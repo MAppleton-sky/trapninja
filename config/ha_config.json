@@ -1,0 +1,17 @@
+{
+  "enabled": false,
+  "mode": "primary",
+  "peer_host": "127.0.0.1",
+  "peer_port": 8162,
+  "listen_port": 8162,
+  "heartbeat_interval": 1.0,
+  "heartbeat_timeout": 3.0,
+  "failover_delay": 2.0,
+  "priority": 100,
+  "shared_secret": "",
+  "split_brain_detection": true,
+  "max_retries": 3,
+  "retry_delay": 0.5,
+  "auto_failback": false,
+  "startup_peer_check": true
+}

@@ -1,0 +1,24 @@
+{
+  "_comment": "Production Primary Server Configuration",
+  "_description": "Use this configuration on the primary HA server (e.g., 192.168.1.100)",
+  "_instructions": [
+    "1. Copy this file to /opt/trapninja/config/ha_config.json",
+    "2. Update peer_host with the IP address of your secondary server",
+    "3. Adjust priority if needed (higher number = preferred as primary)",
+    "4. Set enabled to true when ready to activate HA",
+    "5. Restart TrapNinja service: python trapninja.py --restart"
+  ],
+  "enabled": false,
+  "mode": "primary",
+  "peer_host": "192.168.1.101",
+  "peer_port": 8162,
+  "listen_port": 8162,
+  "heartbeat_interval": 1.0,
+  "heartbeat_timeout": 3.0,
+  "failover_delay": 2.0,
+  "priority": 150,
+  "shared_secret": "",
+  "split_brain_detection": true,
+  "max_retries": 3,
+  "retry_delay": 0.5
+}
