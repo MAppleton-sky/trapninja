@@ -7,7 +7,30 @@ filters them based on configured rules, and forwards them to
 designated destinations.
 """
 
-__version__ = '1.1.0'
-__author__ = 'Matthew Appleton'
+# Import version information from single source of truth
+from .__version__ import (
+    __version__,
+    __author__,
+    __license__,
+    __copyright__,
+    __description__,
+    get_version,
+    get_version_info,
+    has_feature,
+    get_available_features,
+)
 
-# Avoid circular imports - these will be imported in the modules that need them
+# Public API
+__all__ = [
+    '__version__',
+    '__author__',
+    '__license__',
+    '__copyright__',
+    '__description__',
+    'get_version',
+    'get_version_info',
+    'has_feature',
+    'get_available_features',
+]
+
+# Avoid circular imports - modules will be imported where needed
