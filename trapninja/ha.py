@@ -390,7 +390,16 @@ class HACluster:
     # =========================================================================
 
     def _set_state(self, new_state: HAState):
-        """Set HA state with proper locking and logging"""
+        """
+        Set HA state with proper locking and logging.
+        
+        IMPORTANT: This method controls forwarding based on state:
+        - PRIMARY, STANDALONE: Enable forwarding
+        - All other states: Disable forwarding
+        
+        This ensures forwarding is disabled in SECONDARY, FAILOVER,
+        INITIALIZING, SPLIT_BRAIN, and ERROR states.
+        """
         with self.state_lock:
             old_state = self.current_state
             self.current_state = new_state
@@ -398,30 +407,50 @@ class HACluster:
             if old_state != new_state:
                 logger.info(f"HA state transition: {old_state.value} -> {new_state.value}")
 
-                if new_state == HAState.PRIMARY:
+                # Determine forwarding based on new state
+                # Only PRIMARY and STANDALONE should forward
+                if new_state in [HAState.PRIMARY, HAState.STANDALONE]:
                     self._enable_forwarding()
-                elif new_state in [HAState.SECONDARY, HAState.SPLIT_BRAIN]:
+                else:
+                    # SECONDARY, FAILOVER, INITIALIZING, SPLIT_BRAIN, ERROR
+                    # All non-active states disable forwarding
                     self._disable_forwarding()
 
     def _enable_forwarding(self):
         """Enable trap forwarding"""
-        if not self.is_forwarding:
-            self.is_forwarding = True
+        was_disabled = not self.is_forwarding
+        self.is_forwarding = True  # Always set to True
+        
+        if was_disabled:
             logger.info("Trap forwarding ENABLED")
             try:
                 self.trap_forwarder_callback(True)
             except Exception as e:
                 logger.error(f"Error enabling trap forwarding: {e}")
+        else:
+            logger.debug("Trap forwarding already enabled")
 
     def _disable_forwarding(self):
-        """Disable trap forwarding"""
-        if self.is_forwarding:
-            self.is_forwarding = False
+        """
+        Disable trap forwarding.
+        
+        CRITICAL: This method ALWAYS sets is_forwarding to False,
+        regardless of current state. This ensures forwarding is
+        disabled even when transitioning directly from INITIALIZING
+        to SECONDARY.
+        """
+        was_enabled = self.is_forwarding
+        self.is_forwarding = False  # ALWAYS set to False
+        
+        if was_enabled:
             logger.info("Trap forwarding DISABLED")
             try:
                 self.trap_forwarder_callback(False)
             except Exception as e:
                 logger.error(f"Error disabling trap forwarding: {e}")
+        else:
+            # Log at info level for state transitions to help debugging
+            logger.info("Trap forwarding confirmed DISABLED (was already disabled)")
 
     def _start_listener(self) -> bool:
         """Start socket listener"""
@@ -832,9 +861,26 @@ def get_ha_status() -> Dict:
 
 
 def is_forwarding_enabled() -> bool:
-    """Check if trap forwarding is currently enabled"""
+    """
+    Check if trap forwarding is currently enabled.
+    
+    In HA mode, only PRIMARY/STANDALONE nodes should forward.
+    If HA is not initialized, forwarding is allowed by default.
+    
+    Returns:
+        True if forwarding is enabled
+    """
     if _ha_cluster:
-        return _ha_cluster.is_forwarding
+        enabled = _ha_cluster.is_forwarding
+        # Debug logging to help diagnose HA issues
+        if not enabled:
+            logger.debug(
+                f"HA check: forwarding={enabled}, "
+                f"state={_ha_cluster.current_state.value}"
+            )
+        return enabled
+    
+    logger.debug("HA cluster not initialized - forwarding allowed by default")
     return True
 
 

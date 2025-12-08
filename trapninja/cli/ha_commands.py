@@ -108,12 +108,27 @@ def show_ha_status() -> bool:
     Returns:
         True if successful, False otherwise
     """
-    from ..ha import load_ha_config, get_ha_cluster
+    from ..ha import load_ha_config
+    from ..control import ControlSocket
 
     try:
         ha_config = load_ha_config()
-        ha_cluster = get_ha_cluster()
-        ha_status = ha_cluster.get_status() if ha_cluster else {"enabled": False}
+        
+        # Try to get status from running daemon via control socket
+        ha_status = {"enabled": False}
+        daemon_running = False
+        daemon_error_msg = None
+        
+        try:
+            response = ControlSocket.send_command('ha_status')
+            if response.get('status') == ControlSocket.SUCCESS:
+                ha_status = response.get('data', {"enabled": False})
+                daemon_running = True
+        except ConnectionRefusedError:
+            # Daemon not running OR running old code without control socket
+            daemon_error_msg = "Control socket not found - daemon may need restart with updated code"
+        except Exception as e:
+            daemon_error_msg = f"Could not connect to daemon: {e}"
 
         print("=" * 70)
         print("High Availability Status")
@@ -122,7 +137,7 @@ def show_ha_status() -> bool:
 
         if ha_config.enabled:
             print(f"\nConfiguration:")
-            print(f"  Mode: {ha_config.mode}")
+            print(f"  Configured Mode: {ha_config.mode.upper()}")
             print(f"  Peer: {ha_config.peer_host}:{ha_config.peer_port}")
             print(f"  Listen Port: {ha_config.listen_port}")
             print(f"  Priority: {ha_config.priority}")
@@ -131,17 +146,69 @@ def show_ha_status() -> bool:
             print(f"  Heartbeat Timeout: {ha_config.heartbeat_timeout}s")
             print(f"  Failover Delay: {ha_config.failover_delay}s")
 
-            if ha_status.get('enabled', False):
+            if daemon_running and ha_status.get('enabled', False):
                 print(f"\nCurrent Status:")
                 
-                # Format state with color indicator
+                # Get state and forwarding status
                 state = ha_status.get('state', 'unknown')
                 is_forwarding = ha_status.get('is_forwarding', False)
                 
-                status_icon = "🟢" if state == "primary" and is_forwarding else "🔴" if state == "secondary" else "🟡"
-                print(f"  {status_icon} State: {state.upper()}")
+                # Determine acting role based on actual state
+                if state == "primary":
+                    acting_role = "PRIMARY"
+                elif state == "secondary":
+                    acting_role = "SECONDARY"
+                elif state == "failover":
+                    acting_role = "FAILOVER (→ PRIMARY)"
+                elif state == "split_brain":
+                    acting_role = "SPLIT-BRAIN"
+                elif state == "standalone":
+                    acting_role = "STANDALONE"
+                else:
+                    acting_role = state.upper()
+                
+                configured_mode = ha_config.mode.upper()
+                
+                # Check if there's a mismatch (failover/demotion scenario)
+                role_mismatch = False
+                if state in ["primary", "secondary"]:
+                    role_mismatch = (configured_mode != acting_role)
+                
+                # Choose appropriate status icon
+                if state == "primary" and is_forwarding:
+                    status_icon = "🟢"  # Green - active primary
+                elif state == "secondary":
+                    status_icon = "🔴"  # Red - standby secondary
+                elif state == "failover":
+                    status_icon = "🟡"  # Yellow - transitioning
+                elif state == "split_brain":
+                    status_icon = "⚠️ "  # Warning - split brain
+                else:
+                    status_icon = "🟡"  # Yellow - other states
+                
+                # Display configured mode vs acting role
+                print(f"  Configured Mode: {configured_mode}")
+                
+                if role_mismatch:
+                    # Highlight the mismatch
+                    print(f"  {status_icon} Acting As: {acting_role} ⚠️  (Role Mismatch)")
+                else:
+                    print(f"  {status_icon} Acting As: {acting_role}")
+                
                 print(f"  Forwarding: {'ENABLED' if is_forwarding else 'DISABLED'}")
                 print(f"  Uptime: {ha_status.get('uptime', 0):.1f}s")
+                
+                # Show explanation for role mismatch
+                if role_mismatch:
+                    print(f"\n  ℹ️  Role Mismatch Explanation:")
+                    if configured_mode == "PRIMARY" and acting_role == "SECONDARY":
+                        print(f"     Configured as PRIMARY but acting as SECONDARY")
+                        print(f"     Possible reasons: Manual demotion, peer took over, or automatic failover")
+                        print(f"     Action: Use --promote to reclaim PRIMARY role")
+                    elif configured_mode == "SECONDARY" and acting_role == "PRIMARY":
+                        print(f"     Configured as SECONDARY but acting as PRIMARY")
+                        print(f"     Possible reasons: Peer failure triggered automatic failover")
+                        print(f"     Action: This is normal - wait for peer recovery or use --demote")
                 
                 if ha_status.get('manual_override'):
                     print(f"  ⚠️  Manual Override Active")
@@ -167,7 +234,9 @@ def show_ha_status() -> bool:
                 if ha_status.get('split_brain_detected'):
                     print(f"\n❌ SPLIT-BRAIN DETECTED!")
                     print(f"   Both instances think they are PRIMARY")
-                    print(f"   This will auto-resolve based on priority")
+                    print(f"   Configured Mode: {configured_mode}, Acting As: {acting_role}")
+                    print(f"   This will auto-resolve based on priority ({ha_config.priority})")
+                    print(f"   Lower priority node should automatically yield to higher priority")
                     
                 # Suggest actions
                 print(f"\nAvailable Actions:")
@@ -177,6 +246,25 @@ def show_ha_status() -> bool:
                 elif state == "primary":
                     print(f"  • To demote to SECONDARY: python trapninja.py --demote")
                     print(f"  • To force failover:      python trapninja.py --force-failover")
+            elif not daemon_running:
+                # Daemon not providing live status
+                print(f"\n⚠️  LIVE STATUS UNAVAILABLE")
+                print(f"  The daemon is not providing runtime status information.")
+                print(f"  ")
+                if daemon_error_msg:
+                    print(f"  Reason: {daemon_error_msg}")
+                print(f"  ")
+                print(f"  This usually means:")
+                print(f"    1. The daemon is not running, OR")
+                print(f"    2. The daemon is running OLD code (before control socket was added)")
+                print(f"  ")
+                print(f"  To fix:")
+                print(f"    • Check if daemon is running: python trapninja.py --status")
+                print(f"    • If running, restart with new code: sudo python3.9 -O trapninja.py --restart")
+                print(f"    • Check control socket exists: ls -la /tmp/trapninja_control.sock")
+                print(f"  ")
+                print(f"  Without live status, you'll only see static configuration above.")
+                print(f"  The enhanced 'Acting As' display requires the daemon to be running with updated code.")
         else:
             print("\nHA is disabled - running in standalone mode")
             print("To enable HA: python trapninja.py --configure-ha --ha-mode primary --ha-peer-host <ip>")
@@ -196,18 +284,25 @@ def force_failover() -> bool:
     Returns:
         True if successful, False otherwise
     """
-    from ..ha import get_ha_cluster
+    from ..control import ControlSocket
 
     try:
-        ha_cluster = get_ha_cluster()
-        if ha_cluster:
-            ha_cluster.force_failover()
+        try:
+            response = ControlSocket.send_command('ha_force_failover')
+        except ConnectionRefusedError:
+            print("❌ HA cluster not running")
+            return False
+        except Exception as e:
+            print(f"❌ Error communicating with daemon: {e}")
+            return False
+        
+        if response.get('status') == ControlSocket.SUCCESS:
             print("Failover initiated - yielding PRIMARY role")
             print("This instance will become SECONDARY")
             print("The peer should detect this and become PRIMARY")
             return True
         else:
-            print("HA cluster not running")
+            print(f"❌ Error forcing failover: {response.get('error')}")
             return False
     except Exception as e:
         print(f"Error forcing failover: {e}")
@@ -228,17 +323,30 @@ def promote_to_primary(force: bool = False) -> bool:
     Returns:
         True if successful, False otherwise
     """
-    from ..ha import get_ha_cluster
+    from ..control import ControlSocket
     
     try:
-        ha_cluster = get_ha_cluster()
-        if not ha_cluster:
+        # Use control socket to communicate with running daemon
+        try:
+            response = ControlSocket.send_command('ha_status')
+        except ConnectionRefusedError:
             print("❌ HA cluster not running")
             print("   Start the service first: python trapninja.py --start")
             return False
+        except Exception as e:
+            print(f"❌ Error communicating with daemon: {e}")
+            return False
         
-        status = ha_cluster.get_status()
-        current_state = status.get('state', 'unknown')
+        if response.get('status') != ControlSocket.SUCCESS:
+            print("❌ Error getting HA status:", response.get('error'))
+            return False
+        
+        ha_status = response.get('data', {})
+        if not ha_status:
+            print("❌ HA not initialized in daemon")
+            return False
+        
+        current_state = ha_status.get('state', 'unknown')
         
         print("=" * 70)
         print("Manual Promotion to PRIMARY")
@@ -246,7 +354,7 @@ def promote_to_primary(force: bool = False) -> bool:
         
         if current_state == "primary":
             print("✓ Already PRIMARY - no action needed")
-            print(f"  Forwarding: {'ENABLED' if status.get('is_forwarding') else 'DISABLED'}")
+            print(f"  Forwarding: {'ENABLED' if ha_status.get('is_forwarding') else 'DISABLED'}")
             return True
         
         if force:
@@ -265,7 +373,14 @@ def promote_to_primary(force: bool = False) -> bool:
             print("  2. Wait for failover delay (2s)")
             print("  3. Become PRIMARY if peer yields")
         
-        success = ha_cluster.promote_to_primary(force=force)
+        # Send promote command via control socket
+        try:
+            promote_response = ControlSocket.send_command('ha_promote', {'force': force})
+        except Exception as e:
+            print(f"❌ Error sending promote command: {e}")
+            return False
+        
+        success = promote_response.get('status') == ControlSocket.SUCCESS
         
         if success:
             print("\n✓ Promotion initiated successfully")
@@ -288,17 +403,30 @@ def demote_to_secondary() -> bool:
     Returns:
         True if successful, False otherwise
     """
-    from ..ha import get_ha_cluster
+    from ..control import ControlSocket
     
     try:
-        ha_cluster = get_ha_cluster()
-        if not ha_cluster:
+        # Use control socket to communicate with running daemon
+        try:
+            response = ControlSocket.send_command('ha_status')
+        except ConnectionRefusedError:
             print("❌ HA cluster not running")
             print("   Start the service first: python trapninja.py --start")
             return False
+        except Exception as e:
+            print(f"❌ Error communicating with daemon: {e}")
+            return False
         
-        status = ha_cluster.get_status()
-        current_state = status.get('state', 'unknown')
+        if response.get('status') != ControlSocket.SUCCESS:
+            print("❌ Error getting HA status:", response.get('error'))
+            return False
+        
+        ha_status = response.get('data', {})
+        if not ha_status:
+            print("❌ HA not initialized in daemon")
+            return False
+        
+        current_state = ha_status.get('state', 'unknown')
         
         print("=" * 70)
         print("Manual Demotion to SECONDARY")
@@ -323,7 +451,14 @@ def demote_to_secondary() -> bool:
                 print("   Demotion cancelled")
                 return False
         
-        success = ha_cluster.demote_to_secondary()
+        # Send demote command via control socket
+        try:
+            demote_response = ControlSocket.send_command('ha_demote')
+        except Exception as e:
+            print(f"❌ Error sending demote command: {e}")
+            return False
+        
+        success = demote_response.get('status') == ControlSocket.SUCCESS
         
         if success:
             print("\n✓ Demotion successful")

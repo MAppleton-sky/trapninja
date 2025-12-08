@@ -15,7 +15,7 @@ import logging
 from scapy.all import sniff, get_if_list
 
 from .config import INTERFACE, PID_FILE, LISTEN_PORTS, stop_event, load_config, CONFIG_DIR, LOG_FILE
-from .network import start_all_udp_listeners, cleanup_udp_sockets, forward_trap, start_packet_processors
+from .network import start_all_udp_listeners, cleanup_udp_sockets, forward_trap, start_packet_processors, start_queue_monitor
 from .redirection import schedule_config_check, load_redirection_config
 from .metrics import init_metrics, get_metrics_summary
 from .ha import (
@@ -23,6 +23,17 @@ from .ha import (
     notify_trap_processed, is_forwarding_enabled,
     HAState
 )
+
+# Import control socket module with fallback if not available
+try:
+    from .control import initialize_control_socket, shutdown_control_socket
+    CONTROL_SOCKET_AVAILABLE = True
+except ImportError:
+    CONTROL_SOCKET_AVAILABLE = False
+    def initialize_control_socket():
+        return False
+    def shutdown_control_socket():
+        pass
 
 # Import eBPF module with fallback if not available
 try:
@@ -70,6 +81,13 @@ def handle_signal(signum, frame):
 
     # Signal all components to stop
     stop_event.set()
+
+    # Shutdown control socket
+    try:
+        if CONTROL_SOCKET_AVAILABLE:
+            shutdown_control_socket()
+    except Exception as e:
+        logger.error(f"Error shutting down control socket: {e}")
 
     # Shutdown HA cluster first to coordinate with peer
     shutdown_ha()
@@ -137,6 +155,27 @@ def run_service(debug=False):
     # Register signal handlers
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
+
+    # =======================================================================
+    # Initialize Control Socket (for CLI communication)
+    # =======================================================================
+    if CONTROL_SOCKET_AVAILABLE:
+        logger.info("Initializing control socket for CLI communication...")
+        try:
+            if not initialize_control_socket():
+                logger.warning("Failed to initialize control socket - CLI commands may not work")
+                logger.warning("Service will continue without control socket support")
+            else:
+                logger.info("Control socket initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing control socket: {e}")
+            logger.error("Service will continue without control socket support")
+            import traceback
+            logger.debug(traceback.format_exc())
+    else:
+        logger.warning("Control socket module not available - CLI commands will not work")
+        logger.warning("This is expected if running older code without control.py")
+        logger.warning("Service will continue in compatibility mode")
 
     # =======================================================================
     # Initialize High Availability
@@ -277,13 +316,19 @@ def run_service(debug=False):
         logger.info(f"Using interface: {INTERFACE}")
 
     # Determine number of worker threads based on CPU cores
+    # OPTIMIZED: Use 2x CPU cores (up to 32) for high-throughput processing
     import multiprocessing
     cpu_count = multiprocessing.cpu_count()
-    worker_count = min(max(cpu_count - 1, 2), 8)  # Between 2 and 8 workers
-
-    # Start packet processing workers (parallel processing)
+    worker_count = min(cpu_count * 2, 32)
+    
+    # Start queue monitor for utilization tracking
+    start_queue_monitor()
+    
+    # Start optimized packet processing workers
+    # Uses larger batch sizes and longer timeouts to reduce CPU spinning
     workers = start_packet_processors(num_workers=worker_count)
-    logger.info(f"Started {len(workers)} packet processing workers")
+    logger.info(f"Started {len(workers)} packet processing workers (optimized)")
+    logger.info(f"Queue capacity: {packet_queue.maxsize} packets")
 
     # =======================================================================
     # Initialize packet capture (either eBPF or traditional)
@@ -322,40 +367,82 @@ def run_service(debug=False):
     else:
         logger.warning("eBPF module not available, using standard capture")
 
-    # If eBPF didn't work, use standard capture
+    # If eBPF didn't work, use standard capture based on CAPTURE_MODE
     if not capture_started:
-        # Set network module to non-eBPF mode
         from .network import set_ebpf_mode
+        from .config import CAPTURE_MODE
+        
         set_ebpf_mode(False)
-
-        # Start UDP listeners
-        start_all_udp_listeners()
-
-        logger.info(f"Using standard packet capture on interface '{INTERFACE}', UDP ports {LISTEN_PORTS}")
-
-        try:
-            # Construct BPF filter for all ports we're listening on
-            port_filter = " or ".join([f"udp port {port}" for port in LISTEN_PORTS])
-            logger.info(f"BPF filter: {port_filter}")
-
-            # Use prn callback to queue packets instead of processing them directly
-            sniff(
-                iface=INTERFACE,
-                filter=port_filter,
-                prn=ha_aware_forward_trap,  # Use HA-aware packet handler
-                store=0,  # Don't store packets in memory
-                stop_filter=lambda x: stop_event.is_set()
-            )
-        except KeyboardInterrupt:
-            logger.info("TrapNinja service stopped by keyboard interrupt")
-        except Exception as e:
-            logger.error(f"Error in packet capture: {e}", exc_info=True)
-            # Keep running to check for configuration changes or corrections
-            logger.info("Waiting for configuration update or manual restart...")
-
-            # Instead of exiting, stay running until explicitly stopped
-            while not stop_event.is_set():
-                time.sleep(5)
+        
+        # Determine which capture mode to use
+        capture_mode = CAPTURE_MODE.lower()
+        
+        if capture_mode not in ["auto", "sniff", "socket"]:
+            logger.warning(f"Invalid CAPTURE_MODE '{CAPTURE_MODE}', defaulting to 'auto'")
+            capture_mode = "auto"
+        
+        # For "auto" mode without eBPF, default to "sniff" (more reliable)
+        if capture_mode == "auto":
+            capture_mode = "sniff"
+            logger.info("Auto mode selected: using 'sniff' capture method")
+        
+        logger.info(f"Capture mode: {capture_mode.upper()}")
+        
+        # =======================================================================
+        # SOCKET MODE: Use UDP socket listeners only
+        # =======================================================================
+        if capture_mode == "socket":
+            logger.info("Starting UDP socket listeners (socket mode)")
+            logger.info(f"Listening on interface '{INTERFACE}', UDP ports {LISTEN_PORTS}")
+            
+            # Start UDP listeners - they will queue packets for processing
+            if not start_all_udp_listeners():
+                logger.warning("Some UDP listeners failed to start")
+                logger.warning("This may cause packet loss if ports are in use by other services")
+            
+            # In socket mode, we just wait for stop signal
+            # The UDP listeners run in their own threads and queue packets
+            try:
+                logger.info("Socket mode active - packet capture running in background threads")
+                while not stop_event.is_set():
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("TrapNinja service stopped by keyboard interrupt")
+        
+        # =======================================================================
+        # SNIFF MODE: Use Scapy sniff() with libpcap
+        # =======================================================================
+        elif capture_mode == "sniff":
+            logger.info("Starting packet capture with Scapy sniff (sniff mode)")
+            logger.info(f"Listening on interface '{INTERFACE}', UDP ports {LISTEN_PORTS}")
+            logger.info("NOTE: UDP socket listeners are DISABLED in sniff mode to prevent duplication")
+            
+            # DO NOT start UDP listeners in sniff mode - that was causing duplication!
+            # The sniff() function will capture all packets via libpcap
+            
+            try:
+                # Construct BPF filter for all ports we're listening on
+                port_filter = " or ".join([f"udp port {port}" for port in LISTEN_PORTS])
+                logger.info(f"BPF filter: {port_filter}")
+                
+                # Use prn callback to queue packets instead of processing them directly
+                sniff(
+                    iface=INTERFACE,
+                    filter=port_filter,
+                    prn=ha_aware_forward_trap,  # Use HA-aware packet handler
+                    store=0,  # Don't store packets in memory
+                    stop_filter=lambda x: stop_event.is_set()
+                )
+            except KeyboardInterrupt:
+                logger.info("TrapNinja service stopped by keyboard interrupt")
+            except Exception as e:
+                logger.error(f"Error in packet capture: {e}", exc_info=True)
+                # Keep running to check for configuration changes or corrections
+                logger.info("Waiting for configuration update or manual restart...")
+                
+                # Instead of exiting, stay running until explicitly stopped
+                while not stop_event.is_set():
+                    time.sleep(5)
     else:
         # eBPF capture is running, just wait for termination
         logger.info("TrapNinja service running with packet capture active")
@@ -387,6 +474,20 @@ def run_service(debug=False):
     stop_event.set()
     logger.info("Stopping packet processing workers...")
 
+    # Shutdown packet processor (socket pool, stats)
+    try:
+        from .packet_processor import shutdown as shutdown_processor
+        shutdown_processor()
+    except ImportError:
+        pass
+
+    # Shutdown control socket
+    try:
+        if CONTROL_SOCKET_AVAILABLE:
+            shutdown_control_socket()
+    except Exception as e:
+        logger.error(f"Error shutting down control socket: {e}")
+
     # Shutdown HA cluster
     shutdown_ha()
 
@@ -394,14 +495,17 @@ def run_service(debug=False):
     if capture_instance:
         capture_instance.stop()
 
-    # Wait for queue to empty
+    # Wait for queue to empty (with progress logging)
     shutdown_start_time = time.time()
-    max_wait_time = 5  # seconds
+    max_wait_time = 10  # Extended wait time for large queues
 
     try:
+        last_size = packet_queue.qsize()
         while not packet_queue.empty() and time.time() - shutdown_start_time < max_wait_time:
-            remaining = packet_queue.qsize()
-            logger.info(f"Waiting for packet queue to empty ({remaining} remaining)...")
+            current_size = packet_queue.qsize()
+            if current_size != last_size:
+                logger.info(f"Draining queue: {current_size} packets remaining...")
+                last_size = current_size
             time.sleep(0.5)
     except Exception:
         pass

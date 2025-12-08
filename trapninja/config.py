@@ -18,6 +18,14 @@ INTERFACE = "ens192"  # Change to your interface name
 LISTEN_PORTS = [162]  # Default listening port for SNMP traps
 CONFIG_CHECK_INTERVAL = 60  # Check config files every 60 seconds
 
+# Packet capture mode configuration
+# Options:
+#   "auto"   - Use eBPF if available, fall back to sniff (recommended)
+#   "sniff"  - Use Scapy sniff() with libpcap (reliable, cross-platform)
+#   "socket" - Use UDP socket listeners (lower overhead, but may conflict with other services)
+# WARNING: Never use both socket and sniff simultaneously - it will duplicate packets!
+CAPTURE_MODE = "auto"
+
 # Paths to config files
 CONFIG_DIR = "/opt/trapninja/config"
 DESTINATIONS_FILE = os.path.join(CONFIG_DIR, "destinations.json")
