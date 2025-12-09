@@ -28,6 +28,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from .config import stop_event, LISTEN_PORTS
+from .core.constants import FORWARD_SOURCE_PORT
 
 # Import HA functions for forwarding control
 # CRITICAL: These functions control whether this node should forward traps
@@ -284,6 +285,9 @@ def forward_fast(source_ip: str, payload: bytes,
     High-performance packet forwarding using raw sockets.
     Falls back to Scapy if raw sockets unavailable.
     
+    IMPORTANT: Uses FORWARD_SOURCE_PORT (not 162) to prevent forwarded
+    packets from being re-captured by sniff() filters matching 'udp port 162'.
+    
     Args:
         source_ip: Source IP to spoof
         payload: UDP payload to forward
@@ -302,7 +306,7 @@ def forward_fast(source_ip: str, payload: bytes,
         if sock:
             try:
                 for dst_ip, dst_port in destinations:
-                    packet = _build_packet(source_ip, dst_ip, 162, dst_port, payload)
+                    packet = _build_packet(source_ip, dst_ip, FORWARD_SOURCE_PORT, dst_port, payload)
                     try:
                         sock.sendto(packet, (dst_ip, 0))
                     except BlockingIOError:
@@ -326,7 +330,8 @@ def _forward_scapy(source_ip: str, payload: bytes,
         from scapy.all import IP, UDP, send, get_if_list
         from .config import INTERFACE
         
-        template = IP(src=source_ip) / UDP(sport=162)
+        # Use FORWARD_SOURCE_PORT to prevent re-capture loops
+        template = IP(src=source_ip) / UDP(sport=FORWARD_SOURCE_PORT)
         
         for dst_ip, dst_port in destinations:
             template[IP].dst = dst_ip

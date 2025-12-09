@@ -23,6 +23,12 @@ import logging
 from typing import Optional, List, Tuple
 from collections import deque
 
+try:
+    from ..core.constants import FORWARD_SOURCE_PORT
+except ImportError:
+    # Fallback if running standalone or import fails
+    FORWARD_SOURCE_PORT = 10162
+
 logger = logging.getLogger("trapninja")
 
 
@@ -32,7 +38,9 @@ logger = logging.getLogger("trapninja")
 
 DEFAULT_POOL_SIZE = 4
 DEFAULT_SEND_BUFFER = 4194304  # 4MB
-DEFAULT_SOURCE_PORT = 162
+# Use FORWARD_SOURCE_PORT from core.constants to prevent re-capture loops
+# See documentation/fixes/PACKET_RECAPTURE_LOOP_FIX.md
+DEFAULT_SOURCE_PORT = FORWARD_SOURCE_PORT
 
 
 # =============================================================================

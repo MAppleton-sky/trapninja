@@ -22,6 +22,7 @@ from scapy.all import IP, UDP, Raw
 from scapy.layers.snmp import SNMP
 
 from .config import LISTEN_PORTS
+from .core.constants import FORWARD_SOURCE_PORT
 from .redirection import check_for_redirection
 from .metrics import (
     increment_trap_received, increment_trap_forwarded,
@@ -281,6 +282,9 @@ def forward_packet(source_ip: str, payload: bytes,
     """
     Forward packet to destinations using fastest available method.
     
+    IMPORTANT: Uses FORWARD_SOURCE_PORT (not 162) to prevent forwarded
+    packets from being re-captured by sniff() filters.
+    
     Priority:
     1. Raw socket (6-10x faster)
     2. Scapy (fallback)
@@ -293,7 +297,7 @@ def forward_packet(source_ip: str, payload: bytes,
         if _init_raw_socket():
             try:
                 for dst_ip, dst_port in destinations:
-                    pkt = _build_packet(source_ip, dst_ip, 162, dst_port, payload)
+                    pkt = _build_packet(source_ip, dst_ip, FORWARD_SOURCE_PORT, dst_port, payload)
                     _raw_socket.sendto(pkt, (dst_ip, 0))
                 return
             except Exception:
@@ -309,7 +313,8 @@ def _forward_scapy(source_ip: str, payload: bytes,
     from scapy.all import send, get_if_list
     from .config import INTERFACE
     
-    template = IP(src=source_ip) / UDP(sport=162)
+    # Use FORWARD_SOURCE_PORT to prevent re-capture loops
+    template = IP(src=source_ip) / UDP(sport=FORWARD_SOURCE_PORT)
     
     for dst_ip, dst_port in destinations:
         try:
@@ -568,27 +573,10 @@ def process_captured_packet(packet_data: Dict[str, Any]):
         _stats.log_summary()
 
 
-def forward_trap(packet):
-    """Queue packet from Scapy capture for processing"""
-    try:
-        if not is_forwarding_enabled():
-            return
-        
-        if packet.haslayer(IP) and packet.haslayer(UDP):
-            if packet[UDP].dport in LISTEN_PORTS:
-                packet_data = {
-                    'src_ip': packet[IP].src,
-                    'dst_port': packet[UDP].dport,
-                    'payload': bytes(packet[UDP].payload)
-                }
-                
-                from .network import packet_queue
-                try:
-                    packet_queue.put_nowait(packet_data)
-                except Exception:
-                    logger.debug("Queue full, dropping packet")
-    except Exception as e:
-        logger.debug(f"Error queuing packet: {e}")
+# NOTE: forward_trap() has been REMOVED from this module.
+# The canonical implementation is in network.py
+# Having duplicate forward_trap() functions was causing packet duplication.
+# See documentation/PACKET_DUPLICATION_FIX.md for details.
 
 
 # =============================================================================

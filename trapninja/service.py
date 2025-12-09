@@ -219,7 +219,9 @@ def run_service(debug=False):
     logger.info(f"Metrics collection initialized with output to {metrics_dir}")
 
     # First load the configuration
-    config_changed = load_config(restart_udp_listeners)
+    # NOTE: Do NOT pass restart_udp_listeners here - we'll start listeners
+    # only in socket mode to prevent duplication with sniff mode
+    config_changed = load_config(None)  # No callback - don't auto-start listeners
     logger.info(f"Initial configuration loaded (changed: {config_changed})")
 
     # Initialize redirection configuration
@@ -417,12 +419,22 @@ def run_service(debug=False):
             logger.info(f"Listening on interface '{INTERFACE}', UDP ports {LISTEN_PORTS}")
             logger.info("NOTE: UDP socket listeners are DISABLED in sniff mode to prevent duplication")
             
-            # DO NOT start UDP listeners in sniff mode - that was causing duplication!
-            # The sniff() function will capture all packets via libpcap
+            # CRITICAL: Ensure no UDP socket listeners are running!
+            # Having both socket listeners AND sniff() causes 2x packet duplication
+            cleanup_udp_sockets()
+            logger.debug("Cleaned up any existing UDP socket listeners")
             
             try:
-                # Construct BPF filter for all ports we're listening on
-                port_filter = " or ".join([f"udp port {port}" for port in LISTEN_PORTS])
+                # Construct BPF filter for incoming traps only
+                # CRITICAL: Must exclude our own forwarded packets to prevent re-capture loop
+                # - "udp dst port 162" captures packets destined to port 162
+                # - "not udp src port 10162" excludes packets WE are sending (FORWARD_SOURCE_PORT)
+                # Without the exclusion, forwarded packets (sport=10162, dport=162) would be re-captured
+                from .core.constants import FORWARD_SOURCE_PORT
+                port_filter = " or ".join(
+                    [f"(udp dst port {port} and not udp src port {FORWARD_SOURCE_PORT})" 
+                     for port in LISTEN_PORTS]
+                )
                 logger.info(f"BPF filter: {port_filter}")
                 
                 # Use prn callback to queue packets instead of processing them directly

@@ -25,6 +25,7 @@ from typing import Optional, List, Dict, Any
 from scapy.all import IP, UDP, get_if_list
 
 from .config import stop_event, LISTEN_PORTS, INTERFACE
+from .core.constants import FORWARD_SOURCE_PORT
 
 # Import HA functions for forwarding control
 # CRITICAL: These functions control whether this node should forward traps
@@ -449,12 +450,21 @@ def forward_trap(packet):
     """
     Queue packet from Scapy capture for processing.
     Used when sniff() mode is active.
+    
+    IMPORTANT: This only QUEUES packets - actual forwarding happens in workers.
     """
     try:
         if not (packet.haslayer(IP) and packet.haslayer(UDP)):
             return
         
+        # Only process packets destined to our listen ports
         if packet[UDP].dport not in LISTEN_PORTS:
+            return
+        
+        # SAFETY CHECK: Skip packets that came FROM us (shouldn't happen with
+        # correct BPF filter, but defense in depth)
+        if packet[UDP].sport == FORWARD_SOURCE_PORT:
+            logger.debug(f"Skipping packet with our source port {FORWARD_SOURCE_PORT}")
             return
         
         packet_data = {
@@ -477,6 +487,9 @@ def forward_packet(source_ip: str, payload: bytes, destinations: List):
     """
     Forward packet to destinations.
     Uses optimized forwarding from packet_processor if available.
+    
+    IMPORTANT: Uses FORWARD_SOURCE_PORT (not 162) to prevent
+    forwarded packets from being re-captured.
     """
     try:
         from .packet_processor import forward_fast
@@ -490,7 +503,8 @@ def _forward_packet_scapy(source_ip: str, payload: bytes, destinations: List):
     """Scapy-based packet forwarding (fallback)"""
     from scapy.all import send
     
-    template = IP(src=source_ip) / UDP(sport=162)
+    # Use FORWARD_SOURCE_PORT to prevent re-capture loops
+    template = IP(src=source_ip) / UDP(sport=FORWARD_SOURCE_PORT)
     
     for dst_ip, dst_port in destinations:
         try:

@@ -100,6 +100,15 @@ DEFAULT_BLOCKED_PORT = 1462
 # Source port for forwarding (traps come from 162)
 DEFAULT_SOURCE_PORT = 162
 
+# FORWARD_SOURCE_PORT: Port used when SENDING forwarded traps
+# CRITICAL: This MUST be different from DEFAULT_TRAP_PORT (162)
+# Using 162 for both sending and receiving causes a re-capture loop:
+#   - sniff filter "udp port 162" matches sport=162 OR dport=162
+#   - Forwarded packets with sport=162 get re-captured
+#   - This creates exponential packet multiplication
+# See: documentation/fixes/PACKET_RECAPTURE_LOOP_FIX.md
+FORWARD_SOURCE_PORT = 10162
+
 # Maximum UDP packet size
 MAX_UDP_PACKET_SIZE = 65535
 

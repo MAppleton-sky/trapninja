@@ -16,7 +16,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.5.2] - 2025-01-09
+
+### Fixed
+
+#### Critical: Socket + Sniff Capture Duplication (2x Multiplication)
+- **Disabled auto-start of UDP socket listeners** during config load
+  - Old: `load_config(restart_udp_listeners)` started listeners before capture mode was determined
+  - New: `load_config(None)` - listeners only start explicitly in socket mode
+- **Added explicit socket cleanup** before sniff mode starts
+- **Root cause**: UDP socket listeners were running simultaneously with Scapy sniff(),
+  causing every packet to be captured twice (once by each method)
+- Socket listeners now ONLY start in socket capture mode
+
+#### Defense-in-Depth: Application-Level Duplicate Check
+- Added safety check in `network.py`'s `forward_trap()` to reject packets with
+  our source port (FORWARD_SOURCE_PORT) even if BPF filter fails
+
+### Changed
+- Capture mode selection now strictly enforces single capture method
+- Improved logging for capture mode initialization
+
+---
+
+## [0.5.1] - 2025-01-09
+
+### Fixed
+
+#### Critical: Packet Re-Capture Loop (10x Multiplication)
+- **Fixed BPF filter in sniff mode** - Changed to exclude our own forwarded packets:
+  - Old: `udp port 162` (matched both incoming AND our outgoing)
+  - New: `udp dst port 162 and not udp src port 10162`
+- **Centralized FORWARD_SOURCE_PORT constant** (10162) in `core/constants.py`
+- **Updated all forwarding modules** to use distinct source port:
+  - `packet_processor.py` - Uses FORWARD_SOURCE_PORT for raw socket forwarding
+  - `snmp.py` - Uses FORWARD_SOURCE_PORT for fallback forwarding
+  - `network.py` - Uses FORWARD_SOURCE_PORT in Scapy fallback
+  - `processing/forwarder.py` - Uses FORWARD_SOURCE_PORT for socket pool
+- **Root cause**: Forwarded packets have dport=162 (standard trap port), so even
+  changing source port alone wasn't enough - BPF filter must explicitly exclude
+  packets from our forward source port
+- **Documentation**: See `documentation/fixes/PACKET_RECAPTURE_LOOP_FIX.md`
+
+### Changed
+- BPF filter now explicitly excludes packets from FORWARD_SOURCE_PORT (10162)
+- Forward source port changed from 162 to 10162 to enable packet identification
 
 ### Planned for Future Releases
 - Additional EMS integrations
