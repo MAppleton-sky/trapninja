@@ -16,6 +16,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.0] - 2025-01-XX
+
+### Added
+
+#### Redis-Based Trap Caching System
+- **New cache module** (`trapninja/cache/`) for trap buffering and replay
+  - `redis_backend.py`: Redis Streams-based cache with rolling retention
+  - `replay.py`: Time-window based trap replay with rate limiting
+  - Automatic retention trimming (configurable, default 2 hours)
+  - Non-blocking cache operations - failures don't affect forwarding
+
+#### Cache CLI Commands
+- `--cache-status`: View cache statistics and per-destination info
+- `--cache-query`: Preview cached traps for a time window
+- `--cache-replay`: Replay cached traps with rate limiting
+- `--cache-clear`: Clear cached entries (per-destination or all)
+- `--cache-help`: Comprehensive cache system help
+
+#### Cache Features
+- Per-destination streams for isolated replay
+- Flexible time formats: relative (`-2h`, `-30m`), time-only (`14:30`), full datetime
+- OID and source IP filtering during replay
+- Dry-run mode for replay preview
+- Progress tracking during replay operations
+- Automatic integration with existing forwarding pipeline
+
+### Configuration
+- New `cache_config.json` configuration file
+- Configurable retention period, Redis connection, trim intervals
+- Optional password authentication for Redis
+
+### Documentation
+- Added `documentation/CACHE.md` with comprehensive cache system guide
+- Memory sizing guide for Redis capacity planning
+- Integration guide for HA deployments
+
+### Technical Details
+- Cache writes are fire-and-forget (non-blocking)
+- Traps cached after successful forwarding
+- Background retention trimmer thread
+- Statistics tracking: cached, cache_failures in processor stats
+
+---
+
 ## [0.5.2] - 2025-01-09
 
 ### Fixed

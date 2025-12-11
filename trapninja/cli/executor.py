@@ -17,6 +17,7 @@ from . import daemon_commands
 from . import filtering_commands
 from . import ha_commands
 from . import snmpv3_commands
+from . import cache_commands
 from .validation import InputValidator, parse_size
 
 
@@ -221,6 +222,55 @@ def execute_command(args: Namespace) -> int:
     
     elif args.snmpv3_test_decrypt:
         return snmpv3_commands.handle_snmpv3_test_decrypt(args)
+
+    # Handle cache commands
+    elif args.cache_status:
+        return 0 if cache_commands.show_cache_status(verbose=args.verbose) else 1
+    
+    elif args.cache_query:
+        if not args.destination or not args.from_time or not args.to_time:
+            print("Error: --destination, --from, and --to are required for cache query")
+            print("Example: --cache-query --destination voice_noc --from \"14:30\" --to \"15:45\"")
+            return 1
+        return 0 if cache_commands.query_cache(
+            destination=args.destination,
+            start_time=args.from_time,
+            end_time=args.to_time,
+            limit=args.limit,
+            show_oids=True
+        ) else 1
+    
+    elif args.cache_replay:
+        if not args.destination or not args.from_time or not args.to_time:
+            print("Error: --destination, --from, and --to are required for cache replay")
+            print("Example: --cache-replay --destination voice_noc --from \"14:30\" --to \"15:45\"")
+            print("Use --dry-run to preview without sending")
+            print("Use --replay-to HOST:PORT to send to a custom destination")
+            return 1
+        return 0 if cache_commands.replay_cache(
+            destination=args.destination,
+            start_time=args.from_time,
+            end_time=args.to_time,
+            rate_limit=args.rate_limit,
+            dry_run=args.dry_run,
+            oid_filter=args.oid_filter,
+            source_filter=args.source_filter,
+            exclude_oid=args.exclude_oid,
+            yes=args.yes,
+            replay_to=args.replay_to
+        ) else 1
+    
+    elif args.cache_clear:
+        return 0 if cache_commands.clear_cache(
+            destination=args.destination,
+            yes=args.yes
+        ) else 1
+    
+    elif args.cache_trim:
+        return 0 if cache_commands.trim_cache(yes=args.yes) else 1
+    
+    elif args.cache_help:
+        return 0 if cache_commands.show_cache_help() else 1
 
     # Handle daemon control commands
     elif args.start:

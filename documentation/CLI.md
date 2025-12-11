@@ -1,12 +1,10 @@
-# TrapNinja CLI Module
+# TrapNinja CLI Reference
 
 ## Overview
 
-The CLI module provides a clean, modular command-line interface for TrapNinja. The code is organized by functional concern for better maintainability, testability, and extensibility.
+The CLI module provides a modular command-line interface for TrapNinja, organized by functional concern for maintainability, testability, and extensibility.
 
-## Architecture
-
-### Module Structure
+## Module Structure
 
 ```
 trapninja/cli/
@@ -15,34 +13,140 @@ trapninja/cli/
 ├── validation.py            # Input validation and sanitization
 ├── daemon_commands.py       # Daemon control commands
 ├── filtering_commands.py    # IP/OID filtering commands
-├── ha_commands.py          # High Availability commands
-├── snmpv3_commands.py      # SNMPv3 credential management
-└── executor.py             # Command orchestration and execution
+├── ha_commands.py           # High Availability commands
+├── snmpv3_commands.py       # SNMPv3 credential management
+└── executor.py              # Command orchestration and execution
 ```
 
-### Design Principles
+## Command Reference
 
-1. **Single Responsibility**: Each module handles one specific concern
-2. **Separation of Concerns**: Parsing, validation, and execution are separate
-3. **Testability**: Each module can be tested independently
-4. **Security**: All user input is validated before processing
-5. **Maintainability**: Clear structure makes code easy to navigate and modify
+### Daemon Control
 
-## Module Descriptions
+```bash
+# Start as daemon
+python trapninja.py --start
+
+# Stop daemon
+python trapninja.py --stop
+
+# Restart daemon
+python trapninja.py --restart
+
+# Check status
+python trapninja.py --status
+
+# Run in foreground (for testing/debugging)
+python trapninja.py --foreground
+
+# Run with debug logging
+python trapninja.py --foreground --debug
+```
+
+### IP Filtering
+
+```bash
+# Block an IP address
+python trapninja.py --block-ip 10.0.1.50
+
+# Unblock an IP address
+python trapninja.py --unblock-ip 10.0.1.50
+
+# List all blocked IPs
+python trapninja.py --list-blocked-ips
+```
+
+### OID Filtering
+
+```bash
+# Block an OID pattern
+python trapninja.py --block-oid 1.3.6.1.4.1.8072.2.3.0.1
+
+# Unblock an OID pattern
+python trapninja.py --unblock-oid 1.3.6.1.4.1.8072.2.3.0.1
+
+# List all blocked OIDs
+python trapninja.py --list-blocked-oids
+```
+
+### High Availability
+
+```bash
+# Configure as primary node
+python trapninja.py --configure-ha \
+    --ha-mode primary \
+    --ha-peer-host 192.168.1.102 \
+    --ha-priority 150
+
+# Configure as secondary node
+python trapninja.py --configure-ha \
+    --ha-mode secondary \
+    --ha-peer-host 192.168.1.101 \
+    --ha-priority 100
+
+# Show HA status
+python trapninja.py --ha-status
+
+# Manual promotion to primary
+python trapninja.py --promote
+
+# Manual demotion to secondary
+python trapninja.py --demote
+
+# Force failover (maintenance)
+python trapninja.py --force-failover
+
+# Disable HA
+python trapninja.py --disable-ha
+
+# Show HA help
+python trapninja.py --ha-help
+```
+
+### SNMPv3 Credentials
+
+```bash
+# Add SNMPv3 user
+python trapninja.py --snmpv3-add-user \
+    --username myuser \
+    --engine-id 80001f888056565656565656 \
+    --auth-protocol SHA \
+    --priv-protocol AES128
+
+# Remove SNMPv3 user
+python trapninja.py --snmpv3-remove-user myuser
+
+# List SNMPv3 users
+python trapninja.py --snmpv3-list-users
+
+# Show SNMPv3 user details
+python trapninja.py --snmpv3-show-user myuser
+
+# Check SNMPv3 status
+python trapninja.py --snmpv3-status
+```
+
+### Configuration Options
+
+```bash
+# Override config directory
+python trapninja.py --config-dir /etc/trapninja
+
+# Override log file
+python trapninja.py --log-file /var/log/trapninja.log
+
+# Set log level
+python trapninja.py --log-level DEBUG
+
+# Override metrics port
+python trapninja.py --metrics-port 9090
+```
+
+## Module Details
 
 ### `parser.py`
-**Purpose**: Configure all command-line arguments and options
 
-**Key Functions**:
-- `create_argument_parser()`: Returns configured ArgumentParser instance
+Configures all command-line arguments and options.
 
-**Features**:
-- Comprehensive argument definitions with help text
-- Built-in type validation using custom validators
-- Mutually exclusive command groups
-- Hidden internal arguments
-
-**Example**:
 ```python
 from trapninja.cli.parser import create_argument_parser
 
@@ -50,148 +154,141 @@ parser = create_argument_parser()
 args = parser.parse_args()
 ```
 
+Features:
+- Comprehensive argument definitions with help text
+- Built-in type validation using custom validators
+- Mutually exclusive command groups
+- Hidden internal arguments
+
 ### `validation.py`
-**Purpose**: Validate and sanitize all user input
 
-**Key Classes**:
-- `InputValidator`: Comprehensive validation with caching
-- `SecurityError`: Raised when validation fails for security reasons
+Validates and sanitizes all user input.
 
-**Key Functions**:
-- `validate_ip()`: Validate IP addresses
-- `validate_oid()`: Validate SNMP OIDs
-- `validate_port()`: Validate port numbers
-- `validate_tag()`: Validate destination group tags
-- `sanitize_string()`: Remove dangerous characters
-- `parse_size()`: Parse size strings (e.g., "10M", "1G")
+```python
+from trapninja.cli.validation import InputValidator
 
-**Security Features**:
-- Pattern matching for command injection attempts
-- Path traversal detection
-- XSS-like pattern detection
+# Validate IP address
+valid_ip = InputValidator.validate_ip("192.168.1.100")
+
+# Validate OID
+valid_oid = InputValidator.validate_oid("1.3.6.1.4.1.8072.2.3.0.1")
+
+# Validate port
+valid_port = InputValidator.validate_port(162)
+
+# Sanitize string input
+safe_str = InputValidator.sanitize_string(user_input)
+
+# Parse size string
+bytes_val = InputValidator.parse_size("10M")  # Returns 10485760
+```
+
+Security Features:
+- Command injection detection
+- Path traversal prevention
+- XSS-pattern detection
 - Input length limits
 - Control character removal
 - Reserved name checking
 
-**Example**:
-```python
-from trapninja.cli.validation import InputValidator
-
-# Validate and sanitize an IP address
-valid_ip = InputValidator.validate_ip("192.168.1.100")
-if valid_ip:
-    # Use the validated IP
-    pass
-
-# Validate an OID
-valid_oid = InputValidator.validate_oid("1.3.6.1.4.1.8072.2.3.0.1")
-if valid_oid:
-    # Use the validated OID
-    pass
-```
-
 ### `daemon_commands.py`
-**Purpose**: Handle daemon lifecycle operations
 
-**Key Functions**:
-- `start()`: Start TrapNinja as daemon
-- `stop()`: Stop running daemon
-- `restart()`: Restart daemon
-- `status()`: Check daemon status
-- `run_foreground()`: Run in foreground with optional debug mode
+Handles daemon lifecycle operations.
 
-**Example**:
 ```python
 from trapninja.cli import daemon_commands
 
-# Start the daemon
+# Start daemon
 exit_code = daemon_commands.start()
+
+# Stop daemon
+exit_code = daemon_commands.stop()
 
 # Check status
 exit_code = daemon_commands.status()
+
+# Run in foreground
+exit_code = daemon_commands.run_foreground(debug=True)
 ```
 
 ### `filtering_commands.py`
-**Purpose**: Manage IP and OID filtering rules
 
-**Key Classes**:
-- `ConfigManager`: Thread-safe configuration file management with caching
+Manages IP and OID filtering rules with thread-safe configuration.
 
-**Key Functions**:
-- `block_ip()`: Add IP to blocked list
-- `unblock_ip()`: Remove IP from blocked list
-- `list_blocked_ips()`: Display all blocked IPs
-- `block_oid()`: Add OID to blocked list
-- `unblock_oid()`: Remove OID from blocked list
-- `list_blocked_oids()`: Display all blocked OIDs
-
-**Features**:
-- Atomic file operations (write to temp, then rename)
-- Thread-safe with per-file locking
-- Configuration caching for performance
-- Automatic validation of all inputs
-
-**Example**:
 ```python
 from trapninja.cli import filtering_commands
 
-# Block an IP address
+# Block operations
 success = filtering_commands.block_ip("10.0.1.50")
+success = filtering_commands.block_oid("1.3.6.1.4.1.8072")
 
-# List blocked OIDs
+# Unblock operations
+success = filtering_commands.unblock_ip("10.0.1.50")
+success = filtering_commands.unblock_oid("1.3.6.1.4.1.8072")
+
+# List operations
+filtering_commands.list_blocked_ips()
 filtering_commands.list_blocked_oids()
 ```
 
+Features:
+- Atomic file operations (write to temp, then rename)
+- Thread-safe with per-file locking
+- Configuration caching for performance
+
 ### `ha_commands.py`
-**Purpose**: Configure and manage High Availability
 
-**Key Functions**:
-- `configure_ha()`: Configure HA mode, peer, and priority
-- `disable_ha()`: Disable HA functionality
-- `show_ha_status()`: Display detailed HA status
-- `promote_to_primary()`: Manually promote to primary
-- `demote_to_secondary()`: Manually demote to secondary
-- `force_failover()`: Manually trigger failover (maintenance)
+Configures and manages High Availability.
 
-**Example**:
 ```python
 from trapninja.cli import ha_commands
 
-# Configure as primary
+# Configure HA
 success = ha_commands.configure_ha(
     mode="primary",
     peer_host="192.168.1.102",
     priority=150
 )
 
-# Check HA status
+# Show status
 ha_commands.show_ha_status()
+
+# Manual operations
+ha_commands.promote_to_primary()
+ha_commands.demote_to_secondary()
+ha_commands.force_failover()
+
+# Disable HA
+ha_commands.disable_ha()
 ```
 
 ### `snmpv3_commands.py`
-**Purpose**: Manage SNMPv3 credentials
 
-**Key Functions**:
-- `handle_snmpv3_add_user()`: Add SNMPv3 user credentials
-- `handle_snmpv3_remove_user()`: Remove SNMPv3 user
-- `handle_snmpv3_list_users()`: List configured users
-- `handle_snmpv3_show_user()`: Show user details
-- `handle_snmpv3_status()`: Check SNMPv3 subsystem status
+Manages SNMPv3 credentials.
+
+```python
+from trapninja.cli import snmpv3_commands
+
+# Add user
+snmpv3_commands.handle_snmpv3_add_user(args)
+
+# Remove user
+snmpv3_commands.handle_snmpv3_remove_user(username)
+
+# List users
+snmpv3_commands.handle_snmpv3_list_users()
+
+# Show user
+snmpv3_commands.handle_snmpv3_show_user(username)
+
+# Check status
+snmpv3_commands.handle_snmpv3_status()
+```
 
 ### `executor.py`
-**Purpose**: Orchestrate command execution based on parsed arguments
 
-**Key Functions**:
-- `execute_command()`: Main dispatcher that routes to appropriate handler
-- `update_global_config()`: Apply command-line config overrides
+Orchestrates command execution based on parsed arguments.
 
-**Features**:
-- Centralized command routing
-- Global configuration updates
-- Error handling and exit code management
-- Support for foreground daemon mode
-
-**Example**:
 ```python
 from trapninja.cli import create_argument_parser, execute_command
 
@@ -200,93 +297,10 @@ args = parser.parse_args()
 exit_code = execute_command(args)
 ```
 
-## Usage Examples
-
-### From Command Line
-
-```bash
-# Start daemon
-python -m trapninja.main --start
-
-# Configure High Availability
-python -m trapninja.main --configure-ha \
-    --ha-mode primary \
-    --ha-peer-host 192.168.1.102 \
-    --ha-priority 150
-
-# Block an IP
-python -m trapninja.main --block-ip 10.0.1.50
-
-# Run in foreground with debug
-python -m trapninja.main --foreground --debug
-
-# SNMPv3 credential management
-python -m trapninja.main --snmpv3-add-user \
-    --username myuser \
-    --engine-id 80001f888056565656565656 \
-    --auth-protocol SHA \
-    --priv-protocol AES128
-```
-
-### Programmatic Usage
-
-```python
-from trapninja.cli import (
-    daemon_commands,
-    filtering_commands,
-    ha_commands,
-    InputValidator
-)
-
-# Validate input before using
-ip = "192.168.1.100"
-if InputValidator.validate_ip(ip):
-    # Block the validated IP
-    filtering_commands.block_ip(ip)
-
-# Configure HA programmatically
-ha_commands.configure_ha(
-    mode="secondary",
-    peer_host="192.168.1.101",
-    priority=100
-)
-
-# Start daemon
-daemon_commands.start()
-```
-
-## Testing
-
-Each module can be tested independently:
-
-```python
-# Test validation
-def test_ip_validation():
-    from trapninja.cli.validation import InputValidator
-    
-    assert InputValidator.validate_ip("192.168.1.1") == "192.168.1.1"
-    assert InputValidator.validate_ip("invalid") is None
-    assert InputValidator.validate_ip("256.1.1.1") is None
-
-# Test filtering commands
-def test_block_ip(monkeypatch):
-    from trapninja.cli import filtering_commands
-    
-    # Mock the config manager
-    # ... test implementation
-```
-
 ## Configuration Management
 
-The CLI module uses `ConfigManager` for thread-safe configuration file operations:
+The CLI uses `ConfigManager` for thread-safe configuration operations:
 
-**Features**:
-- **Atomic writes**: Write to temp file, then rename
-- **Caching**: Reduces file I/O for frequently accessed configs
-- **Thread-safe**: Per-file locking prevents race conditions
-- **Cache invalidation**: Automatic when files are updated
-
-**Example**:
 ```python
 from trapninja.cli.filtering_commands import config_manager
 
@@ -296,97 +310,121 @@ config = config_manager.load_json("/path/to/config.json", default=[])
 # Save with atomic write
 success = config_manager.save_json("/path/to/config.json", data)
 
-# Invalidate cache when external changes occur
+# Invalidate cache
 config_manager.invalidate_cache("/path/to/config.json")
 ```
 
-## Security Considerations
+Features:
+- **Atomic writes**: Write to temp file, then rename
+- **Caching**: Reduces file I/O for frequently accessed configs
+- **Thread-safe**: Per-file locking prevents race conditions
+- **Cache invalidation**: Automatic when files are updated
 
-### Input Validation
+## Security Patterns
 
-All user input goes through `InputValidator` which:
-- Removes control characters
-- Detects command injection patterns
-- Prevents path traversal
-- Enforces length limits
-- Uses LRU caching for performance
+### Always Validate Input
 
-### Secure Patterns
-
-**DO**:
 ```python
-# Always validate before use
+# CORRECT - validate before use
+from trapninja.cli.validation import InputValidator
+
 validated_ip = InputValidator.validate_ip(user_input)
 if validated_ip:
-    # Use validated_ip
+    filtering_commands.block_ip(validated_ip)
+else:
+    print("Invalid IP address")
+
+# INCORRECT - never use raw input
+filtering_commands.block_ip(user_input)  # UNSAFE!
 ```
 
-**DON'T**:
+### Input Validation Details
+
+The `InputValidator` class checks for:
+
+| Check | Description |
+|-------|-------------|
+| Command injection | Patterns like `; rm`, `| cat`, backticks |
+| Path traversal | Patterns like `../`, `/etc/` |
+| XSS patterns | Script tags, javascript: URLs |
+| Control characters | Non-printable characters |
+| Length limits | Prevents buffer overflow attempts |
+| Reserved names | System reserved file/path names |
+
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | General error |
+| 2 | Invalid arguments |
+| 3 | Configuration error |
+| 4 | Permission denied |
+| 5 | Service not running |
+
+## Extending the CLI
+
+### Adding a New Command
+
+1. **Add command function** in the appropriate module:
+
 ```python
-# Never use raw user input
-block_ip(user_input)  # UNSAFE!
+# In filtering_commands.py
+def block_subnet(subnet: str) -> bool:
+    """Block an entire subnet."""
+    validated = InputValidator.validate_subnet(subnet)
+    if not validated:
+        print(f"Invalid subnet: {subnet}")
+        return False
+    # Implementation...
+    return True
 ```
 
-## Extension Guidelines
+2. **Add argument** in `parser.py`:
 
-### Adding New Commands
+```python
+group.add_argument('--block-subnet',
+    type=str,
+    metavar='SUBNET',
+    help='Block entire subnet (CIDR notation)')
+```
 
-1. **Create command function in appropriate module**:
-   ```python
-   # In filtering_commands.py
-   def block_subnet(subnet: str) -> bool:
-       """Block entire subnet"""
-       # Implementation
-   ```
+3. **Add validation** in `validation.py` (if needed):
 
-2. **Add argument to parser**:
-   ```python
-   # In parser.py
-   group.add_argument('--block-subnet', type=validated_subnet,
-                     help='Block entire subnet')
-   ```
+```python
+@classmethod
+def validate_subnet(cls, subnet_str: str) -> Optional[str]:
+    """Validate CIDR subnet notation."""
+    try:
+        import ipaddress
+        network = ipaddress.ip_network(subnet_str, strict=False)
+        return str(network)
+    except ValueError:
+        return None
+```
 
-3. **Add validation if needed**:
-   ```python
-   # In validation.py
-   @classmethod
-   def validate_subnet(cls, subnet_str: str) -> Optional[str]:
-       # Validation logic
-   ```
+4. **Route command** in `executor.py`:
 
-4. **Route command in executor**:
-   ```python
-   # In executor.py
-   elif args.block_subnet:
-       return 0 if filtering_commands.block_subnet(args.block_subnet) else 1
-   ```
+```python
+elif args.block_subnet:
+    return 0 if filtering_commands.block_subnet(args.block_subnet) else 1
+```
 
-### Adding New Command Categories
-
-For entirely new command categories:
+### Adding a New Command Category
 
 1. Create new module: `trapninja/cli/your_category_commands.py`
-2. Import in `__init__.py`
-3. Add commands to parser
-4. Route in executor
-
-## Benefits of This Structure
-
-1. **Maintainability**: Clear organization makes code easy to find and modify
-2. **Testability**: Each module can be unit tested independently
-3. **Extensibility**: Adding new commands is straightforward
-4. **Security**: Centralized validation prevents injection attacks
-5. **Performance**: Caching and LRU decorators optimize repeated operations
-6. **Professionalism**: Industry-standard modular architecture
+2. Add exports to `__init__.py`
+3. Add arguments to `parser.py`
+4. Add routing to `executor.py`
 
 ## Troubleshooting
 
 ### Import Errors
 
-If you get import errors, ensure you're running from the correct directory:
+Ensure you're running from the correct directory:
 
 ```bash
-# Run from project root
+# From project root
 python -m trapninja.main --status
 
 # Or with full path
@@ -395,29 +433,25 @@ python /opt/trapninja/trapninja/main.py --status
 
 ### Validation Failures
 
-If validation consistently fails for valid input:
+Test specific validators:
 
 ```python
-# Check validation logic
 from trapninja.cli.validation import InputValidator
 
-# Test specific validator
 result = InputValidator.validate_ip("192.168.1.1")
-print(f"Validation result: {result}")
+print(f"Validation result: {result}")  # Should print the IP or None
 ```
 
 ### Cache Issues
 
-If configuration changes aren't being picked up:
+Force cache invalidation:
 
 ```python
 from trapninja.cli.filtering_commands import config_manager
-
-# Force cache invalidation
 config_manager.invalidate_cache()
 ```
 
-## Performance Considerations
+## Performance Notes
 
 - **LRU Caching**: Validation functions use `@lru_cache` for performance
 - **Precompiled Patterns**: Regex patterns compiled once at module load
@@ -426,6 +460,6 @@ config_manager.invalidate_cache()
 
 ---
 
-**Last Updated**: 2025-01-15  
 **Module Version**: 2.0.0  
-**Python Compatibility**: 3.6+
+**Python Compatibility**: 3.6+  
+**Last Updated**: 2025-01-10

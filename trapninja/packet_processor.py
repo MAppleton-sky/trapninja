@@ -58,6 +58,15 @@ except ImportError as e:
 
 logger = logging.getLogger("trapninja")
 
+# Import cache module with fallback
+try:
+    from .cache import get_cache
+    CACHE_AVAILABLE = True
+except ImportError:
+    CACHE_AVAILABLE = False
+    def get_cache():
+        return None
+
 
 # =============================================================================
 # LOCK-FREE STATISTICS (Atomic counters for performance)
@@ -74,6 +83,8 @@ class AtomicStats:
     queue_full_events: int = 0
     processing_errors: int = 0
     ha_blocked: int = 0  # Packets dropped due to HA secondary mode
+    packets_cached: int = 0  # Packets stored in cache
+    cache_failures: int = 0  # Cache store failures
     last_summary_time: float = field(default_factory=time.time)
     max_queue_depth: int = 0
     
@@ -99,6 +110,12 @@ class AtomicStats:
     def increment_ha_blocked(self):
         self.ha_blocked += 1
     
+    def increment_cached(self):
+        self.packets_cached += 1
+    
+    def increment_cache_failure(self):
+        self.cache_failures += 1
+    
     def update_max_depth(self, depth: int):
         if depth > self.max_queue_depth:
             self.max_queue_depth = depth
@@ -113,6 +130,8 @@ class AtomicStats:
             'queue_full_events': self.queue_full_events,
             'errors': self.processing_errors,
             'ha_blocked': self.ha_blocked,
+            'cached': self.packets_cached,
+            'cache_failures': self.cache_failures,
             'max_queue_depth': self.max_queue_depth
         }
     
@@ -430,6 +449,63 @@ def _decode_oid(oid_bytes: bytes) -> str:
 
 
 # =============================================================================
+# CACHE INTEGRATION
+# =============================================================================
+
+import base64
+from datetime import datetime
+
+
+def cache_trap(destination: str, source_ip: str, payload: bytes, 
+               trap_oid: Optional[str] = None) -> bool:
+    """
+    Cache a trap for later replay. Non-blocking - failures don't affect forwarding.
+    
+    Args:
+        destination: Destination identifier (e.g., "default", "voice_noc")
+        source_ip: Source IP address of the trap
+        payload: Raw UDP payload
+        trap_oid: Extracted trap OID (optional)
+        
+    Returns:
+        True if cached successfully, False otherwise
+    """
+    if not CACHE_AVAILABLE:
+        return False
+    
+    cache = get_cache()
+    if not cache or not cache.available:
+        return False
+    
+    try:
+        # Encode payload as base64
+        pdu_base64 = base64.b64encode(payload).decode('ascii')
+        
+        # Build trap data
+        trap_data = {
+            'timestamp': datetime.now().isoformat(),
+            'source_ip': source_ip,
+            'trap_oid': trap_oid or '',
+            'pdu_base64': pdu_base64,
+        }
+        
+        # Store in cache (non-blocking)
+        entry_id = cache.store(destination, trap_data)
+        
+        if entry_id:
+            _stats.increment_cached()
+            return True
+        else:
+            _stats.increment_cache_failure()
+            return False
+            
+    except Exception as e:
+        logger.debug(f"Cache trap failed: {e}")
+        _stats.increment_cache_failure()
+        return False
+
+
+# =============================================================================
 # BATCH PROCESSOR (Core processing engine)
 # =============================================================================
 
@@ -473,16 +549,16 @@ class BatchProcessor:
         """
         Process a single packet with minimal overhead.
         
+        Note: Caching happens regardless of HA state. Only forwarding
+        is controlled by HA. This ensures the Secondary has trap history
+        if it becomes Primary.
+        
         Returns:
             True if packet was processed successfully
         """
         try:
-            # CRITICAL: Check HA state before processing
-            # Only the PRIMARY node should forward traps
-            if not is_forwarding_enabled():
-                _stats.increment_ha_blocked()
-                logger.debug("Packet received but forwarding disabled by HA (secondary mode)")
-                return True  # Successfully handled by dropping
+            # Check HA state for forwarding decision (but always cache)
+            ha_forwarding_enabled = is_forwarding_enabled()
             
             config = self._get_config()
             source_ip = packet_data['src_ip']
@@ -510,26 +586,47 @@ class BatchProcessor:
                 if source_ip in config['redirected_ips']:
                     tag = config['redirected_ips'][source_ip]
                     if tag in config['redirected_destinations']:
-                        forward_fast(source_ip, payload, 
-                                    config['redirected_destinations'][tag])
-                        _stats.increment_redirected()
-                        notify_trap_processed()  # Notify HA system of activity
+                        # Always cache, regardless of HA state
+                        cache_trap(tag, source_ip, payload, trap_oid)
+                        
+                        # Only forward if HA allows
+                        if ha_forwarding_enabled:
+                            forward_fast(source_ip, payload, 
+                                        config['redirected_destinations'][tag])
+                            _stats.increment_redirected()
+                            notify_trap_processed()
+                        else:
+                            _stats.increment_ha_blocked()
                         return True
                 
                 if trap_oid in config['redirected_oids']:
                     tag = config['redirected_oids'][trap_oid]
                     if tag in config['redirected_destinations']:
-                        forward_fast(source_ip, payload,
-                                    config['redirected_destinations'][tag])
-                        _stats.increment_redirected()
-                        notify_trap_processed()  # Notify HA system of activity
+                        # Always cache, regardless of HA state
+                        cache_trap(tag, source_ip, payload, trap_oid)
+                        
+                        # Only forward if HA allows
+                        if ha_forwarding_enabled:
+                            forward_fast(source_ip, payload,
+                                        config['redirected_destinations'][tag])
+                            _stats.increment_redirected()
+                            notify_trap_processed()
+                        else:
+                            _stats.increment_ha_blocked()
                         return True
             
-            # Forward to normal destinations
-            if config['destinations']:
-                forward_fast(source_ip, payload, config['destinations'])
-                _stats.increment_forwarded()
-                notify_trap_processed()  # Notify HA system of activity
+            # Default destination handling
+            # Always cache, regardless of HA state
+            cache_trap('default', source_ip, payload, trap_oid)
+            
+            # Only forward if HA allows
+            if ha_forwarding_enabled:
+                if config['destinations']:
+                    forward_fast(source_ip, payload, config['destinations'])
+                    _stats.increment_forwarded()
+                    notify_trap_processed()
+            else:
+                _stats.increment_ha_blocked()
             
             return True
             

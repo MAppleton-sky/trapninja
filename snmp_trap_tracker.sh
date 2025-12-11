@@ -181,38 +181,42 @@ print_header() {
 # Build port filter for BPF (e.g., "port 162 or port 6667")
 build_bpf_port_filter() {
     local ports="$1"
-    local filter_parts=()
+    local filter=""
     
     # Split on comma and build filter
     IFS=',' read -ra PORT_ARRAY <<< "$ports"
     for port in "${PORT_ARRAY[@]}"; do
         port=$(echo "$port" | tr -d ' ')  # Trim whitespace
-        filter_parts+=("port $port")
+        if [[ -z "$filter" ]]; then
+            filter="port $port"
+        else
+            filter="$filter or port $port"
+        fi
     done
     
-    # Join with " or "
-    local IFS=" or "
-    echo "${filter_parts[*]}"
+    echo "$filter"
 }
 
 # Build port regex for grep (e.g., "(162|6667|snmptrap)")
 build_port_regex() {
     local ports="$1"
-    local regex_parts=()
+    local regex=""
     
     # Split on comma and build regex
     IFS=',' read -ra PORT_ARRAY <<< "$ports"
     for port in "${PORT_ARRAY[@]}"; do
         port=$(echo "$port" | tr -d ' ')  # Trim whitespace
-        regex_parts+=("$port")
+        if [[ -z "$regex" ]]; then
+            regex="$port"
+        else
+            regex="$regex|$port"
+        fi
     done
     
     # Add snmptrap service name
-    regex_parts+=("snmptrap")
+    regex="$regex|snmptrap"
     
-    # Join with "|"
-    local IFS="|"
-    echo "(${regex_parts[*]})"
+    echo "($regex)"
 }
 
 get_counts() {

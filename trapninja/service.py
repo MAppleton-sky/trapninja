@@ -24,6 +24,22 @@ from .ha import (
     HAState
 )
 
+# Import cache module with fallback if not available
+try:
+    from .cache import initialize_cache, shutdown_cache, get_cache
+    from .config import load_cache_config
+    CACHE_MODULE_AVAILABLE = True
+except ImportError:
+    CACHE_MODULE_AVAILABLE = False
+    def initialize_cache(config):
+        return None
+    def shutdown_cache():
+        pass
+    def get_cache():
+        return None
+    def load_cache_config():
+        return None
+
 # Import control socket module with fallback if not available
 try:
     from .control import initialize_control_socket, shutdown_control_socket
@@ -217,6 +233,31 @@ def run_service(debug=False):
     metrics_dir = os.path.join(os.path.dirname(LOG_FILE), "metrics")
     init_metrics(metrics_directory=metrics_dir, export_interval=60)
     logger.info(f"Metrics collection initialized with output to {metrics_dir}")
+
+    # =======================================================================
+    # Initialize Cache System (Redis-based trap buffering)
+    # =======================================================================
+    if CACHE_MODULE_AVAILABLE:
+        logger.info("Initializing cache system...")
+        try:
+            cache_config = load_cache_config()
+            if cache_config and cache_config.enabled:
+                cache = initialize_cache(cache_config)
+                if cache and cache.available:
+                    logger.info(f"Cache enabled: Redis at {cache_config.host}:{cache_config.port}")
+                    logger.info(f"Cache retention: {cache_config.retention_hours} hours")
+                else:
+                    logger.warning("Cache configured but failed to connect to Redis")
+                    logger.info("Traps will be forwarded but not cached")
+                    logger.info("To enable caching, ensure Redis is running and accessible")
+            else:
+                logger.info("Cache not enabled - traps will not be buffered")
+                logger.info("To enable caching, create config/cache_config.json with enabled=true")
+        except Exception as e:
+            logger.warning(f"Failed to initialize cache: {e}")
+            logger.info("Traps will be forwarded without caching")
+    else:
+        logger.debug("Cache module not available")
 
     # First load the configuration
     # NOTE: Do NOT pass restart_udp_listeners here - we'll start listeners
@@ -492,6 +533,13 @@ def run_service(debug=False):
         shutdown_processor()
     except ImportError:
         pass
+
+    # Shutdown cache
+    if CACHE_MODULE_AVAILABLE:
+        try:
+            shutdown_cache()
+        except Exception as e:
+            logger.error(f"Error shutting down cache: {e}")
 
     # Shutdown control socket
     try:

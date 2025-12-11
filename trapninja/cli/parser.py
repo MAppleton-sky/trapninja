@@ -145,6 +145,20 @@ Examples:
     group.add_argument('--snmpv3-test-decrypt', action='store_true',
                       help='Test SNMPv3 decryption with a sample trap')
 
+    # Cache commands
+    group.add_argument('--cache-status', action='store_true',
+                      help='Show cache status and statistics')
+    group.add_argument('--cache-query', action='store_true',
+                      help='Query cached traps for a time window')
+    group.add_argument('--cache-replay', action='store_true',
+                      help='Replay cached traps for a time window')
+    group.add_argument('--cache-clear', action='store_true',
+                      help='Clear cached entries')
+    group.add_argument('--cache-trim', action='store_true',
+                      help='Manually trigger retention trim')
+    group.add_argument('--cache-help', action='store_true',
+                      help='Show comprehensive cache help')
+
     # Hidden option for internal daemon use
     parser.add_argument('--foreground-daemon', action='store_true',
                        help=argparse.SUPPRESS)
@@ -211,5 +225,27 @@ Examples:
                        help='Verbose output (show details)')
     parser.add_argument('--yes', '-y', action='store_true',
                        help='Skip confirmation prompts')
+
+    # Cache parameters
+    parser.add_argument('--destination', type=str,
+                       help='Destination for cache operations')
+    parser.add_argument('--from', dest='from_time', type=str,
+                       help='Start time for cache query/replay (e.g., "14:30", "-2h")')
+    parser.add_argument('--to', dest='to_time', type=str,
+                       help='End time for cache query/replay')
+    parser.add_argument('--replay-to', type=str, metavar='HOST:PORT',
+                       help='Custom replay destination (e.g., 10.1.2.3:162)')
+    parser.add_argument('--rate-limit', type=int, default=500,
+                       help='Max traps/sec for replay (default: 500)')
+    parser.add_argument('--dry-run', action='store_true',
+                       help='Preview cache replay without sending')
+    parser.add_argument('--oid-filter', type=str,
+                       help='OID prefix filter for cache operations')
+    parser.add_argument('--source-filter', type=str,
+                       help='Source IP prefix filter for cache operations')
+    parser.add_argument('--exclude-oid', type=str,
+                       help='OID to exclude from cache replay')
+    parser.add_argument('--limit', type=int, default=20,
+                       help='Maximum entries to show in cache query (default: 20)')
 
     return parser
