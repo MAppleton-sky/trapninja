@@ -590,25 +590,24 @@ def run_service(debug=False):
 
 def ha_aware_forward_trap(packet):
     """
-    HA-aware packet capture function that only forwards when this instance is active
+    Packet capture callback that queues packets for processing.
+    
+    Note: HA state is checked in the packet processor, not here.
+    This ensures packets are always queued for processing (filtering, caching)
+    even on Secondary nodes. The processor will skip forwarding if HA
+    indicates this node is Secondary.
 
     Args:
         packet: Scapy packet from sniff function
     """
     try:
-        # Check if HA allows forwarding
-        if not is_forwarding_enabled():
-            logger.debug("Packet captured but forwarding disabled by HA")
-            return
-
-        # Use the original forward_trap function
+        # Always queue the packet for processing
+        # The packet processor will handle HA state for forwarding decisions
+        # but will always cache the trap regardless of HA state
         forward_trap(packet)
 
-        # Notify HA system that we processed a trap
-        notify_trap_processed()
-
     except Exception as e:
-        logger.error(f"Error in HA-aware packet forwarding: {e}")
+        logger.error(f"Error in packet capture callback: {e}")
 
 
 def get_ha_status():
