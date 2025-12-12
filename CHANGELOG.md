@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.6.0] - 2025-01-XX
+## [0.6.0] - 2025-06-15
 
 ### Added
 
@@ -57,6 +57,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Traps cached after successful forwarding
 - Background retention trimmer thread
 - Statistics tracking: cached, cache_failures in processor stats
+
+### Fixed
+
+#### Critical: Metrics All Showing Zero Values
+- **Root Cause**: The `metrics.py` module had its own counters that were never
+  incremented by the packet processing code. The `packet_processor.py` used
+  separate `AtomicStats` that weren't synced to the Prometheus exporter.
+- **Solution**: Unified metrics system that collects from all sources:
+  - `packet_processor.py` → AtomicStats (core processing metrics)
+  - `network.py` → QueueStats (queue depth and utilization)
+  - `ha.py` → HA cluster status (if enabled)
+  - `cache.py` → Cache availability (if enabled)
+- **New metrics added**:
+  - `trapninja_fast_path_hits_total` - Packets using optimized path
+  - `trapninja_slow_path_hits_total` - Packets requiring full parsing
+  - `trapninja_fast_path_ratio` - Performance efficiency percentage
+  - `trapninja_processing_rate` - Current packets/second
+- **Documentation**: Added `documentation/METRICS.md` with full metrics reference
+- **Testing**: Updated `tests/metrics-test.py` with integration tests
 
 ---
 

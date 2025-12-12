@@ -27,11 +27,12 @@ from .ha import (
 # Import cache module with fallback if not available
 try:
     from .cache import initialize_cache, shutdown_cache, get_cache
-    from .config import load_cache_config
+    from .config import load_cache_config, CACHE_CONFIG_FILE
     CACHE_MODULE_AVAILABLE = True
 except ImportError:
     CACHE_MODULE_AVAILABLE = False
-    def initialize_cache(config):
+    CACHE_CONFIG_FILE = None
+    def initialize_cache(config, config_file=None):
         return None
     def shutdown_cache():
         pass
@@ -242,7 +243,8 @@ def run_service(debug=False):
         try:
             cache_config = load_cache_config()
             if cache_config and cache_config.enabled:
-                cache = initialize_cache(cache_config)
+                # Pass config file path for hot-reload support
+                cache = initialize_cache(cache_config, config_file=CACHE_CONFIG_FILE)
                 if cache and cache.available:
                     logger.info(f"Cache enabled: Redis at {cache_config.host}:{cache_config.port}")
                     logger.info(f"Cache retention: {cache_config.retention_hours} hours")

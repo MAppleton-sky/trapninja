@@ -17,7 +17,9 @@ Version: 1.0.0
 """
 
 import base64
+import json
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -616,7 +618,7 @@ class RetentionManager:
     Background thread for periodic retention trimming.
     
     Runs at configurable intervals to remove entries older than
-    the retention window.
+    the retention window. Supports hot-reload of configuration.
     """
     
     def __init__(self, cache: TrapCache, interval: int = 60):
@@ -631,6 +633,58 @@ class RetentionManager:
         self.interval = interval
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._config_file = None
+        self._config_mtime = 0
+    
+    def set_config_file(self, path: str):
+        """Set the config file path for hot-reload monitoring."""
+        self._config_file = path
+        try:
+            if os.path.exists(path):
+                self._config_mtime = os.path.getmtime(path)
+        except Exception:
+            pass
+    
+    def _check_config_reload(self) -> bool:
+        """
+        Check if config file has changed and reload if needed.
+        
+        Returns:
+            True if config was reloaded
+        """
+        if not self._config_file or not os.path.exists(self._config_file):
+            return False
+        
+        try:
+            current_mtime = os.path.getmtime(self._config_file)
+            if current_mtime != self._config_mtime:
+                # Config file changed - reload it
+                with open(self._config_file, 'r') as f:
+                    data = json.load(f)
+                
+                # Update retention hours
+                old_retention = self.cache.config.retention_hours
+                new_retention = data.get('retention_hours', old_retention)
+                
+                if new_retention != old_retention:
+                    self.cache.config.retention_hours = new_retention
+                    logger.info(f"Cache config reloaded: retention_hours changed from {old_retention} to {new_retention} hours")
+                
+                # Update trim interval
+                old_interval = self.interval
+                new_interval = data.get('trim_interval_seconds', old_interval)
+                
+                if new_interval != old_interval:
+                    self.interval = new_interval
+                    logger.info(f"Cache config reloaded: trim_interval changed from {old_interval} to {new_interval} seconds")
+                
+                self._config_mtime = current_mtime
+                return True
+                
+        except Exception as e:
+            logger.warning(f"Failed to reload cache config: {e}")
+        
+        return False
     
     def start(self):
         """Start the retention trimmer background thread."""
@@ -662,6 +716,9 @@ class RetentionManager:
                 # Wait for interval or stop signal
                 if self._stop_event.wait(timeout=self.interval):
                     break
+                
+                # Check for config changes before each trim
+                self._check_config_reload()
                 
                 # Perform trim
                 if self.cache.available:
@@ -698,12 +755,13 @@ def get_cache() -> Optional[TrapCache]:
     return _cache_instance
 
 
-def initialize_cache(config: CacheConfig) -> Optional[TrapCache]:
+def initialize_cache(config: CacheConfig, config_file: Optional[str] = None) -> Optional[TrapCache]:
     """
     Initialize the global cache instance.
     
     Args:
         config: Cache configuration
+        config_file: Path to config file for hot-reload support
         
     Returns:
         TrapCache instance if successful, None otherwise
@@ -734,6 +792,12 @@ def initialize_cache(config: CacheConfig) -> Optional[TrapCache]:
                 cache,
                 interval=config.trim_interval_seconds
             )
+            
+            # Set config file path for hot-reload
+            if config_file:
+                _retention_manager.set_config_file(config_file)
+                logger.info(f"Cache config hot-reload enabled: {config_file}")
+            
             _retention_manager.start()
             
             logger.info(f"Cache initialized with {config.retention_hours}h retention")

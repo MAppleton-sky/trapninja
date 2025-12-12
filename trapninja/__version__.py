@@ -50,6 +50,8 @@ FEATURES = {
     'snmpv3': VERSION_INFO >= (0, 5, 0),
     'cli_v2': VERSION_INFO >= (0, 5, 0),
     'modular_cli': VERSION_INFO >= (0, 5, 0),
+    'caching': VERSION_INFO >= (0, 6, 0),
+    'unified_metrics': VERSION_INFO >= (0, 6, 0),
 }
 
 

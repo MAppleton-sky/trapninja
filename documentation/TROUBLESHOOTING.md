@@ -486,4 +486,82 @@ If issues persist:
 
 ---
 
-**Last Updated**: 2025-01-10
+## Metrics Issues
+
+### Symptom: All Metrics Show Zero
+
+**Root Cause (Fixed in v0.6.0)**: Prior to v0.6.0, the metrics module was not integrated with the packet processor. The `metrics.py` module had its own counters that were never incremented because packet processing happened in `packet_processor.py` with separate statistics.
+
+**Solution**: Update to TrapNinja v0.6.0+ which has unified metrics collection.
+
+**Verification**:
+```bash
+# Check metrics file
+cat /var/log/trapninja/metrics/trapninja_metrics.prom | head -30
+
+# Run metrics test
+cd /path/to/trapninja
+python3 tests/metrics-test.py --all
+```
+
+### Symptom: Metrics Not Updating
+
+**Causes and Solutions**:
+
+1. **No traffic**: Verify traps are arriving:
+   ```bash
+   tcpdump -i eth0 udp port 162 -c 5
+   ```
+
+2. **Export timer issue**: Metrics export every 60s by default
+   ```bash
+   # Force immediate export
+   python -c "from trapninja.metrics import export_metrics; export_metrics()"
+   ```
+
+3. **Directory permissions**:
+   ```bash
+   ls -la /var/log/trapninja/metrics/
+   # Should be writable by trapninja user
+   ```
+
+### Symptom: Fast Path Ratio Is 0%
+
+**Expected**: Most SNMPv2c traps should use fast path (85%+ typical).
+
+**Causes**:
+
+1. **All SNMPv3 traffic**: SNMPv3 uses slow path for decryption
+2. **Malformed traps**: Traps that fail fast path validation
+
+**Diagnostics**:
+```bash
+# Check trap type breakdown in logs
+grep -E "fast_path|slow_path" /var/log/trapninja.log | tail -20
+
+# Check metrics
+cat /var/log/trapninja/metrics/trapninja_metrics.prom | grep fast_path
+```
+
+### Viewing Metrics
+
+**Prometheus format**:
+```bash
+cat /var/log/trapninja/metrics/trapninja_metrics.prom
+```
+
+**JSON format**:
+```bash
+cat /var/log/trapninja/metrics/trapninja_metrics.json | python -m json.tool
+```
+
+**Real-time monitoring**:
+```bash
+watch -n 5 'cat /var/log/trapninja/metrics/trapninja_metrics.prom | grep -E "received|forwarded|blocked|rate"'
+```
+
+See `documentation/METRICS.md` for full metrics reference.
+
+---
+
+**Last Updated**: 2025-06-15

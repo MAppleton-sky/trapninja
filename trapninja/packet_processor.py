@@ -74,7 +74,12 @@ except ImportError:
 
 @dataclass
 class AtomicStats:
-    """Lock-free statistics using Python's GIL for atomic int operations"""
+    """
+    Lock-free statistics using Python's GIL for atomic int operations.
+    
+    Tracks all packet processing metrics for Prometheus export.
+    """
+    # Core packet counts
     packets_processed: int = 0
     packets_forwarded: int = 0
     packets_blocked: int = 0
@@ -82,9 +87,20 @@ class AtomicStats:
     packets_dropped: int = 0
     queue_full_events: int = 0
     processing_errors: int = 0
-    ha_blocked: int = 0  # Packets dropped due to HA secondary mode
+    
+    # HA metrics
+    ha_blocked: int = 0  # Packets not forwarded due to HA secondary mode
+    
+    # Cache metrics
     packets_cached: int = 0  # Packets stored in cache
     cache_failures: int = 0  # Cache store failures
+    
+    # Performance metrics (fast/slow path tracking)
+    fast_path_hits: int = 0  # SNMPv2c packets using optimized path
+    slow_path_hits: int = 0  # Packets requiring full parsing
+    
+    # Timing and queue metrics
+    start_time: float = field(default_factory=time.time)
     last_summary_time: float = field(default_factory=time.time)
     max_queue_depth: int = 0
     
@@ -116,12 +132,43 @@ class AtomicStats:
     def increment_cache_failure(self):
         self.cache_failures += 1
     
+    def record_fast_path(self):
+        """Record packet processed via fast SNMPv2c path."""
+        self.fast_path_hits += 1
+    
+    def record_slow_path(self):
+        """Record packet processed via full parsing path."""
+        self.slow_path_hits += 1
+    
     def update_max_depth(self, depth: int):
         if depth > self.max_queue_depth:
             self.max_queue_depth = depth
     
+    @property
+    def uptime(self) -> float:
+        """Get seconds since start."""
+        return time.time() - self.start_time
+    
+    @property
+    def fast_path_ratio(self) -> float:
+        """Calculate fast path ratio as percentage."""
+        total = self.fast_path_hits + self.slow_path_hits
+        if total == 0:
+            return 0.0
+        return (self.fast_path_hits / total) * 100
+    
+    @property
+    def processing_rate(self) -> float:
+        """Calculate packets per second."""
+        elapsed = self.uptime
+        if elapsed <= 0:
+            return 0.0
+        return self.packets_processed / elapsed
+    
     def get_summary(self) -> Dict[str, Any]:
+        """Get all statistics as a dictionary for metrics export."""
         return {
+            # Core counts
             'processed': self.packets_processed,
             'forwarded': self.packets_forwarded,
             'blocked': self.packets_blocked,
@@ -129,10 +176,25 @@ class AtomicStats:
             'dropped': self.packets_dropped,
             'queue_full_events': self.queue_full_events,
             'errors': self.processing_errors,
+            
+            # HA
             'ha_blocked': self.ha_blocked,
+            
+            # Cache
             'cached': self.packets_cached,
             'cache_failures': self.cache_failures,
-            'max_queue_depth': self.max_queue_depth
+            
+            # Performance
+            'fast_path_hits': self.fast_path_hits,
+            'slow_path_hits': self.slow_path_hits,
+            'fast_path_ratio': round(self.fast_path_ratio, 1),
+            'processing_rate': round(self.processing_rate, 1),
+            
+            # Queue
+            'max_queue_depth': self.max_queue_depth,
+            
+            # Timing
+            'uptime_seconds': round(self.uptime, 1),
         }
     
     def should_log_summary(self, interval: float = 30.0) -> bool:
@@ -569,12 +631,22 @@ class BatchProcessor:
             # Quick IP block check
             if source_ip in config['blocked_ips']:
                 _stats.increment_blocked()
+                _stats.record_fast_path()  # Simple check is fast path
                 return True
             
             # Try fast path for SNMPv2c
             trap_oid = None
+            used_fast_path = False
+            
             if is_snmpv2c_fast(payload):
                 trap_oid = extract_oid_fast(payload)
+                if trap_oid:
+                    used_fast_path = True
+                    _stats.record_fast_path()
+            
+            # If fast path failed, record slow path
+            if not used_fast_path:
+                _stats.record_slow_path()
             
             if trap_oid:
                 # Check OID blocking
