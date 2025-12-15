@@ -89,6 +89,23 @@ def _format_timestamp(ts: str) -> str:
         return ts
 
 
+def _sort_stats_list(stats_list: List[Dict], sort_by: str) -> List[Dict]:
+    """Sort a list of stats dictionaries by the specified field."""
+    if not stats_list:
+        return stats_list
+    
+    if sort_by == 'total':
+        return sorted(stats_list, key=lambda x: x.get('total_traps', 0), reverse=True)
+    elif sort_by == 'rate':
+        return sorted(stats_list, key=lambda x: x.get('rate_per_minute', 0), reverse=True)
+    elif sort_by == 'blocked':
+        return sorted(stats_list, key=lambda x: x.get('blocked', 0), reverse=True)
+    elif sort_by == 'recent':
+        return sorted(stats_list, key=lambda x: x.get('last_seen', ''), reverse=True)
+    else:
+        return stats_list
+
+
 # =============================================================================
 # COMMAND HANDLERS
 # =============================================================================
@@ -177,7 +194,10 @@ def handle_stats_top_ips(args: Namespace) -> int:
     if not data:
         file_data = _get_stats_from_file()
         if file_data:
-            data = {'data': file_data.get('top_ips', [])}
+            # File data needs to be sorted since it's pre-sorted by 'total'
+            ip_list = file_data.get('top_ips', [])
+            sorted_list = _sort_stats_list(ip_list, sort_by)
+            data = {'data': sorted_list}
     
     if not data:
         print("Error: Could not retrieve IP statistics.")
@@ -233,7 +253,10 @@ def handle_stats_top_oids(args: Namespace) -> int:
     if not data:
         file_data = _get_stats_from_file()
         if file_data:
-            data = {'data': file_data.get('top_oids', [])}
+            # File data needs to be sorted since it's pre-sorted by 'total'
+            oid_list = file_data.get('top_oids', [])
+            sorted_list = _sort_stats_list(oid_list, sort_by)
+            data = {'data': sorted_list}
     
     if not data:
         print("Error: Could not retrieve OID statistics.")

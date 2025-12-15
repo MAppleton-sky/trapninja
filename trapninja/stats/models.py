@@ -315,6 +315,8 @@ class OIDStats:
             'rate_per_second': round(self.rate_per_second, 4),
             'age_seconds': round(self.age_seconds, 1),
             'idle_seconds': round(self.idle_seconds, 1),
+            # Always include unique_sources count for top lists
+            'unique_sources': len(self.ip_counts),
         }
         
         if include_details:
@@ -322,7 +324,6 @@ class OIDStats:
                 {'ip': ip, 'count': count}
                 for ip, count in self.get_top_ips(10)
             ]
-            result['unique_sources'] = len(self.ip_counts)
             result['destinations'] = dict(self.destination_counts)
         
         return result
