@@ -145,6 +145,44 @@ Examples:
     group.add_argument('--snmpv3-test-decrypt', action='store_true',
                       help='Test SNMPv3 decryption with a sample trap')
 
+    # Cache commands
+    group.add_argument('--cache-status', action='store_true',
+                      help='Show cache status and statistics')
+    group.add_argument('--cache-query', action='store_true',
+                      help='Query cached traps for a time window')
+    group.add_argument('--cache-replay', action='store_true',
+                      help='Replay cached traps for a time window')
+    group.add_argument('--cache-clear', action='store_true',
+                      help='Clear cached entries')
+    group.add_argument('--cache-trim', action='store_true',
+                      help='Manually trigger retention trim')
+    group.add_argument('--cache-help', action='store_true',
+                      help='Show comprehensive cache help')
+
+    # Granular statistics commands
+    group.add_argument('--stats-summary', action='store_true',
+                      help='Show granular statistics summary')
+    group.add_argument('--stats-top-ips', action='store_true',
+                      help='Show top source IPs by volume/rate')
+    group.add_argument('--stats-top-oids', action='store_true',
+                      help='Show top OIDs by volume/rate')
+    group.add_argument('--stats-ip', action='store_true',
+                      help='Show details for specific IP (use --ip)')
+    group.add_argument('--stats-oid', action='store_true',
+                      help='Show details for specific OID (use --oid)')
+    group.add_argument('--stats-destinations', action='store_true',
+                      help='Show destination statistics')
+    group.add_argument('--stats-dashboard', action='store_true',
+                      help='Export full dashboard data as JSON')
+    group.add_argument('--stats-api', action='store_true',
+                      help='Start standalone statistics REST API server')
+    group.add_argument('--stats-export', action='store_true',
+                      help='Export statistics to file')
+    group.add_argument('--stats-reset', action='store_true',
+                      help='Reset all granular statistics')
+    group.add_argument('--stats-help', action='store_true',
+                      help='Show granular statistics help')
+
     # Hidden option for internal daemon use
     parser.add_argument('--foreground-daemon', action='store_true',
                        help=argparse.SUPPRESS)
@@ -211,5 +249,47 @@ Examples:
                        help='Verbose output (show details)')
     parser.add_argument('--yes', '-y', action='store_true',
                        help='Skip confirmation prompts')
+
+    # Stats parameters
+    parser.add_argument('--oid', type=str,
+                       help='OID for stats queries (use with --stats-oid)')
+    parser.add_argument('--count', '-n', type=int, default=10,
+                       help='Number of items to show in stats lists (default: 10)')
+    parser.add_argument('--sort', '-s', type=str, default='total',
+                       choices=['total', 'rate', 'blocked', 'recent'],
+                       help='Sort order for stats lists (default: total)')
+    parser.add_argument('--format', '-f', type=str, default='json',
+                       choices=['json', 'prometheus'],
+                       help='Export format for stats (default: json)')
+    parser.add_argument('--json', action='store_true',
+                       help='Output stats as JSON')
+    parser.add_argument('--pretty', action='store_true',
+                       help='Pretty print JSON output')
+    parser.add_argument('--stats-port', type=int, default=8080,
+                       help='Port for stats API server (default: 8080)')
+    parser.add_argument('--stats-host', type=str, default='0.0.0.0',
+                       help='Host for stats API server (default: 0.0.0.0)')
+
+    # Cache parameters
+    parser.add_argument('--destination', type=str,
+                       help='Destination for cache operations')
+    parser.add_argument('--from', dest='from_time', type=str,
+                       help='Start time for cache query/replay (e.g., "14:30", "-2h")')
+    parser.add_argument('--to', dest='to_time', type=str,
+                       help='End time for cache query/replay')
+    parser.add_argument('--replay-to', type=str, metavar='HOST:PORT',
+                       help='Custom replay destination (e.g., 10.1.2.3:162)')
+    parser.add_argument('--rate-limit', type=int, default=500,
+                       help='Max traps/sec for replay (default: 500)')
+    parser.add_argument('--dry-run', action='store_true',
+                       help='Preview cache replay without sending')
+    parser.add_argument('--oid-filter', type=str,
+                       help='OID prefix filter for cache operations')
+    parser.add_argument('--source-filter', type=str,
+                       help='Source IP prefix filter for cache operations')
+    parser.add_argument('--exclude-oid', type=str,
+                       help='OID to exclude from cache replay')
+    parser.add_argument('--limit', type=int, default=20,
+                       help='Maximum entries to show in cache query (default: 20)')
 
     return parser

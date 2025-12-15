@@ -24,6 +24,41 @@ from .ha import (
     HAState
 )
 
+# Import cache module with fallback if not available
+try:
+    from .cache import initialize_cache, shutdown_cache, get_cache
+    from .config import load_cache_config, CACHE_CONFIG_FILE
+    CACHE_MODULE_AVAILABLE = True
+except ImportError:
+    CACHE_MODULE_AVAILABLE = False
+    CACHE_CONFIG_FILE = None
+    def initialize_cache(config, config_file=None):
+        return None
+    def shutdown_cache():
+        pass
+    def get_cache():
+        return None
+    def load_cache_config():
+        return None
+
+# Import granular statistics module with fallback if not available
+try:
+    from .stats import (
+        initialize_stats, shutdown_stats, get_stats_collector,
+        CollectorConfig
+    )
+    GRANULAR_STATS_AVAILABLE = True
+except ImportError:
+    GRANULAR_STATS_AVAILABLE = False
+    def initialize_stats(config=None):
+        return None
+    def shutdown_stats():
+        pass
+    def get_stats_collector():
+        return None
+    class CollectorConfig:
+        pass
+
 # Import control socket module with fallback if not available
 try:
     from .control import initialize_control_socket, shutdown_control_socket
@@ -91,6 +126,13 @@ def handle_signal(signum, frame):
 
     # Shutdown HA cluster first to coordinate with peer
     shutdown_ha()
+
+    # Shutdown granular statistics
+    if GRANULAR_STATS_AVAILABLE:
+        try:
+            shutdown_stats()
+        except Exception as e:
+            logger.error(f"Error shutting down granular stats: {e}")
 
     # Log final metrics before shutdown
     try:
@@ -217,6 +259,66 @@ def run_service(debug=False):
     metrics_dir = os.path.join(os.path.dirname(LOG_FILE), "metrics")
     init_metrics(metrics_directory=metrics_dir, export_interval=60)
     logger.info(f"Metrics collection initialized with output to {metrics_dir}")
+
+    # =======================================================================
+    # Initialize Cache System (Redis-based trap buffering)
+    # =======================================================================
+    if CACHE_MODULE_AVAILABLE:
+        logger.info("Initializing cache system...")
+        try:
+            cache_config = load_cache_config()
+            if cache_config and cache_config.enabled:
+                # Pass config file path for hot-reload support
+                cache = initialize_cache(cache_config, config_file=CACHE_CONFIG_FILE)
+                if cache and cache.available:
+                    logger.info(f"Cache enabled: Redis at {cache_config.host}:{cache_config.port}")
+                    logger.info(f"Cache retention: {cache_config.retention_hours} hours")
+                else:
+                    logger.warning("Cache configured but failed to connect to Redis")
+                    logger.info("Traps will be forwarded but not cached")
+                    logger.info("To enable caching, ensure Redis is running and accessible")
+            else:
+                logger.info("Cache not enabled - traps will not be buffered")
+                logger.info("To enable caching, create config/cache_config.json with enabled=true")
+        except Exception as e:
+            logger.warning(f"Failed to initialize cache: {e}")
+            logger.info("Traps will be forwarded without caching")
+    else:
+        logger.debug("Cache module not available")
+
+    # =======================================================================
+    # Initialize Granular Statistics System
+    # =======================================================================
+    if GRANULAR_STATS_AVAILABLE:
+        logger.info("Initializing granular statistics system...")
+        try:
+            # Configure the collector
+            stats_config = CollectorConfig(
+                max_ips=10000,      # Track up to 10,000 unique source IPs
+                max_oids=5000,      # Track up to 5,000 unique OIDs
+                max_destinations=100,
+                cleanup_interval=300,  # Cleanup stale entries every 5 minutes
+                stale_threshold=3600,  # Remove entries idle for 1 hour
+                rate_window=60,        # 1 minute rate calculation window
+                export_interval=60,    # Export to files every minute
+                metrics_dir=metrics_dir,  # Same directory as other metrics
+            )
+            
+            # Initialize the collector
+            collector = initialize_stats(stats_config)
+            
+            if collector:
+                logger.info("Granular statistics collector initialized successfully")
+                logger.info(f"  Max tracked IPs: {stats_config.max_ips:,}")
+                logger.info(f"  Max tracked OIDs: {stats_config.max_oids:,}")
+                logger.info(f"  Export interval: {stats_config.export_interval}s")
+            else:
+                logger.warning("Failed to initialize granular statistics collector")
+        except Exception as e:
+            logger.warning(f"Error initializing granular statistics: {e}")
+            logger.info("Service will continue without granular statistics")
+    else:
+        logger.debug("Granular statistics module not available")
 
     # First load the configuration
     # NOTE: Do NOT pass restart_udp_listeners here - we'll start listeners
@@ -493,6 +595,21 @@ def run_service(debug=False):
     except ImportError:
         pass
 
+    # Shutdown cache
+    if CACHE_MODULE_AVAILABLE:
+        try:
+            shutdown_cache()
+        except Exception as e:
+            logger.error(f"Error shutting down cache: {e}")
+
+    # Shutdown granular statistics
+    if GRANULAR_STATS_AVAILABLE:
+        try:
+            logger.info("Shutting down granular statistics...")
+            shutdown_stats()
+        except Exception as e:
+            logger.error(f"Error shutting down granular stats: {e}")
+
     # Shutdown control socket
     try:
         if CONTROL_SOCKET_AVAILABLE:
@@ -542,25 +659,24 @@ def run_service(debug=False):
 
 def ha_aware_forward_trap(packet):
     """
-    HA-aware packet capture function that only forwards when this instance is active
+    Packet capture callback that queues packets for processing.
+    
+    Note: HA state is checked in the packet processor, not here.
+    This ensures packets are always queued for processing (filtering, caching)
+    even on Secondary nodes. The processor will skip forwarding if HA
+    indicates this node is Secondary.
 
     Args:
         packet: Scapy packet from sniff function
     """
     try:
-        # Check if HA allows forwarding
-        if not is_forwarding_enabled():
-            logger.debug("Packet captured but forwarding disabled by HA")
-            return
-
-        # Use the original forward_trap function
+        # Always queue the packet for processing
+        # The packet processor will handle HA state for forwarding decisions
+        # but will always cache the trap regardless of HA state
         forward_trap(packet)
 
-        # Notify HA system that we processed a trap
-        notify_trap_processed()
-
     except Exception as e:
-        logger.error(f"Error in HA-aware packet forwarding: {e}")
+        logger.error(f"Error in packet capture callback: {e}")
 
 
 def get_ha_status():

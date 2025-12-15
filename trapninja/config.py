@@ -35,6 +35,7 @@ BLOCKED_IPS_FILE = os.path.join(CONFIG_DIR, "blocked_ips.json")
 REDIRECTED_IPS_FILE = os.path.join(CONFIG_DIR, "redirected_ips.json")
 REDIRECTED_OIDS_FILE = os.path.join(CONFIG_DIR, "redirected_oids.json")
 REDIRECTED_DESTINATIONS_FILE = os.path.join(CONFIG_DIR, "redirected_destinations.json")
+CACHE_CONFIG_FILE = os.path.join(CONFIG_DIR, "cache_config.json")
 
 # Daemon settings
 PID_FILE = "/var/run/trapninja.pid"
@@ -45,6 +46,15 @@ LOG_LEVEL = "INFO"
 LOG_MAX_SIZE = 10 * 1024 * 1024  # 10 MB
 LOG_BACKUP_COUNT = 5
 LOG_COMPRESS = False
+
+# Cache configuration defaults
+CACHE_ENABLED = False
+CACHE_HOST = "localhost"
+CACHE_PORT = 6379
+CACHE_PASSWORD = None
+CACHE_DB = 0
+CACHE_RETENTION_HOURS = 2.0
+CACHE_TRIM_INTERVAL = 60
 
 # Global variables to store config - optimized data structures
 destinations = []
@@ -354,3 +364,90 @@ def load_config(restart_udp_listeners_callback=None):
         Timer(CONFIG_CHECK_INTERVAL, load_config, args=[restart_udp_listeners_callback]).start()
 
     return config_changed
+
+
+def load_cache_config():
+    """
+    Load cache configuration from file.
+    
+    Returns:
+        CacheConfig object with loaded settings, or default config if not found
+    """
+    global CACHE_ENABLED, CACHE_HOST, CACHE_PORT, CACHE_PASSWORD
+    global CACHE_DB, CACHE_RETENTION_HOURS, CACHE_TRIM_INTERVAL
+    
+    log = logging.getLogger("trapninja")
+    
+    # Try to import CacheConfig
+    try:
+        from .cache import CacheConfig
+    except ImportError:
+        log.debug("Cache module not available")
+        return None
+    
+    # Load from file if exists
+    if os.path.exists(CACHE_CONFIG_FILE):
+        try:
+            data = safe_load_json(CACHE_CONFIG_FILE, {})
+            
+            # Update globals
+            CACHE_ENABLED = data.get('enabled', False)
+            CACHE_HOST = data.get('host', 'localhost')
+            CACHE_PORT = data.get('port', 6379)
+            CACHE_PASSWORD = data.get('password')
+            CACHE_DB = data.get('db', 0)
+            CACHE_RETENTION_HOURS = data.get('retention_hours', 2.0)
+            CACHE_TRIM_INTERVAL = data.get('trim_interval_seconds', 60)
+            
+            log.info(f"Loaded cache config: enabled={CACHE_ENABLED}, host={CACHE_HOST}:{CACHE_PORT}")
+            
+            return CacheConfig.from_dict(data)
+            
+        except Exception as e:
+            log.warning(f"Failed to load cache config: {e}")
+    else:
+        log.debug(f"Cache config file not found: {CACHE_CONFIG_FILE}")
+    
+    # Return default config
+    return CacheConfig(
+        enabled=CACHE_ENABLED,
+        host=CACHE_HOST,
+        port=CACHE_PORT,
+        password=CACHE_PASSWORD,
+        db=CACHE_DB,
+        retention_hours=CACHE_RETENTION_HOURS,
+        trim_interval_seconds=CACHE_TRIM_INTERVAL
+    )
+
+
+def save_cache_config(config):
+    """
+    Save cache configuration to file.
+    
+    Args:
+        config: CacheConfig object or dict with settings
+        
+    Returns:
+        True if successful
+    """
+    log = logging.getLogger("trapninja")
+    
+    try:
+        if hasattr(config, 'to_dict'):
+            data = config.to_dict()
+        else:
+            data = dict(config)
+        
+        # Don't save password if None
+        if data.get('password') is None:
+            data.pop('password', None)
+        
+        with open(CACHE_CONFIG_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+        
+        log.info(f"Saved cache config to {CACHE_CONFIG_FILE}")
+        return True
+        
+    except Exception as e:
+        log.error(f"Failed to save cache config: {e}")
+        return False

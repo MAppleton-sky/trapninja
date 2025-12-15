@@ -16,6 +16,131 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.0] - 2025-12-12
+
+### Added
+
+#### Granular Statistics System - Service Integration
+- **Enabled granular statistics collection in service** - The stats module was fully
+  implemented but never initialized. Now properly integrated into service startup.
+- **Per-IP statistics**: Track trap volume, rates, and breakdowns per source IP
+- **Per-OID statistics**: Track trap volume, rates, and source IP distribution per OID
+- **Per-destination statistics**: Track forwards, success rates, and source breakdown
+- **REST API server** for web frontend integration (optional, enable via env var)
+  - `GET /api/stats/summary` - Overall statistics summary
+  - `GET /api/stats/dashboard` - Full dashboard data for visualization
+  - `GET /api/stats/ips/top` - Top source IPs by volume or rate
+  - `GET /api/stats/oids/top` - Top OIDs by volume or rate
+  - `GET /api/stats/ip/<ip>` - Detailed stats for specific IP
+  - `GET /api/stats/oid/<oid>` - Detailed stats for specific OID
+  - `GET /api/stats/matrix` - IP/OID matrix for heatmap visualization
+  - `GET /api/health` - Health check endpoint
+- **LRU-bounded storage** prevents unbounded memory growth
+- **Automatic stale entry cleanup** removes idle entries
+- **Prometheus export** with dimensional labels (per-IP, per-OID)
+- **JSON export** for custom integrations
+
+#### CLI Commands for Granular Statistics
+- `stats summary` - Show statistics overview
+- `stats top-ips [-n N] [-s sort]` - View top source IPs
+- `stats top-oids [-n N] [-s sort]` - View top OIDs
+- `stats ip <ip>` - Detailed stats for specific IP
+- `stats oid <oid>` - Detailed stats for specific OID
+- `stats destinations` - Destination statistics
+- `stats dashboard` - Export full dashboard data
+- `stats api [--host HOST] [--port PORT]` - Start standalone API server
+- `stats export [-f format] [-o file]` - Export stats to file
+- `stats reset` - Reset all statistics
+
+#### Configuration
+- New `config/stats_config.json` for granular statistics settings
+- Environment variables for API server:
+  - `TRAPNINJA_STATS_API_PORT` - Enable API server on specified port
+  - `TRAPNINJA_STATS_API_HOST` - API server bind host (default: 0.0.0.0)
+
+### Fixed
+
+#### Critical: Granular Statistics Not Collecting
+- **Root Cause**: The `trapninja/stats/` module was fully implemented with
+  collector, models, API, and HTTP server, but `initialize_stats()` was never
+  called in `service.py`. The packet processor imported `get_stats_collector()`
+  but it always returned `None`.
+- **Solution**: Added proper initialization of granular statistics system in
+  service startup, with configuration from `CollectorConfig`.
+- **Impact**: Per-IP/OID statistics now actually collect and can be queried
+  via CLI commands or REST API.
+
+### Documentation
+- Added `documentation/GRANULAR_STATS.md` with comprehensive guide
+- API endpoint reference with example responses
+- Web frontend integration guide
+- Prometheus/Grafana integration examples
+
+---
+
+## [0.6.0] - 2025-06-15
+
+### Added
+
+#### Redis-Based Trap Caching System
+- **New cache module** (`trapninja/cache/`) for trap buffering and replay
+  - `redis_backend.py`: Redis Streams-based cache with rolling retention
+  - `replay.py`: Time-window based trap replay with rate limiting
+  - Automatic retention trimming (configurable, default 2 hours)
+  - Non-blocking cache operations - failures don't affect forwarding
+
+#### Cache CLI Commands
+- `--cache-status`: View cache statistics and per-destination info
+- `--cache-query`: Preview cached traps for a time window
+- `--cache-replay`: Replay cached traps with rate limiting
+- `--cache-clear`: Clear cached entries (per-destination or all)
+- `--cache-help`: Comprehensive cache system help
+
+#### Cache Features
+- Per-destination streams for isolated replay
+- Flexible time formats: relative (`-2h`, `-30m`), time-only (`14:30`), full datetime
+- OID and source IP filtering during replay
+- Dry-run mode for replay preview
+- Progress tracking during replay operations
+- Automatic integration with existing forwarding pipeline
+
+### Configuration
+- New `cache_config.json` configuration file
+- Configurable retention period, Redis connection, trim intervals
+- Optional password authentication for Redis
+
+### Documentation
+- Added `documentation/CACHE.md` with comprehensive cache system guide
+- Memory sizing guide for Redis capacity planning
+- Integration guide for HA deployments
+
+### Technical Details
+- Cache writes are fire-and-forget (non-blocking)
+- Traps cached after successful forwarding
+- Background retention trimmer thread
+- Statistics tracking: cached, cache_failures in processor stats
+
+### Fixed
+
+#### Critical: Metrics All Showing Zero Values
+- **Root Cause**: The `metrics.py` module had its own counters that were never
+  incremented by the packet processing code. The `packet_processor.py` used
+  separate `AtomicStats` that weren't synced to the Prometheus exporter.
+- **Solution**: Unified metrics system that collects from all sources:
+  - `packet_processor.py` → AtomicStats (core processing metrics)
+  - `network.py` → QueueStats (queue depth and utilization)
+  - `ha.py` → HA cluster status (if enabled)
+  - `cache.py` → Cache availability (if enabled)
+- **New metrics added**:
+  - `trapninja_fast_path_hits_total` - Packets using optimized path
+  - `trapninja_slow_path_hits_total` - Packets requiring full parsing
+  - `trapninja_fast_path_ratio` - Performance efficiency percentage
+  - `trapninja_processing_rate` - Current packets/second
+- **Documentation**: Added `documentation/METRICS.md` with full metrics reference
+- **Testing**: Updated `tests/metrics-test.py` with integration tests
+
+---
+
 ## [0.5.2] - 2025-01-09
 
 ### Fixed

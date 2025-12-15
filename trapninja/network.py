@@ -381,6 +381,17 @@ def _start_legacy_workers(num_workers: int) -> List[threading.Thread]:
     """Legacy worker implementation for backward compatibility"""
     from .snmp import process_captured_packet
     
+    # Import cache module if available
+    try:
+        from .cache import get_cache
+        import base64
+        from datetime import datetime
+        CACHE_AVAILABLE = True
+    except ImportError:
+        CACHE_AVAILABLE = False
+        def get_cache():
+            return None
+    
     def worker(worker_id):
         logger.info(f"Legacy worker {worker_id} started")
         
@@ -388,15 +399,31 @@ def _start_legacy_workers(num_workers: int) -> List[threading.Thread]:
             try:
                 packet = packet_queue.get(timeout=0.5)
                 
-                # CRITICAL: Check HA state before processing
-                # Only the PRIMARY node should forward traps
-                if not is_forwarding_enabled():
-                    logger.debug("Packet received but forwarding disabled by HA (secondary mode)")
-                    packet_queue.task_done()
-                    continue
+                # Check HA state for forwarding decision (but always cache)
+                ha_forwarding_enabled = is_forwarding_enabled()
                 
-                process_captured_packet(packet)
-                notify_trap_processed()  # Notify HA system of activity
+                # Cache the trap regardless of HA state
+                if CACHE_AVAILABLE:
+                    cache = get_cache()
+                    if cache and cache.available:
+                        try:
+                            trap_data = {
+                                'timestamp': datetime.now().isoformat(),
+                                'source_ip': packet.get('src_ip', ''),
+                                'trap_oid': '',  # Legacy doesn't extract OID
+                                'pdu_base64': base64.b64encode(packet.get('payload', b'')).decode('ascii'),
+                            }
+                            cache.store('default', trap_data)
+                        except Exception:
+                            pass
+                
+                # Only process/forward if HA allows
+                if ha_forwarding_enabled:
+                    process_captured_packet(packet)
+                    notify_trap_processed()
+                else:
+                    logger.debug("Packet cached but forwarding disabled by HA (secondary mode)")
+                
                 packet_queue.task_done()
             except queue.Empty:
                 continue

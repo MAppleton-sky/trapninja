@@ -1,0 +1,14 @@
+{
+    "enabled": true,
+    "max_ips": 10000,
+    "max_oids": 5000,
+    "max_destinations": 100,
+    "cleanup_interval": 300,
+    "stale_threshold": 3600,
+    "rate_window": 60,
+    "export_interval": 60,
+    "persistence": {
+        "enabled": false,
+        "redis_key_prefix": "trapninja:stats:"
+    }
+}
