@@ -52,6 +52,8 @@ FEATURES = {
     'modular_cli': VERSION_INFO >= (0, 5, 0),
     'caching': VERSION_INFO >= (0, 6, 0),
     'unified_metrics': VERSION_INFO >= (0, 6, 0),
+    'granular_stats': VERSION_INFO >= (0, 7, 0),
+    'stats_api': VERSION_INFO >= (0, 7, 0),
 }
 
 

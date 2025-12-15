@@ -67,6 +67,39 @@ except ImportError:
     def get_cache():
         return None
 
+# Import granular statistics module with fallback
+try:
+    from .stats import get_stats_collector, initialize_stats
+    GRANULAR_STATS_AVAILABLE = True
+except ImportError:
+    GRANULAR_STATS_AVAILABLE = False
+    def get_stats_collector():
+        return None
+    def initialize_stats(config=None):
+        return None
+
+
+def _record_granular_stats(source_ip: str, oid: str = None, 
+                           action: str = 'forwarded', destination: str = None):
+    """
+    Record granular per-IP/OID statistics.
+    Non-blocking - failures don't affect packet processing.
+    """
+    if not GRANULAR_STATS_AVAILABLE:
+        return
+    
+    collector = get_stats_collector()
+    if collector:
+        try:
+            collector.record_trap(
+                source_ip=source_ip,
+                oid=oid,
+                action=action,
+                destination=destination
+            )
+        except Exception:
+            pass  # Never block packet processing for stats
+
 
 # =============================================================================
 # LOCK-FREE STATISTICS (Atomic counters for performance)
@@ -632,6 +665,7 @@ class BatchProcessor:
             if source_ip in config['blocked_ips']:
                 _stats.increment_blocked()
                 _stats.record_fast_path()  # Simple check is fast path
+                _record_granular_stats(source_ip, oid=None, action='blocked')
                 return True
             
             # Try fast path for SNMPv2c
@@ -652,6 +686,7 @@ class BatchProcessor:
                 # Check OID blocking
                 if trap_oid in config['blocked_traps']:
                     _stats.increment_blocked()
+                    _record_granular_stats(source_ip, oid=trap_oid, action='blocked')
                     return True
                 
                 # Check redirection
@@ -666,9 +701,12 @@ class BatchProcessor:
                             forward_fast(source_ip, payload, 
                                         config['redirected_destinations'][tag])
                             _stats.increment_redirected()
+                            _record_granular_stats(source_ip, oid=trap_oid, 
+                                                   action='redirected', destination=tag)
                             notify_trap_processed()
                         else:
                             _stats.increment_ha_blocked()
+                            _record_granular_stats(source_ip, oid=trap_oid, action='dropped')
                         return True
                 
                 if trap_oid in config['redirected_oids']:
@@ -682,9 +720,12 @@ class BatchProcessor:
                             forward_fast(source_ip, payload,
                                         config['redirected_destinations'][tag])
                             _stats.increment_redirected()
+                            _record_granular_stats(source_ip, oid=trap_oid,
+                                                   action='redirected', destination=tag)
                             notify_trap_processed()
                         else:
                             _stats.increment_ha_blocked()
+                            _record_granular_stats(source_ip, oid=trap_oid, action='dropped')
                         return True
             
             # Default destination handling
@@ -696,9 +737,12 @@ class BatchProcessor:
                 if config['destinations']:
                     forward_fast(source_ip, payload, config['destinations'])
                     _stats.increment_forwarded()
+                    _record_granular_stats(source_ip, oid=trap_oid,
+                                           action='forwarded', destination='default')
                     notify_trap_processed()
             else:
                 _stats.increment_ha_blocked()
+                _record_granular_stats(source_ip, oid=trap_oid, action='dropped')
             
             return True
             

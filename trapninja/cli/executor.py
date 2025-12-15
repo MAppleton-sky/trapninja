@@ -18,6 +18,7 @@ from . import filtering_commands
 from . import ha_commands
 from . import snmpv3_commands
 from . import cache_commands
+from . import stats_commands
 from .validation import InputValidator, parse_size
 
 
@@ -271,6 +272,48 @@ def execute_command(args: Namespace) -> int:
     
     elif args.cache_help:
         return 0 if cache_commands.show_cache_help() else 1
+
+    # Handle granular statistics commands
+    elif args.stats_summary:
+        return stats_commands.handle_stats_summary(args)
+
+    elif args.stats_top_ips:
+        return stats_commands.handle_stats_top_ips(args)
+
+    elif args.stats_top_oids:
+        return stats_commands.handle_stats_top_oids(args)
+
+    elif args.stats_ip:
+        if not args.ip:
+            print("Error: --ip is required for --stats-ip")
+            print("Example: --stats-ip --ip 10.0.0.1")
+            return 1
+        return stats_commands.handle_stats_ip_detail(args)
+
+    elif args.stats_oid:
+        if not args.oid:
+            print("Error: --oid is required for --stats-oid")
+            print("Example: --stats-oid --oid 1.3.6.1.4.1.9.9.41.2.0.1")
+            return 1
+        return stats_commands.handle_stats_oid_detail(args)
+
+    elif args.stats_destinations:
+        return stats_commands.handle_stats_destinations(args)
+
+    elif args.stats_dashboard:
+        return stats_commands.handle_stats_dashboard(args)
+
+    elif args.stats_api:
+        return stats_commands.handle_stats_api(args)
+
+    elif args.stats_export:
+        return stats_commands.handle_stats_export(args)
+
+    elif args.stats_reset:
+        return stats_commands.handle_stats_reset(args)
+
+    elif args.stats_help:
+        return stats_commands.handle_stats_help(args)
 
     # Handle daemon control commands
     elif args.start:
