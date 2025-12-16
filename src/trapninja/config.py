@@ -27,7 +27,28 @@ CONFIG_CHECK_INTERVAL = 60  # Check config files every 60 seconds
 CAPTURE_MODE = "auto"
 
 # Paths to config files
-CONFIG_DIR = "/opt/trapninja/config"
+# Priority: TRAPNINJA_CONFIG env var > /etc/trapninja > ./config > /opt/trapninja/config
+def _get_config_dir():
+    """Determine configuration directory with fallback logic."""
+    # 1. Environment variable (set by systemd service)
+    env_config = os.environ.get('TRAPNINJA_CONFIG')
+    if env_config and os.path.isdir(env_config):
+        return env_config
+    
+    # 2. Standard system config location
+    if os.path.isdir('/etc/trapninja'):
+        return '/etc/trapninja'
+    
+    # 3. Local config directory (for development)
+    script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    local_config = os.path.join(script_dir, 'config')
+    if os.path.isdir(local_config):
+        return local_config
+    
+    # 4. Default installation location
+    return '/opt/trapninja/config'
+
+CONFIG_DIR = _get_config_dir()
 DESTINATIONS_FILE = os.path.join(CONFIG_DIR, "destinations.json")
 BLOCKED_TRAPS_FILE = os.path.join(CONFIG_DIR, "blocked_traps.json")
 LISTEN_PORTS_FILE = os.path.join(CONFIG_DIR, "listen_ports.json")

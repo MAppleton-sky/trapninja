@@ -1,0 +1,56 @@
+---
+# TrapNinja Server Group Variables
+# These apply to all servers in the trapninja_servers group
+
+# Git repository settings
+trapninja_git_repo: "git@gitlab.example.com:network/trapninja.git"
+trapninja_git_branch: "main"
+
+# Installation paths
+trapninja_dest: /opt/trapninja
+trapninja_config_dest: /etc/trapninja
+
+# Service settings
+trapninja_user: root
+trapninja_group: root
+trapninja_python: python3.9
+
+# Feature flags
+trapninja_enable_cache: true
+trapninja_enable_metrics: true
+trapninja_minimal_install: false
+
+# =============================================================================
+# Destination Configuration
+# Uncomment and customize to deploy destinations.json via template
+# =============================================================================
+# trapninja_destinations:
+#   - ["192.168.1.100", 162]   # Primary NMS
+#   - ["192.168.1.101", 162]   # Secondary NMS
+
+# =============================================================================
+# HA Configuration
+# Uncomment and customize for HA deployments
+# Note: Primary and secondary should have different settings - use host_vars
+# =============================================================================
+# trapninja_ha_config:
+#   enabled: true
+#   mode: "primary"           # or "secondary"
+#   peer_host: "10.234.83.134"
+#   peer_port: 60006
+#   priority: 150             # Higher = preferred primary
+#   heartbeat_interval: 1.0
+#   heartbeat_timeout: 3.0
+#   failover_delay: 2.0
+
+# =============================================================================
+# Cache Configuration
+# Uncomment to customize Redis cache settings
+# =============================================================================
+# trapninja_cache_config:
+#   enabled: true
+#   host: "localhost"
+#   port: 6379
+#   db: 0
+#   retention_hours: 2.0
+#   trim_interval_seconds: 60

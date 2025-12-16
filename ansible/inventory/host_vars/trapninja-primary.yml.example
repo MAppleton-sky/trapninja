@@ -1,0 +1,17 @@
+---
+# TrapNinja Primary Server Configuration
+# Host-specific variables for the primary HA node
+
+# HA Configuration for PRIMARY node
+trapninja_ha_config:
+  enabled: true
+  mode: "primary"
+  peer_host: "10.234.83.134"    # IP of secondary server
+  peer_port: 60006
+  listen_port: 60006
+  priority: 150                  # Higher priority = preferred primary
+  heartbeat_interval: 1.0
+  heartbeat_timeout: 3.0
+  failover_delay: 2.0
+  auto_failback: false
+  startup_peer_check: true

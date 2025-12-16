@@ -281,6 +281,7 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
     logger.info(f"Starting TrapNinja service with HA support (PID: {os.getpid()})...")
     logger.info(f"Python version: {sys.version}")
     logger.info(f"Running as user: {os.getenv('USER', 'unknown')}")
+    logger.info(f"Configuration directory: {CONFIG_DIR}")
 
     # Write PID to file to ensure it's correct
     try:

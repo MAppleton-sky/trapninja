@@ -61,6 +61,20 @@ ehthumbs.db
 Thumbs.db
 
 # -----------------------------------------------------------------------------
+# Ansible
+# -----------------------------------------------------------------------------
+# Inventory files (may contain sensitive info)
+# Keep only .example files
+ansible/inventory/*
+!ansible/inventory/*.example
+!ansible/inventory/group_vars/
+!ansible/inventory/host_vars/
+ansible/inventory/group_vars/*
+!ansible/inventory/group_vars/*.example
+ansible/inventory/host_vars/*
+!ansible/inventory/host_vars/*.example
+
+# -----------------------------------------------------------------------------
 # Logs and Data
 # -----------------------------------------------------------------------------
 *.log
