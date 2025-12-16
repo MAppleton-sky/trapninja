@@ -208,6 +208,8 @@ class ControlSocket:
             return self._handle_ha_force_failover(request)
         elif command == 'service_status':
             return self._handle_service_status(request)
+        elif command == 'stats':
+            return self._handle_stats(request)
         elif command == 'ping':
             return {'status': self.SUCCESS, 'message': 'pong'}
         else:
@@ -348,6 +350,114 @@ class ControlSocket:
             return {
                 'status': self.ERROR,
                 'error': f'Error getting service status: {e}'
+            }
+
+    def _handle_stats(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle granular statistics requests"""
+        try:
+            from .stats import get_stats_collector
+            
+            collector = get_stats_collector()
+            if not collector:
+                return {
+                    'status': self.NOT_FOUND,
+                    'error': 'Statistics collector not initialized'
+                }
+            
+            action = request.get('action', 'summary')
+            
+            if action == 'summary':
+                return {
+                    'status': self.SUCCESS,
+                    'data': collector.get_summary()
+                }
+            
+            elif action == 'top_ips':
+                count = request.get('count', 10)
+                sort_by = request.get('sort_by', 'total')
+                data = collector.get_top_ips(n=count, sort_by=sort_by)
+                return {
+                    'status': self.SUCCESS,
+                    'data': data
+                }
+            
+            elif action == 'top_oids':
+                count = request.get('count', 10)
+                sort_by = request.get('sort_by', 'total')
+                data = collector.get_top_oids(n=count, sort_by=sort_by)
+                return {
+                    'status': self.SUCCESS,
+                    'data': data
+                }
+            
+            elif action == 'ip_detail':
+                ip_address = request.get('ip_address')
+                if not ip_address:
+                    return {
+                        'status': self.INVALID_REQUEST,
+                        'error': 'ip_address required'
+                    }
+                data = collector.get_ip_stats(ip_address)
+                if data:
+                    return {
+                        'status': self.SUCCESS,
+                        'data': data
+                    }
+                return {
+                    'status': self.NOT_FOUND,
+                    'error': f'IP {ip_address} not found'
+                }
+            
+            elif action == 'oid_detail':
+                oid = request.get('oid')
+                if not oid:
+                    return {
+                        'status': self.INVALID_REQUEST,
+                        'error': 'oid required'
+                    }
+                data = collector.get_oid_stats(oid)
+                if data:
+                    return {
+                        'status': self.SUCCESS,
+                        'data': data
+                    }
+                return {
+                    'status': self.NOT_FOUND,
+                    'error': f'OID {oid} not found'
+                }
+            
+            elif action == 'destinations':
+                data = collector.get_all_destinations()
+                return {
+                    'status': self.SUCCESS,
+                    'data': data
+                }
+            
+            elif action == 'dashboard':
+                snapshot = collector.get_snapshot(top_n=50)
+                return {
+                    'status': self.SUCCESS,
+                    'data': snapshot.to_dict()
+                }
+            
+            elif action == 'reset':
+                collector.reset()
+                return {
+                    'status': self.SUCCESS,
+                    'message': 'Statistics reset'
+                }
+            
+            else:
+                return {
+                    'status': self.INVALID_REQUEST,
+                    'error': f'Unknown stats action: {action}'
+                }
+                
+        except Exception as e:
+            logger.error(f"Error handling stats request: {e}")
+            return {
+                'status': self.ERROR,
+                'error': f'Error getting statistics: {e}'
             }
 
     @staticmethod

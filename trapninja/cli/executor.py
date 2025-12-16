@@ -19,6 +19,7 @@ from . import ha_commands
 from . import snmpv3_commands
 from . import cache_commands
 from . import stats_commands
+from . import shadow_commands
 from .validation import InputValidator, parse_size
 
 
@@ -303,9 +304,6 @@ def execute_command(args: Namespace) -> int:
     elif args.stats_dashboard:
         return stats_commands.handle_stats_dashboard(args)
 
-    elif args.stats_api:
-        return stats_commands.handle_stats_api(args)
-
     elif args.stats_export:
         return stats_commands.handle_stats_export(args)
 
@@ -314,6 +312,13 @@ def execute_command(args: Namespace) -> int:
 
     elif args.stats_help:
         return stats_commands.handle_stats_help(args)
+
+    # Handle shadow mode commands
+    elif args.shadow_status:
+        return shadow_commands.handle_shadow_status(args)
+    
+    elif args.shadow_export:
+        return shadow_commands.handle_shadow_export(args)
 
     # Handle daemon control commands
     elif args.start:
@@ -329,7 +334,14 @@ def execute_command(args: Namespace) -> int:
         return daemon_commands.status()
     
     elif args.foreground:
-        return daemon_commands.run_foreground(debug=args.debug)
+        return daemon_commands.run_foreground(
+            debug=args.debug,
+            shadow_mode=getattr(args, 'shadow_mode', False),
+            mirror_mode=getattr(args, 'mirror_mode', False),
+            parallel=getattr(args, 'parallel', False),
+            capture_mode=getattr(args, 'capture_mode', None),
+            log_traps=getattr(args, 'log_traps', None)
+        )
     
     elif args.foreground_daemon:
         # Hidden mode used by start_daemon() to run the actual daemon

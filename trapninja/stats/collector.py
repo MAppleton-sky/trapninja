@@ -329,9 +329,12 @@ class GranularStatsCollector:
         """Get stats for all destinations."""
         return [d.to_dict(include_details=True) for d in self._dest_stats.values()]
     
-    def get_snapshot(self) -> StatsSnapshot:
+    def get_snapshot(self, top_n: int = 50) -> StatsSnapshot:
         """
         Get a point-in-time snapshot of all statistics.
+        
+        Args:
+            top_n: Number of top IPs/OIDs to include (default 50)
         
         Returns:
             StatsSnapshot with summary and top entities
@@ -353,9 +356,9 @@ class GranularStatsCollector:
         # Rate
         snapshot.overall_rate_per_minute = self._global_rate.get_count(60)
         
-        # Top entities
-        snapshot.top_ips = self.get_top_ips(10, sort_by='total')
-        snapshot.top_oids = self.get_top_oids(10, sort_by='total')
+        # Top entities - include more for file export so CLI -n works
+        snapshot.top_ips = self.get_top_ips(top_n, sort_by='total')
+        snapshot.top_oids = self.get_top_oids(top_n, sort_by='total')
         snapshot.top_destinations = self.get_all_destinations()
         
         # Time range

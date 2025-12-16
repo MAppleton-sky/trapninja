@@ -1,0 +1,16 @@
+{
+  "_comment": "Capture configuration for TrapNinja",
+  "_options": {
+    "mode": ["auto", "sniff", "socket"],
+    "mode_descriptions": {
+      "auto": "Try eBPF first, fall back to sniff (recommended)",
+      "sniff": "Use Scapy sniff() with libpcap - can run alongside other receivers",
+      "socket": "Use UDP socket binding - requires exclusive port access"
+    }
+  },
+  "mode": "auto",
+  "allow_parallel": false,
+  "buffer_size_mb": 64,
+  "batch_size": 100,
+  "worker_count": 0
+}

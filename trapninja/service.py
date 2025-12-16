@@ -59,6 +59,41 @@ except ImportError:
     class CollectorConfig:
         pass
 
+# Import shadow mode module with fallback if not available
+try:
+    from .shadow import (
+        initialize_shadow_mode, shutdown_shadow_mode,
+        is_shadow_mode, is_observe_only, should_use_sniff_mode,
+        get_effective_capture_mode, get_shadow_summary,
+        load_shadow_config, load_capture_config,
+        ShadowConfig, CaptureConfig
+    )
+    SHADOW_MODULE_AVAILABLE = True
+except ImportError:
+    SHADOW_MODULE_AVAILABLE = False
+    def initialize_shadow_mode(shadow_config=None, capture_config=None):
+        return False
+    def shutdown_shadow_mode():
+        pass
+    def is_shadow_mode():
+        return False
+    def is_observe_only():
+        return False
+    def should_use_sniff_mode():
+        return False
+    def get_effective_capture_mode():
+        return "auto"
+    def get_shadow_summary():
+        return {'enabled': False}
+    def load_shadow_config():
+        return None
+    def load_capture_config():
+        return None
+    class ShadowConfig:
+        pass
+    class CaptureConfig:
+        pass
+
 # Import control socket module with fallback if not available
 try:
     from .control import initialize_control_socket, shutdown_control_socket
@@ -156,12 +191,18 @@ def handle_signal(signum, frame):
     sys.exit(0)
 
 
-def run_service(debug=False):
+def run_service(debug=False, shadow_mode=False, mirror_mode=False,
+                parallel=False, capture_mode=None, log_traps=None):
     """
     Main service function with HA integration
 
     Args:
         debug (bool): Whether to run in debug mode with more verbose logging
+        shadow_mode (bool): Observe only mode (no forwarding)
+        mirror_mode (bool): Parallel capture and forward mode
+        parallel (bool): Enable sniff capture for coexistence
+        capture_mode (str): Force capture mode (auto, sniff, socket)
+        log_traps (str): Log all traps to this file
 
     Returns:
         int: Exit code
@@ -170,6 +211,61 @@ def run_service(debug=False):
     
     # Record service start time
     start_time = time.time()
+    
+    # =======================================================================
+    # Initialize Shadow/Parallel Mode
+    # =======================================================================
+    observe_only = False
+    force_sniff_mode = False
+    
+    if shadow_mode or mirror_mode or parallel:
+        # Shadow/mirror/parallel modes require sniff capture for coexistence
+        force_sniff_mode = True
+        
+        if shadow_mode:
+            observe_only = True
+            logger.info("="*60)
+            logger.info("SHADOW MODE ENABLED")
+            logger.info("  - Using sniff capture (can run alongside other receivers)")
+            logger.info("  - Forwarding DISABLED - observe only")
+            logger.info("  - All traps will be counted but NOT forwarded")
+            logger.info("="*60)
+        elif mirror_mode:
+            logger.info("="*60)
+            logger.info("MIRROR MODE ENABLED")
+            logger.info("  - Using sniff capture (can run alongside other receivers)")
+            logger.info("  - Forwarding ENABLED - parallel operation")
+            logger.info("  - Both TrapNinja and existing receivers will forward traps")
+            logger.info("="*60)
+        else:
+            logger.info("="*60)
+            logger.info("PARALLEL CAPTURE ENABLED")
+            logger.info("  - Using sniff capture (can run alongside other receivers)")
+            logger.info("="*60)
+        
+        # Initialize shadow mode if available
+        if SHADOW_MODULE_AVAILABLE:
+            shadow_config = ShadowConfig(
+                enabled=shadow_mode,
+                observe_only=observe_only,
+                log_all_traps=bool(log_traps),
+                log_file=log_traps
+            )
+            capture_config = CaptureConfig(
+                mode="sniff" if force_sniff_mode else (capture_mode or "auto"),
+                allow_parallel=force_sniff_mode
+            )
+            initialize_shadow_mode(shadow_config, capture_config)
+    
+    # Override capture mode if specified via CLI
+    if capture_mode:
+        from . import config
+        config.CAPTURE_MODE = capture_mode
+        logger.info(f"Capture mode overridden via CLI: {capture_mode}")
+    elif force_sniff_mode:
+        from . import config
+        config.CAPTURE_MODE = "sniff"
+        logger.info("Capture mode forced to SNIFF for parallel operation")
 
     if debug:
         # Set logger to DEBUG level for more detailed information
@@ -587,6 +683,13 @@ def run_service(debug=False):
     # Signal workers to stop
     stop_event.set()
     logger.info("Stopping packet processing workers...")
+
+    # Shutdown shadow mode
+    if SHADOW_MODULE_AVAILABLE:
+        try:
+            shutdown_shadow_mode()
+        except Exception as e:
+            logger.error(f"Error shutting down shadow mode: {e}")
 
     # Shutdown packet processor (socket pool, stats)
     try:

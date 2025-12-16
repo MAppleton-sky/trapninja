@@ -1,0 +1,41 @@
+# TrapNinja SNMP Trap Forwarder - Python Requirements
+# =====================================================
+#
+# Install with: pip3 install --break-system-packages -r requirements.txt
+#
+# Note: On RHEL 8, use pip3.9 if python3.9 is installed separately
+
+# =============================================================================
+# REQUIRED - Core Dependencies
+# =============================================================================
+
+# Packet capture and forwarding (required)
+scapy>=2.4.5
+
+# =============================================================================
+# OPTIONAL - Enhanced Features
+# =============================================================================
+
+# Redis caching for trap replay during outages
+# Requires: redis-server running on system
+redis>=4.0.0
+
+# SNMPv3 decryption support
+# Enables decryption of encrypted SNMPv3 traps
+pysnmp>=4.4.12
+pyasn1>=0.4.8
+
+# Cryptography for SNMPv3 and credential encryption
+# Used by: SNMPv3 decryption, Fernet credential storage
+cryptography>=3.4.0
+
+# =============================================================================
+# DEVELOPMENT - Testing and Documentation
+# =============================================================================
+
+# Uncomment for development/testing:
+# pytest>=7.0.0
+# pytest-cov>=4.0.0
+# black>=22.0.0
+# flake8>=5.0.0
+# mypy>=1.0.0

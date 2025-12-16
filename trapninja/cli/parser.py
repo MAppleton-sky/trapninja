@@ -174,14 +174,30 @@ Examples:
                       help='Show destination statistics')
     group.add_argument('--stats-dashboard', action='store_true',
                       help='Export full dashboard data as JSON')
-    group.add_argument('--stats-api', action='store_true',
-                      help='Start standalone statistics REST API server')
     group.add_argument('--stats-export', action='store_true',
                       help='Export statistics to file')
     group.add_argument('--stats-reset', action='store_true',
                       help='Reset all granular statistics')
     group.add_argument('--stats-help', action='store_true',
                       help='Show granular statistics help')
+
+    # Shadow/Mirror mode for parallel testing
+    parser.add_argument('--shadow-mode', action='store_true',
+                       help='Run in shadow mode (observe only, no forwarding) - for testing alongside existing receivers')
+    parser.add_argument('--mirror-mode', action='store_true',
+                       help='Run in mirror mode (parallel capture and forward) - for comparison testing')
+    parser.add_argument('--parallel', action='store_true',
+                       help='Enable parallel operation (use sniff capture, no port binding)')
+    parser.add_argument('--log-traps', type=str, metavar='FILE',
+                       help='Log all observed traps to file (shadow mode)')
+    parser.add_argument('--capture-mode', type=str, choices=['auto', 'sniff', 'socket'],
+                       help='Packet capture mode: auto, sniff (parallel-safe), or socket (exclusive)')
+    
+    # Shadow mode status
+    group.add_argument('--shadow-status', action='store_true',
+                      help='Show shadow mode statistics')
+    group.add_argument('--shadow-export', action='store_true',
+                      help='Export shadow mode statistics to JSON')
 
     # Hidden option for internal daemon use
     parser.add_argument('--foreground-daemon', action='store_true',
@@ -265,10 +281,6 @@ Examples:
                        help='Output stats as JSON')
     parser.add_argument('--pretty', action='store_true',
                        help='Pretty print JSON output')
-    parser.add_argument('--stats-port', type=int, default=8080,
-                       help='Port for stats API server (default: 8080)')
-    parser.add_argument('--stats-host', type=str, default='0.0.0.0',
-                       help='Host for stats API server (default: 0.0.0.0)')
 
     # Cache parameters
     parser.add_argument('--destination', type=str,

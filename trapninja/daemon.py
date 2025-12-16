@@ -399,12 +399,18 @@ def restart_daemon():
     return 0 if (stop_result == 0 and start_result == 0) else 1
 
 
-def run_foreground_daemon(debug=False):
+def run_foreground_daemon(debug=False, shadow_mode=False, mirror_mode=False,
+                          parallel=False, capture_mode=None, log_traps=None):
     """
     Run the daemon in foreground mode
 
     Args:
         debug (bool): Whether to run in debug mode with more verbose logging
+        shadow_mode (bool): Observe only mode (no forwarding)
+        mirror_mode (bool): Parallel capture and forward mode
+        parallel (bool): Enable sniff capture for coexistence
+        capture_mode (str): Force capture mode (auto, sniff, socket)
+        log_traps (str): Log all traps to this file
 
     Returns:
         int: Exit code from the service
@@ -416,4 +422,11 @@ def run_foreground_daemon(debug=False):
     ensure_config_dir()
 
     # Run directly (not as daemon)
-    return run_service(debug=debug)
+    return run_service(
+        debug=debug,
+        shadow_mode=shadow_mode,
+        mirror_mode=mirror_mode,
+        parallel=parallel,
+        capture_mode=capture_mode,
+        log_traps=log_traps
+    )

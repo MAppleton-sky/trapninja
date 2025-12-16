@@ -1,0 +1,10 @@
+# TrapNinja Minimal Requirements
+# ================================
+#
+# Minimal dependencies for basic trap forwarding.
+# Use this for air-gapped or resource-constrained systems.
+#
+# Install with: pip3 install --break-system-packages -r requirements-minimal.txt
+
+# Packet capture and forwarding (required)
+scapy>=2.4.5

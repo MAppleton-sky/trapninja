@@ -1,0 +1,9 @@
+{
+  "_comment": "Shadow mode configuration for testing alongside existing receivers",
+  "enabled": false,
+  "observe_only": true,
+  "log_all_traps": false,
+  "log_file": "/var/log/trapninja/shadow_traps.log",
+  "collect_detailed_stats": true,
+  "stats_export_interval": 60
+}

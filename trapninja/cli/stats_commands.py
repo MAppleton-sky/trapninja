@@ -39,7 +39,8 @@ def _get_stats_from_file() -> Optional[Dict]:
 
 def _query_daemon_stats(query: Dict) -> Optional[Dict]:
     """Query the running daemon for statistics via Unix socket."""
-    socket_path = "/var/run/trapninja/control.sock"
+    # Match the socket path used by control.py
+    socket_path = "/tmp/trapninja_control.sock"
     
     if not os.path.exists(socket_path):
         return None
@@ -60,11 +61,23 @@ def _query_daemon_stats(query: Dict) -> Optional[Dict]:
             if not chunk:
                 break
             response += chunk
-            if b'\n' in chunk:
+            # Response is complete when we get valid JSON
+            try:
+                json.loads(response.decode())
                 break
+            except json.JSONDecodeError:
+                continue
         
         sock.close()
-        return json.loads(response.decode().strip())
+        
+        result = json.loads(response.decode().strip())
+        
+        # Check if request was successful
+        if result.get('status') == 0:  # SUCCESS
+            # Return data if present, otherwise return the message or full result
+            return result.get('data') or result.get('message') or result
+        else:
+            return None
         
     except Exception:
         return None
@@ -115,11 +128,11 @@ def handle_stats_summary(args: Namespace) -> int:
     use_json = getattr(args, 'json', False)
     pretty = getattr(args, 'pretty', False)
     
-    # Try daemon first
+    # Try daemon first - returns summary dict directly on success
     data = _query_daemon_stats({'action': 'summary'})
     
-    # Fall back to file
-    if not data:
+    # Fall back to file if daemon query failed
+    if data is None:
         data = _get_stats_from_file()
     
     if not data:
@@ -183,27 +196,25 @@ def handle_stats_top_ips(args: Namespace) -> int:
     use_json = getattr(args, 'json', False)
     pretty = getattr(args, 'pretty', False)
     
-    # Try daemon first
-    data = _query_daemon_stats({
+    # Try daemon first - returns list directly on success
+    ips = _query_daemon_stats({
         'action': 'top_ips',
         'count': count,
         'sort_by': sort_by
     })
     
-    # Fall back to file
-    if not data:
+    # Fall back to file if daemon query failed
+    if ips is None:
         file_data = _get_stats_from_file()
         if file_data:
             # File data needs to be sorted since it's pre-sorted by 'total'
             ip_list = file_data.get('top_ips', [])
-            sorted_list = _sort_stats_list(ip_list, sort_by)
-            data = {'data': sorted_list}
+            ips = _sort_stats_list(ip_list, sort_by)[:count]
     
-    if not data:
+    if not ips:
         print("Error: Could not retrieve IP statistics.")
+        print("Make sure TrapNinja is running with granular stats enabled.")
         return 1
-    
-    ips = data.get('data', data.get('top_ips', []))[:count]
     
     if use_json:
         _output_json(ips, pretty)
@@ -242,27 +253,25 @@ def handle_stats_top_oids(args: Namespace) -> int:
     use_json = getattr(args, 'json', False)
     pretty = getattr(args, 'pretty', False)
     
-    # Try daemon first
-    data = _query_daemon_stats({
+    # Try daemon first - returns list directly on success
+    oids = _query_daemon_stats({
         'action': 'top_oids',
         'count': count,
         'sort_by': sort_by
     })
     
-    # Fall back to file
-    if not data:
+    # Fall back to file if daemon query failed
+    if oids is None:
         file_data = _get_stats_from_file()
         if file_data:
             # File data needs to be sorted since it's pre-sorted by 'total'
             oid_list = file_data.get('top_oids', [])
-            sorted_list = _sort_stats_list(oid_list, sort_by)
-            data = {'data': sorted_list}
+            oids = _sort_stats_list(oid_list, sort_by)[:count]
     
-    if not data:
+    if not oids:
         print("Error: Could not retrieve OID statistics.")
+        print("Make sure TrapNinja is running with granular stats enabled.")
         return 1
-    
-    oids = data.get('data', data.get('top_oids', []))[:count]
     
     if use_json:
         _output_json(oids, pretty)
@@ -302,18 +311,20 @@ def handle_stats_ip_detail(args: Namespace) -> int:
     use_json = getattr(args, 'json', False)
     pretty = getattr(args, 'pretty', False)
     
-    # Query daemon for real-time data
-    data = _query_daemon_stats({
+    if not ip_address:
+        print("Error: IP address required. Use --ip <address>")
+        return 1
+    
+    # Query daemon for real-time data - returns IP data dict directly on success
+    ip_data = _query_daemon_stats({
         'action': 'ip_detail',
         'ip_address': ip_address
     })
     
-    if not data or data.get('status') == 'error':
+    if ip_data is None:
         print(f"Error: IP address '{ip_address}' not found in statistics.")
         print("Note: Only IPs that have sent traps since last restart are tracked.")
         return 1
-    
-    ip_data = data.get('data', data)
     
     if use_json:
         _output_json(ip_data, pretty)
@@ -367,18 +378,20 @@ def handle_stats_oid_detail(args: Namespace) -> int:
     use_json = getattr(args, 'json', False)
     pretty = getattr(args, 'pretty', False)
     
-    # Query daemon for real-time data
-    data = _query_daemon_stats({
+    if not oid:
+        print("Error: OID required. Use --oid <oid>")
+        return 1
+    
+    # Query daemon for real-time data - returns OID data dict directly on success
+    oid_data = _query_daemon_stats({
         'action': 'oid_detail',
         'oid': oid
     })
     
-    if not data or data.get('status') == 'error':
+    if oid_data is None:
         print(f"Error: OID '{oid}' not found in statistics.")
         print("Note: Only OIDs that have been seen since last restart are tracked.")
         return 1
-    
-    oid_data = data.get('data', data)
     
     if use_json:
         _output_json(oid_data, pretty)
@@ -421,20 +434,19 @@ def handle_stats_destinations(args: Namespace) -> int:
     use_json = getattr(args, 'json', False)
     pretty = getattr(args, 'pretty', False)
     
-    # Try daemon first
-    data = _query_daemon_stats({'action': 'destinations'})
+    # Try daemon first - returns list directly on success
+    dests = _query_daemon_stats({'action': 'destinations'})
     
-    # Fall back to file
-    if not data:
+    # Fall back to file if daemon query failed
+    if dests is None:
         file_data = _get_stats_from_file()
         if file_data:
-            data = {'data': file_data.get('top_destinations', [])}
+            dests = file_data.get('top_destinations', [])
     
-    if not data:
+    if not dests:
         print("Error: Could not retrieve destination statistics.")
+        print("Make sure TrapNinja is running with granular stats enabled.")
         return 1
-    
-    dests = data.get('data', data.get('top_destinations', []))
     
     if use_json:
         _output_json(dests, pretty)
@@ -475,12 +487,13 @@ def handle_stats_dashboard(args: Namespace) -> int:
     # Try to get comprehensive dashboard data from daemon
     data = _query_daemon_stats({'action': 'dashboard'})
     
-    # Fall back to file
-    if not data:
+    # Fall back to file if daemon query failed
+    if data is None:
         data = _get_stats_from_file()
     
     if not data:
         print("Error: Could not retrieve dashboard data.")
+        print("Make sure TrapNinja is running with granular stats enabled.")
         return 1
     
     _output_json(data, pretty=True)  # Dashboard always pretty-printed
@@ -540,10 +553,10 @@ def handle_stats_reset(args: Namespace) -> int:
             print("Aborted.")
             return 1
     
-    # Send reset command to daemon
-    data = _query_daemon_stats({'action': 'reset'})
+    # Send reset command to daemon - returns message on success
+    result = _query_daemon_stats({'action': 'reset'})
     
-    if data and data.get('status') == 'ok':
+    if result is not None:
         print("Granular statistics have been reset.")
         return 0
     else:
