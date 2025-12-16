@@ -91,8 +91,8 @@ sudo dnf install -y \
 #### Standard Installation (Internet Access)
 
 ```bash
-# Install all dependencies
-pip3.9 install --break-system-packages -r requirements.txt
+# Install all dependencies (requirements file is in dev/ directory)
+pip3.9 install --break-system-packages -r dev/requirements.txt
 
 # Or install individually:
 
@@ -171,8 +171,8 @@ sudo chmod 755 /var/log/trapninja
 ### 6. Initial Configuration
 
 ```bash
-# Copy configuration files
-cp -r config/* /etc/trapninja/
+# Copy configuration files from source
+cp -r src/config/* /etc/trapninja/
 
 # Create minimal destinations.json
 cat > /etc/trapninja/destinations.json << 'EOF'
@@ -181,7 +181,8 @@ cat > /etc/trapninja/destinations.json << 'EOF'
 ]
 EOF
 
-# Verify configuration
+# Verify configuration (run from src directory)
+cd src
 python3.9 -O trapninja.py --check-config
 ```
 

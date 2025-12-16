@@ -1,0 +1,252 @@
+---
+# TrapNinja Deployment Playbook
+# 
+# Usage:
+#   ansible-playbook -i inventory/hosts deploy.yml
+#   ansible-playbook -i inventory/hosts deploy.yml --tags install
+#   ansible-playbook -i inventory/hosts deploy.yml --tags config
+#   ansible-playbook -i inventory/hosts deploy.yml --tags service
+#
+# Variables:
+#   trapninja_src: Local path to trapninja repo
+#   trapninja_dest: Remote installation path (default: /opt/trapninja)
+#   trapninja_config_dest: Remote config path (default: /etc/trapninja)
+#   trapninja_user: User to run service (default: root)
+#   trapninja_group: Group for service (default: root)
+#
+# Directory Structure:
+#   Repository Layout:
+#     trapninja/
+#     ├── src/           <- Deployable code (synced to trapninja_dest)
+#     │   ├── trapninja.py
+#     │   ├── trapninja/
+#     │   ├── config/
+#     │   └── VERSION
+#     ├── dev/           <- Development files (NOT deployed)
+#     │   ├── requirements.txt
+#     │   ├── CHANGELOG.md
+#     │   └── ...
+#     ├── docs/          <- Documentation (NOT deployed)
+#     ├── ansible/       <- This directory
+#     └── README.md
+#
+#   Deployment Result:
+#     /opt/trapninja/
+#     ├── trapninja.py
+#     ├── trapninja/
+#     ├── config/
+#     └── VERSION
+
+- name: Deploy TrapNinja SNMP Trap Forwarder
+  hosts: trapninja_servers
+  become: yes
+  
+  vars:
+    trapninja_src: "{{ playbook_dir }}/.."
+    trapninja_dest: /opt/trapninja
+    trapninja_config_dest: /etc/trapninja
+    trapninja_user: root
+    trapninja_group: root
+    trapninja_python: python3.9
+
+  tasks:
+    # =========================================================================
+    # Prerequisites
+    # =========================================================================
+    - name: Install Python 3.9 and dependencies
+      tags: [install, prereq]
+      dnf:
+        name:
+          - python39
+          - python39-pip
+          - libpcap
+          - libpcap-devel
+        state: present
+
+    - name: Install optional Redis for caching
+      tags: [install, prereq, redis]
+      dnf:
+        name: redis
+        state: present
+      when: trapninja_enable_cache | default(true)
+
+    - name: Start and enable Redis
+      tags: [install, prereq, redis]
+      systemd:
+        name: redis
+        state: started
+        enabled: yes
+      when: trapninja_enable_cache | default(true)
+
+    # =========================================================================
+    # Deploy Application
+    # =========================================================================
+    - name: Create installation directory
+      tags: [install, deploy]
+      file:
+        path: "{{ trapninja_dest }}"
+        state: directory
+        owner: "{{ trapninja_user }}"
+        group: "{{ trapninja_group }}"
+        mode: '0755'
+
+    - name: Create config directory
+      tags: [install, deploy, config]
+      file:
+        path: "{{ trapninja_config_dest }}"
+        state: directory
+        owner: "{{ trapninja_user }}"
+        group: "{{ trapninja_group }}"
+        mode: '0750'
+
+    # Deploy ONLY the src/ directory - clean and simple
+    - name: Sync TrapNinja application files
+      tags: [install, deploy]
+      synchronize:
+        src: "{{ trapninja_src }}/src/"
+        dest: "{{ trapninja_dest }}/"
+        delete: yes
+        rsync_opts:
+          - "--exclude=__pycache__/"
+          - "--exclude=*.pyc"
+          - "--exclude=*.pyo"
+          - "--exclude=.DS_Store"
+      notify: Restart TrapNinja
+
+    - name: Set main script executable
+      tags: [install, deploy]
+      file:
+        path: "{{ trapninja_dest }}/trapninja.py"
+        mode: '0755'
+
+    # =========================================================================
+    # Python Dependencies
+    # =========================================================================
+    # Note: Requirements files are in dev/ directory - copy locally first
+    - name: Copy requirements file to target temporarily
+      tags: [install, pip]
+      copy:
+        src: "{{ trapninja_src }}/dev/requirements{{ '-minimal' if trapninja_minimal_install | default(false) else '' }}.txt"
+        dest: "/tmp/trapninja-requirements.txt"
+        mode: '0644'
+
+    - name: Install Python requirements
+      tags: [install, pip]
+      pip:
+        requirements: /tmp/trapninja-requirements.txt
+        executable: pip3.9
+        extra_args: "--break-system-packages"
+
+    - name: Clean up temporary requirements file
+      tags: [install, pip]
+      file:
+        path: /tmp/trapninja-requirements.txt
+        state: absent
+
+    # =========================================================================
+    # Configuration
+    # =========================================================================
+    - name: Deploy destination configuration
+      tags: [config]
+      template:
+        src: destinations.json.j2
+        dest: "{{ trapninja_config_dest }}/destinations.json"
+        owner: "{{ trapninja_user }}"
+        group: "{{ trapninja_group }}"
+        mode: '0640'
+      when: trapninja_destinations is defined
+      notify: Restart TrapNinja
+
+    - name: Deploy HA configuration
+      tags: [config, ha]
+      template:
+        src: ha_config.json.j2
+        dest: "{{ trapninja_config_dest }}/ha_config.json"
+        owner: "{{ trapninja_user }}"
+        group: "{{ trapninja_group }}"
+        mode: '0640'
+      when: trapninja_ha_config is defined
+      notify: Restart TrapNinja
+
+    - name: Deploy cache configuration
+      tags: [config, cache]
+      template:
+        src: cache_config.json.j2
+        dest: "{{ trapninja_config_dest }}/cache_config.json"
+        owner: "{{ trapninja_user }}"
+        group: "{{ trapninja_group }}"
+        mode: '0640'
+      when: trapninja_cache_config is defined
+      notify: Restart TrapNinja
+
+    - name: Copy default configs if not customized
+      tags: [config]
+      copy:
+        src: "{{ trapninja_dest }}/config/{{ item }}"
+        dest: "{{ trapninja_config_dest }}/{{ item }}"
+        owner: "{{ trapninja_user }}"
+        group: "{{ trapninja_group }}"
+        mode: '0640'
+        remote_src: yes
+        force: no
+      loop:
+        - blocked_ips.json
+        - blocked_traps.json
+        - listen_ports.json
+        - stats_config.json
+
+    # =========================================================================
+    # Systemd Service
+    # =========================================================================
+    - name: Deploy systemd service file
+      tags: [service]
+      template:
+        src: trapninja.service.j2
+        dest: /etc/systemd/system/trapninja.service
+        mode: '0644'
+      notify:
+        - Reload systemd
+        - Restart TrapNinja
+
+    - name: Enable and start TrapNinja service
+      tags: [service]
+      systemd:
+        name: trapninja
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    # =========================================================================
+    # Firewall
+    # =========================================================================
+    - name: Open SNMP trap port (162/udp)
+      tags: [firewall]
+      firewalld:
+        port: 162/udp
+        permanent: yes
+        state: enabled
+        immediate: yes
+      when: ansible_facts['os_family'] == 'RedHat'
+      ignore_errors: yes
+
+    - name: Open Prometheus metrics port (9162/tcp)
+      tags: [firewall]
+      firewalld:
+        port: 9162/tcp
+        permanent: yes
+        state: enabled
+        immediate: yes
+      when: 
+        - ansible_facts['os_family'] == 'RedHat'
+        - trapninja_enable_metrics | default(true)
+      ignore_errors: yes
+
+  handlers:
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Restart TrapNinja
+      systemd:
+        name: trapninja
+        state: restarted
