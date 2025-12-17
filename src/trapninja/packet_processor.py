@@ -875,6 +875,9 @@ class BatchProcessor:
         """
         Process SNMPv3 packet - decrypt and convert to v2c.
         
+        Only attempts decryption if we have credentials for the engine ID.
+        Otherwise forwards the original packet without wasting time.
+        
         Args:
             packet_data: Packet data dict with src_ip and payload
             config: Configuration dict
@@ -886,67 +889,83 @@ class BatchProcessor:
         source_ip = packet_data['src_ip']
         payload = packet_data['payload']
         
-        logger.debug(f"Processing SNMPv3 trap from {source_ip} ({len(payload)} bytes)")
-        
-        # Try to extract engine ID and username for logging
+        # Extract engine ID first to check if we have credentials
         try:
             from .snmpv3_decryption import (
                 extract_engine_id_from_bytes, 
                 extract_username_from_bytes,
                 get_snmpv3_decryptor
             )
+            from .snmpv3_credentials import get_credential_store
             
             engine_id = extract_engine_id_from_bytes(payload)
+            
+            if not engine_id:
+                # Can't extract engine ID - just forward original
+                logger.debug(f"SNMPv3 from {source_ip}: could not extract engine ID, forwarding as-is")
+                return self._forward_original_snmpv3(source_ip, payload, config, ha_forwarding_enabled)
+            
+            # Quick check: do we have ANY credentials for this engine?
+            credential_store = get_credential_store()
+            users = credential_store.get_users_for_engine(engine_id)
+            
+            if not users:
+                # No credentials for this engine - skip decryption entirely
+                logger.debug(
+                    f"SNMPv3 from {source_ip}: no credentials for engine {engine_id}, forwarding as-is"
+                )
+                return self._forward_original_snmpv3(source_ip, payload, config, ha_forwarding_enabled)
+            
+            # We have credentials - now try decryption
             username = extract_username_from_bytes(payload)
-            logger.debug(f"SNMPv3: engine_id={engine_id}, username={username}")
+            logger.debug(f"SNMPv3 from {source_ip}: engine={engine_id}, user={username}, attempting decryption")
             
             decryptor = get_snmpv3_decryptor()
             
-            if decryptor:
-                logger.debug(f"Attempting SNMPv3 decryption for engine {engine_id}")
-                result = decryptor.decrypt_snmpv3_trap(payload)
+            if not decryptor:
+                logger.debug("SNMPv3 decryptor not initialized")
+                return self._forward_original_snmpv3(source_ip, payload, config, ha_forwarding_enabled)
+            
+            result = decryptor.decrypt_snmpv3_trap(payload, engine_id)
+            
+            if result:
+                result_engine_id, trap_data = result
+                logger.info(
+                    f"SNMPv3 decrypted from {source_ip}: engine={result_engine_id}, "
+                    f"varbinds={len(trap_data.get('varbinds', []))}"
+                )
                 
-                if result:
-                    result_engine_id, trap_data = result
-                    logger.info(
-                        f"SNMPv3 decrypted from {source_ip}: engine={result_engine_id}, "
-                        f"user={trap_data.get('username', 'N/A')}, "
-                        f"varbinds={len(trap_data.get('varbinds', []))}"
+                v2c_payload = decryptor.convert_to_snmpv2c(trap_data, "public")
+                
+                if v2c_payload and len(v2c_payload) > 20:
+                    logger.debug(
+                        f"SNMPv3->v2c conversion: {len(payload)} -> {len(v2c_payload)} bytes"
                     )
                     
-                    v2c_payload = decryptor.convert_to_snmpv2c(trap_data, "public")
+                    # Cache the converted trap
+                    cache_trap('default', source_ip, v2c_payload, None)
                     
-                    if v2c_payload and len(v2c_payload) > 20:
-                        logger.debug(
-                            f"SNMPv3->v2c conversion: {len(payload)} -> {len(v2c_payload)} bytes"
-                        )
-                        
-                        # Cache the converted trap
-                        cache_trap('default', source_ip, v2c_payload, None)
-                        
-                        # Forward if HA allows
-                        if ha_forwarding_enabled:
-                            if config['destinations']:
-                                forward_fast(source_ip, v2c_payload, config['destinations'])
-                                _stats.increment_forwarded()
-                                _record_granular_stats(source_ip, oid=None,
-                                                       action='forwarded', destination='default')
-                                notify_trap_processed()
-                        else:
-                            _stats.increment_ha_blocked()
-                        return True
+                    # Forward if HA allows
+                    if ha_forwarding_enabled:
+                        if config['destinations']:
+                            forward_fast(source_ip, v2c_payload, config['destinations'])
+                            _stats.increment_forwarded()
+                            _record_granular_stats(source_ip, oid=None,
+                                                   action='forwarded', destination='default')
+                            notify_trap_processed()
                     else:
-                        logger.warning(
-                            f"SNMPv3->v2c conversion produced invalid payload: "
-                            f"{len(v2c_payload) if v2c_payload else 0} bytes"
-                        )
+                        _stats.increment_ha_blocked()
+                    return True
                 else:
                     logger.warning(
-                        f"SNMPv3 decryption failed for {source_ip}: "
-                        f"engine={engine_id}, user={username}"
+                        f"SNMPv3->v2c conversion produced invalid payload: "
+                        f"{len(v2c_payload) if v2c_payload else 0} bytes"
                     )
             else:
-                logger.debug("SNMPv3 decryptor not initialized")
+                logger.warning(
+                    f"SNMPv3 decryption failed for {source_ip}: "
+                    f"engine={engine_id}, user={username} (credentials exist but decryption failed)"
+                )
                 
         except ImportError as e:
             logger.debug(f"SNMPv3 module not available: {e}")
@@ -956,8 +975,14 @@ class BatchProcessor:
             logger.debug(traceback.format_exc())
         
         # Forward original encrypted packet if decryption failed
-        # (downstream may be able to handle it)
-        logger.debug(f"Forwarding original SNMPv3 packet from {source_ip}")
+        return self._forward_original_snmpv3(source_ip, payload, config, ha_forwarding_enabled)
+    
+    def _forward_original_snmpv3(self, source_ip: str, payload: bytes, 
+                                  config: Dict, ha_forwarding_enabled: bool) -> bool:
+        """
+        Forward original SNMPv3 packet without decryption.
+        Used when we don't have credentials or decryption fails.
+        """
         cache_trap('default', source_ip, payload, None)
         
         if ha_forwarding_enabled:
