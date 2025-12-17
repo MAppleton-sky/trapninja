@@ -25,8 +25,12 @@ redis>=4.0.0
 pysnmp>=4.4.12
 pyasn1>=0.4.8
 
-# Cryptography for SNMPv3 and credential encryption
-# Used by: SNMPv3 decryption, Fernet credential storage
+# Cryptographic primitives for SNMPv3 decryption (AES, DES)
+# Required for: Decrypting SNMPv3 encrypted payloads
+pycryptodome>=3.15.0
+
+# Cryptography for credential encryption
+# Used by: Fernet credential storage
 cryptography>=3.4.0
 
 # =============================================================================

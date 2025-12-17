@@ -416,25 +416,52 @@ class PacketWorker:
         try:
             from ..snmpv3_decryption import get_snmpv3_decryptor
             decryptor = get_snmpv3_decryptor()
+            
             if decryptor:
                 result = decryptor.decrypt_snmpv3_trap(payload)
+                
                 if result:
-                    _, trap_data = result
+                    engine_id, trap_data = result
+                    logger.debug(
+                        f"SNMPv3 decrypted: engine={engine_id}, "
+                        f"varbinds={len(trap_data.get('varbinds', []))}"
+                    )
+                    
                     v2c_payload = decryptor.convert_to_snmpv2c(trap_data, "public")
-                    if v2c_payload:
+                    
+                    if v2c_payload and len(v2c_payload) > 20:
+                        logger.debug(
+                            f"SNMPv3->v2c conversion: {len(payload)} -> {len(v2c_payload)} bytes"
+                        )
                         if config['destinations']:
                             forward_packet(source_ip, v2c_payload, config['destinations'])
                             self.stats.increment_forwarded()
-                            notify_trap_processed()  # Notify HA system of activity
+                            notify_trap_processed()
                         return
-        except Exception:
-            pass
+                    else:
+                        logger.warning(
+                            f"SNMPv3->v2c conversion produced invalid payload: "
+                            f"{len(v2c_payload) if v2c_payload else 0} bytes"
+                        )
+                else:
+                    logger.debug(f"SNMPv3 decryption returned no result for {source_ip}")
+            else:
+                logger.debug("SNMPv3 decryptor not available")
+                
+        except ImportError as e:
+            logger.debug(f"SNMPv3 module not available: {e}")
+        except Exception as e:
+            logger.warning(f"SNMPv3 processing error: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
         
-        # Forward without decryption
+        # Forward original packet if decryption failed or not available
+        # Note: This forwards encrypted payload which may not be useful
+        logger.debug(f"Forwarding original SNMPv3 packet from {source_ip} (no decryption)")
         if config['destinations']:
             forward_packet(source_ip, payload, config['destinations'])
             self.stats.increment_forwarded()
-            notify_trap_processed()  # Notify HA system of activity
+            notify_trap_processed()
 
 
 # =============================================================================

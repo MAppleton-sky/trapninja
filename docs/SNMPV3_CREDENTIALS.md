@@ -20,14 +20,23 @@ The SNMPv3 security model uses three key elements:
 
 ## Prerequisites
 
-SNMPv3 functionality requires the `cryptography` package for secure credential storage, and optionally `pysnmp` for full decryption support.
+SNMPv3 functionality requires several Python packages:
 
 ```bash
-# Required for credential storage
+# Required for credential storage (encrypted at rest)
 pip3 install --break-system-packages cryptography
 
 # Required for trap decryption
 pip3 install --break-system-packages pysnmp pyasn1
+
+# Required for AES/DES decryption of encrypted payloads
+pip3 install --break-system-packages pycryptodome
+```
+
+Or install all at once:
+
+```bash
+pip3 install --break-system-packages cryptography pysnmp pyasn1 pycryptodome
 ```
 
 Verify dependencies are installed:
