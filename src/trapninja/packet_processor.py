@@ -474,15 +474,129 @@ def _forward_scapy(source_ip: str, payload: bytes,
 _SNMPV2C_SIGNATURE = b'\x30'  # SEQUENCE tag
 _SNMPTRAPOID_MARKER = b'\x2b\x06\x01\x06\x03\x01\x01\x04\x01\x00'
 
+# ASN.1 tags
+_ASN1_SEQUENCE = 0x30
+_ASN1_INTEGER = 0x02
+_ASN1_OCTET_STRING = 0x04
+
+
+def _skip_ber_length(payload: bytes, idx: int) -> int:
+    """
+    Skip BER length encoding and return new index.
+    Handles both short form (1 byte) and long form (multi-byte).
+    """
+    if idx >= len(payload):
+        return idx
+    
+    if payload[idx] & 0x80:
+        # Long form: high bit set, low 7 bits = number of length bytes
+        num_len_bytes = payload[idx] & 0x7F
+        return idx + 1 + num_len_bytes
+    else:
+        # Short form: length is the byte itself
+        return idx + 1
+
 
 def is_snmpv2c_fast(payload: bytes) -> bool:
-    """Ultra-fast SNMPv2c detection"""
-    return (len(payload) >= 8 and 
-            payload[0] == 0x30 and
-            payload[2] == 0x02 and
-            payload[3] == 0x01 and
-            payload[4] == 0x01 and
-            payload[5] == 0x04)
+    """
+    Fast SNMPv2c detection.
+    
+    Handles both short and long form BER length encoding.
+    
+    Structure checked:
+    - SEQUENCE (0x30)
+    - INTEGER version = 1 (SNMPv2c)
+    - OCTET STRING (community)
+    """
+    if len(payload) < 8:
+        return False
+    
+    # Must start with SEQUENCE
+    if payload[0] != _ASN1_SEQUENCE:
+        return False
+    
+    # Skip SEQUENCE length
+    idx = _skip_ber_length(payload, 1)
+    
+    if idx + 4 > len(payload):
+        return False
+    
+    # Check INTEGER tag (version)
+    if payload[idx] != _ASN1_INTEGER:
+        return False
+    idx += 1
+    
+    # Version length should be 1
+    if payload[idx] != 0x01:
+        return False
+    idx += 1
+    
+    # Version value should be 1 (SNMPv2c)
+    if payload[idx] != 0x01:
+        return False
+    idx += 1
+    
+    # Next should be OCTET STRING (community)
+    if idx >= len(payload) or payload[idx] != _ASN1_OCTET_STRING:
+        return False
+    
+    return True
+
+
+def is_snmpv3_fast(payload: bytes) -> bool:
+    """
+    Fast SNMPv3 detection.
+    
+    Handles both short and long form BER length encoding.
+    
+    Structure checked:
+    - SEQUENCE (0x30)
+    - INTEGER version = 3
+    - SEQUENCE (msgGlobalData) - NOT OCTET STRING like v1/v2c
+    """
+    if len(payload) < 10:
+        return False
+    
+    # Must start with SEQUENCE
+    if payload[0] != _ASN1_SEQUENCE:
+        return False
+    
+    # Skip SEQUENCE length
+    idx = _skip_ber_length(payload, 1)
+    
+    if idx + 4 > len(payload):
+        return False
+    
+    # Check INTEGER tag (version)
+    if payload[idx] != _ASN1_INTEGER:
+        return False
+    idx += 1
+    
+    # Get version length
+    if idx >= len(payload):
+        return False
+    version_len = payload[idx]
+    idx += 1
+    
+    if idx + version_len > len(payload):
+        return False
+    
+    # Get version value
+    version = 0
+    for i in range(version_len):
+        version = (version << 8) | payload[idx + i]
+    idx += version_len
+    
+    # Version must be 3
+    if version != 3:
+        return False
+    
+    # After version, SNMPv3 has SEQUENCE (msgGlobalData)
+    # v1/v2c would have OCTET STRING (community)
+    if idx >= len(payload):
+        return False
+    
+    return payload[idx] == _ASN1_SEQUENCE
 
 
 def extract_oid_fast(payload: bytes) -> Optional[str]:
@@ -668,6 +782,11 @@ class BatchProcessor:
                 _record_granular_stats(source_ip, oid=None, action='blocked')
                 return True
             
+            # Check for SNMPv3 FIRST - route to special handler
+            if is_snmpv3_fast(payload):
+                _stats.record_slow_path()  # SNMPv3 is always slow path
+                return self._process_snmpv3(packet_data, config, ha_forwarding_enabled)
+            
             # Try fast path for SNMPv2c
             trap_oid = None
             used_fast_path = False
@@ -750,6 +869,106 @@ class BatchProcessor:
             _stats.increment_error()
             logger.debug(f"Worker {self.worker_id} error: {e}")
             return False
+    
+    def _process_snmpv3(self, packet_data: Dict[str, Any], config: Dict, 
+                        ha_forwarding_enabled: bool) -> bool:
+        """
+        Process SNMPv3 packet - decrypt and convert to v2c.
+        
+        Args:
+            packet_data: Packet data dict with src_ip and payload
+            config: Configuration dict
+            ha_forwarding_enabled: Whether HA allows forwarding
+            
+        Returns:
+            True if processed successfully
+        """
+        source_ip = packet_data['src_ip']
+        payload = packet_data['payload']
+        
+        logger.debug(f"Processing SNMPv3 trap from {source_ip} ({len(payload)} bytes)")
+        
+        # Try to extract engine ID and username for logging
+        try:
+            from .snmpv3_decryption import (
+                extract_engine_id_from_bytes, 
+                extract_username_from_bytes,
+                get_snmpv3_decryptor
+            )
+            
+            engine_id = extract_engine_id_from_bytes(payload)
+            username = extract_username_from_bytes(payload)
+            logger.debug(f"SNMPv3: engine_id={engine_id}, username={username}")
+            
+            decryptor = get_snmpv3_decryptor()
+            
+            if decryptor:
+                logger.debug(f"Attempting SNMPv3 decryption for engine {engine_id}")
+                result = decryptor.decrypt_snmpv3_trap(payload)
+                
+                if result:
+                    result_engine_id, trap_data = result
+                    logger.info(
+                        f"SNMPv3 decrypted from {source_ip}: engine={result_engine_id}, "
+                        f"user={trap_data.get('username', 'N/A')}, "
+                        f"varbinds={len(trap_data.get('varbinds', []))}"
+                    )
+                    
+                    v2c_payload = decryptor.convert_to_snmpv2c(trap_data, "public")
+                    
+                    if v2c_payload and len(v2c_payload) > 20:
+                        logger.debug(
+                            f"SNMPv3->v2c conversion: {len(payload)} -> {len(v2c_payload)} bytes"
+                        )
+                        
+                        # Cache the converted trap
+                        cache_trap('default', source_ip, v2c_payload, None)
+                        
+                        # Forward if HA allows
+                        if ha_forwarding_enabled:
+                            if config['destinations']:
+                                forward_fast(source_ip, v2c_payload, config['destinations'])
+                                _stats.increment_forwarded()
+                                _record_granular_stats(source_ip, oid=None,
+                                                       action='forwarded', destination='default')
+                                notify_trap_processed()
+                        else:
+                            _stats.increment_ha_blocked()
+                        return True
+                    else:
+                        logger.warning(
+                            f"SNMPv3->v2c conversion produced invalid payload: "
+                            f"{len(v2c_payload) if v2c_payload else 0} bytes"
+                        )
+                else:
+                    logger.warning(
+                        f"SNMPv3 decryption failed for {source_ip}: "
+                        f"engine={engine_id}, user={username}"
+                    )
+            else:
+                logger.debug("SNMPv3 decryptor not initialized")
+                
+        except ImportError as e:
+            logger.debug(f"SNMPv3 module not available: {e}")
+        except Exception as e:
+            logger.warning(f"SNMPv3 processing error: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+        
+        # Forward original encrypted packet if decryption failed
+        # (downstream may be able to handle it)
+        logger.debug(f"Forwarding original SNMPv3 packet from {source_ip}")
+        cache_trap('default', source_ip, payload, None)
+        
+        if ha_forwarding_enabled:
+            if config['destinations']:
+                forward_fast(source_ip, payload, config['destinations'])
+                _stats.increment_forwarded()
+                notify_trap_processed()
+        else:
+            _stats.increment_ha_blocked()
+        
+        return True
     
     def process_batch(self, batch: List[Dict[str, Any]]):
         """Process a batch of packets efficiently"""
