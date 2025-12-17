@@ -5,66 +5,57 @@ TrapNinja SNMPv3 Decryption Module
 Handles decryption of SNMPv3 traps and conversion to SNMPv2c format.
 Integrates with the credential management system for authentication.
 
-This module uses pysnmp's USM (User-based Security Model) to properly
-decrypt SNMPv3 messages before converting them to SNMPv2c format.
+Supports both pysnmp 4.x and 7.x API versions.
 """
 import logging
 import struct
+import hashlib
 from typing import Optional, Tuple, Dict, List, Any
-
-try:
-    from pysnmp.hlapi import (
-        SnmpEngine, CommunityData, UdpTransportTarget,
-        ContextData, ObjectType, ObjectIdentity,
-        UsmUserData, usmHMACMD5AuthProtocol, usmHMACSHAAuthProtocol,
-        usmHMAC128SHA224AuthProtocol, usmHMAC192SHA256AuthProtocol,
-        usmHMAC256SHA384AuthProtocol, usmHMAC384SHA512AuthProtocol,
-        usmDESPrivProtocol, usm3DESEDEPrivProtocol,
-        usmAesCfb128Protocol, usmAesCfb192Protocol, usmAesCfb256Protocol,
-        usmNoAuthProtocol, usmNoPrivProtocol
-    )
-    from pysnmp.proto import api as snmp_api
-    from pysnmp.proto.rfc1902 import (
-        Integer32, OctetString, ObjectIdentifier as OID,
-        IpAddress, Counter32, Gauge32, TimeTicks, Counter64, Opaque
-    )
-    from pysnmp.proto.rfc1905 import VarBind, VarBindList
-    from pyasn1.codec.ber import decoder, encoder
-    from pyasn1.type import univ, tag
-    PYSNMP_AVAILABLE = True
-except ImportError as e:
-    PYSNMP_AVAILABLE = False
-    import_error = str(e)
 
 # Get logger instance
 logger = logging.getLogger("trapninja")
 
-# Check if pysnmp is available
-if not PYSNMP_AVAILABLE:
-    logger.warning(f"pysnmp not available: {import_error}")
+# Try to detect pysnmp version and import accordingly
+PYSNMP_AVAILABLE = False
+PYSNMP_VERSION = None
+
+try:
+    import pysnmp
+    PYSNMP_VERSION = getattr(pysnmp, '__version__', '0.0.0')
+    major_version = int(PYSNMP_VERSION.split('.')[0])
+    
+    if major_version >= 7:
+        # pysnmp 7.x imports
+        from pysnmp.smi.rfc1902 import ObjectIdentity, ObjectType
+        from pyasn1.codec.ber import decoder, encoder
+        from pyasn1.type import univ
+        PYSNMP_AVAILABLE = True
+        logger.info(f"Using pysnmp {PYSNMP_VERSION} (v7.x API)")
+    else:
+        # pysnmp 4.x imports
+        from pysnmp.proto import api as snmp_api
+        from pysnmp.proto.rfc1902 import (
+            Integer32, OctetString, ObjectIdentifier as OID,
+            IpAddress, Counter32, Gauge32, TimeTicks, Counter64
+        )
+        from pyasn1.codec.ber import decoder, encoder
+        from pyasn1.type import univ
+        PYSNMP_AVAILABLE = True
+        logger.info(f"Using pysnmp {PYSNMP_VERSION} (v4.x API)")
+        
+except ImportError as e:
+    logger.warning(f"pysnmp not available: {e}")
     logger.warning("SNMPv3 decryption will not be available")
     logger.warning("Install with: pip3 install --break-system-packages pysnmp pyasn1")
 
-
-# Protocol mappings
-AUTH_PROTOCOLS = {
-    'NONE': usmNoAuthProtocol if PYSNMP_AVAILABLE else None,
-    'MD5': usmHMACMD5AuthProtocol if PYSNMP_AVAILABLE else None,
-    'SHA': usmHMACSHAAuthProtocol if PYSNMP_AVAILABLE else None,
-    'SHA224': usmHMAC128SHA224AuthProtocol if PYSNMP_AVAILABLE else None,
-    'SHA256': usmHMAC192SHA256AuthProtocol if PYSNMP_AVAILABLE else None,
-    'SHA384': usmHMAC256SHA384AuthProtocol if PYSNMP_AVAILABLE else None,
-    'SHA512': usmHMAC384SHA512AuthProtocol if PYSNMP_AVAILABLE else None,
-}
-
-PRIV_PROTOCOLS = {
-    'NONE': usmNoPrivProtocol if PYSNMP_AVAILABLE else None,
-    'DES': usmDESPrivProtocol if PYSNMP_AVAILABLE else None,
-    '3DES': usm3DESEDEPrivProtocol if PYSNMP_AVAILABLE else None,
-    'AES128': usmAesCfb128Protocol if PYSNMP_AVAILABLE else None,
-    'AES192': usmAesCfb192Protocol if PYSNMP_AVAILABLE else None,
-    'AES256': usmAesCfb256Protocol if PYSNMP_AVAILABLE else None,
-}
+# Check for pycryptodome
+CRYPTO_AVAILABLE = False
+try:
+    from Crypto.Cipher import AES, DES
+    CRYPTO_AVAILABLE = True
+except ImportError:
+    logger.warning("pycryptodome not available - encrypted SNMPv3 traps cannot be decrypted")
+    logger.warning("Install with: pip3 install --break-system-packages pycryptodome")
 
 
 def extract_engine_id_from_bytes(data: bytes) -> Optional[str]:
@@ -75,17 +66,8 @@ def extract_engine_id_from_bytes(data: bytes) -> Optional[str]:
     - SEQUENCE
       - INTEGER (version = 3)
       - SEQUENCE (msgGlobalData)
-        - INTEGER (msgID)
-        - INTEGER (msgMaxSize)
-        - OCTET STRING (msgFlags)
-        - INTEGER (msgSecurityModel)
       - OCTET STRING (msgSecurityParameters - contains USM data)
-      - SEQUENCE (msgData - encrypted or plaintext)
-    
-    The USM security parameters contain:
-    - SEQUENCE
-      - OCTET STRING (msgAuthoritativeEngineID)
-      - ...
+      - SEQUENCE or OCTET STRING (msgData)
     
     Args:
         data: Raw SNMPv3 message bytes
@@ -94,13 +76,13 @@ def extract_engine_id_from_bytes(data: bytes) -> Optional[str]:
         Engine ID as hex string, or None if extraction fails
     """
     try:
-        # Quick check for SNMPv3
         if len(data) < 10:
             return None
         
-        # Parse the outer SEQUENCE
         idx = 0
-        if data[idx] != 0x30:  # SEQUENCE tag
+        
+        # Parse outer SEQUENCE
+        if data[idx] != 0x30:
             return None
         idx += 1
         
@@ -111,8 +93,8 @@ def extract_engine_id_from_bytes(data: bytes) -> Optional[str]:
         else:
             idx += 1
         
-        # Check version (should be INTEGER 3)
-        if data[idx] != 0x02:  # INTEGER tag
+        # Check version INTEGER
+        if data[idx] != 0x02:
             return None
         idx += 1
         ver_len = data[idx]
@@ -135,8 +117,8 @@ def extract_engine_id_from_bytes(data: bytes) -> Optional[str]:
             idx += 1
         idx += global_len
         
-        # Now at msgSecurityParameters (OCTET STRING containing BER-encoded USM)
-        if data[idx] != 0x04:  # OCTET STRING tag
+        # Get msgSecurityParameters OCTET STRING
+        if data[idx] != 0x04:
             return None
         idx += 1
         if data[idx] & 0x80:
@@ -147,23 +129,25 @@ def extract_engine_id_from_bytes(data: bytes) -> Optional[str]:
             sec_len = data[idx]
             idx += 1
         
-        # Parse USM security parameters (nested SEQUENCE)
+        # Parse USM security parameters
         usm_data = data[idx:idx+sec_len]
         usm_idx = 0
         
-        if usm_data[usm_idx] != 0x30:  # SEQUENCE
+        if len(usm_data) < 2 or usm_data[usm_idx] != 0x30:
             return None
         usm_idx += 1
+        
         if usm_data[usm_idx] & 0x80:
             len_bytes = usm_data[usm_idx] & 0x7f
             usm_idx += 1 + len_bytes
         else:
             usm_idx += 1
         
-        # First element is msgAuthoritativeEngineID (OCTET STRING)
+        # First element is msgAuthoritativeEngineID
         if usm_data[usm_idx] != 0x04:
             return None
         usm_idx += 1
+        
         if usm_data[usm_idx] & 0x80:
             len_bytes = usm_data[usm_idx] & 0x7f
             engine_len = int.from_bytes(usm_data[usm_idx+1:usm_idx+1+len_bytes], 'big')
@@ -183,16 +167,11 @@ def extract_engine_id_from_bytes(data: bytes) -> Optional[str]:
 def extract_username_from_bytes(data: bytes) -> Optional[str]:
     """
     Extract the username from raw SNMPv3 message bytes.
-    
-    Args:
-        data: Raw SNMPv3 message bytes
-        
-    Returns:
-        Username string, or None if extraction fails
     """
     try:
-        # Similar parsing as engine ID, but go further into USM params
         idx = 0
+        
+        # Skip to msgSecurityParameters (similar to engine ID extraction)
         if data[idx] != 0x30:
             return None
         idx += 1
@@ -295,11 +274,65 @@ def extract_username_from_bytes(data: bytes) -> Optional[str]:
         return None
 
 
+def _parse_ber_length(data: bytes, idx: int) -> Tuple[int, int]:
+    """Parse BER length and return (length, new_idx)."""
+    if data[idx] & 0x80:
+        len_bytes = data[idx] & 0x7f
+        length = int.from_bytes(data[idx+1:idx+1+len_bytes], 'big')
+        return length, idx + 1 + len_bytes
+    else:
+        return data[idx], idx + 1
+
+
+def _localize_key(passphrase: str, engine_id: bytes, auth_protocol: str) -> bytes:
+    """
+    Localize a passphrase to an engine-specific key using SNMPv3 key localization.
+    
+    Args:
+        passphrase: User passphrase
+        engine_id: Engine ID bytes
+        auth_protocol: Authentication protocol name
+        
+    Returns:
+        Localized key bytes
+    """
+    # Select hash function based on auth protocol
+    if auth_protocol in ('MD5',):
+        hash_func = hashlib.md5
+    elif auth_protocol == 'SHA224':
+        hash_func = hashlib.sha224
+    elif auth_protocol == 'SHA256':
+        hash_func = hashlib.sha256
+    elif auth_protocol == 'SHA384':
+        hash_func = hashlib.sha384
+    elif auth_protocol == 'SHA512':
+        hash_func = hashlib.sha512
+    else:
+        hash_func = hashlib.sha1  # Default SHA1
+    
+    # Step 1: Generate Ku from passphrase (password to key)
+    password = passphrase.encode('utf-8')
+    
+    # Repeat password to create 1MB of data
+    h = hash_func()
+    password_buf = password * ((1048576 // len(password)) + 1)
+    
+    for i in range(0, 1048576, 64):
+        h.update(password_buf[i:i+64])
+    
+    ku = h.digest()
+    
+    # Step 2: Localize Ku with engine ID to get Kul
+    h = hash_func()
+    h.update(ku + engine_id + ku)
+    kul = h.digest()
+    
+    return kul
+
+
 class SNMPv3Decryptor:
     """
     Decrypts SNMPv3 messages and converts them to SNMPv2c format.
-    
-    Uses pysnmp's USM implementation for proper decryption.
     """
     
     def __init__(self, credential_store):
@@ -310,40 +343,7 @@ class SNMPv3Decryptor:
             credential_store: SNMPv3CredentialStore instance
         """
         self.credential_store = credential_store
-        self._engines: Dict[str, SnmpEngine] = {}
         logger.info("SNMPv3 Decryptor initialized")
-    
-    def _get_user_data(self, user) -> Optional['UsmUserData']:
-        """
-        Create UsmUserData from stored credentials.
-        
-        Args:
-            user: SNMPv3User object
-            
-        Returns:
-            UsmUserData instance or None
-        """
-        if not PYSNMP_AVAILABLE:
-            return None
-        
-        auth_proto = AUTH_PROTOCOLS.get(user.auth_protocol.upper())
-        priv_proto = PRIV_PROTOCOLS.get(user.priv_protocol.upper())
-        
-        if auth_proto is None or priv_proto is None:
-            logger.warning(f"Unknown protocol for user {user.username}")
-            return None
-        
-        try:
-            return UsmUserData(
-                userName=user.username,
-                authKey=user.auth_passphrase if user.auth_passphrase else None,
-                privKey=user.priv_passphrase if user.priv_passphrase else None,
-                authProtocol=auth_proto,
-                privProtocol=priv_proto
-            )
-        except Exception as e:
-            logger.error(f"Failed to create UsmUserData: {e}")
-            return None
     
     def decrypt_snmpv3_trap(
         self,
@@ -361,7 +361,7 @@ class SNMPv3Decryptor:
             Tuple of (engine_id, trap_data_dict) or None if decryption fails
         """
         if not PYSNMP_AVAILABLE:
-            logger.warning("pysnmp not available for SNMPv3 decryption")
+            logger.debug("pysnmp not available for SNMPv3 decryption")
             return None
         
         # Extract engine ID and username from message
@@ -384,10 +384,7 @@ class SNMPv3Decryptor:
         
         # If we extracted a username, try that user first
         if username:
-            for user in users:
-                if user.username == username:
-                    users = [user] + [u for u in users if u.username != username]
-                    break
+            users = sorted(users, key=lambda u: u.username != username)
         
         # Try decryption with each user
         for user in users:
@@ -411,181 +408,200 @@ class SNMPv3Decryptor:
     ) -> Optional[Dict]:
         """
         Attempt to decrypt message with specific user credentials.
-        
-        This uses pysnmp's internal message processing to handle decryption.
-        
-        Args:
-            message: Raw SNMPv3 message bytes
-            engine_id: Engine ID hex string
-            user: SNMPv3User object
-            
-        Returns:
-            Trap data dictionary or None
         """
         try:
-            from pysnmp.proto.secmod.rfc3414.service import SnmpUSMSecurityModel
-            from pysnmp.proto.secmod.rfc3414 import auth, priv
-            from pysnmp.proto import rfc3411, rfc3412
-            from pysnmp.proto.mpmod.rfc3412 import SnmpV3MessageProcessingModel
-            from pysnmp.entity import engine as snmp_engine
-            from pysnmp.entity import config as snmp_config
-            from pyasn1.codec.ber import decoder as ber_decoder
-            from pyasn1.codec.ber import encoder as ber_encoder
+            # Parse the SNMPv3 message structure manually
+            idx = 0
             
-            # Create or get SNMP engine for this engine ID
-            engine_id_bytes = bytes.fromhex(engine_id)
+            # Outer SEQUENCE
+            if message[idx] != 0x30:
+                return None
+            idx += 1
+            _, idx = _parse_ber_length(message, idx)
             
-            # Create a new engine each time to avoid caching issues
-            snmpEngine = snmp_engine.SnmpEngine()
+            # Version INTEGER (should be 3)
+            if message[idx] != 0x02:
+                return None
+            idx += 1
+            ver_len = message[idx]
+            idx += 1
+            version = int.from_bytes(message[idx:idx+ver_len], 'big')
+            if version != 3:
+                return None
+            idx += ver_len
             
-            # Configure the user
-            auth_proto = AUTH_PROTOCOLS.get(user.auth_protocol.upper(), usmNoAuthProtocol)
-            priv_proto = PRIV_PROTOCOLS.get(user.priv_protocol.upper(), usmNoPrivProtocol)
+            # msgGlobalData SEQUENCE
+            if message[idx] != 0x30:
+                return None
+            idx += 1
+            global_len, idx = _parse_ber_length(message, idx)
             
-            snmp_config.addV3User(
-                snmpEngine,
-                user.username,
-                auth_proto,
-                user.auth_passphrase if user.auth_passphrase else None,
-                priv_proto,
-                user.priv_passphrase if user.priv_passphrase else None,
-                securityEngineId=univ.OctetString(hexValue=engine_id)
-            )
+            # Extract msgID, msgMaxSize, msgFlags from msgGlobalData
+            global_start = idx
             
-            # Use pysnmp's message processing to decode the message
-            from pysnmp.proto.rfc3412 import MsgAndPduDispatcher
-            from pysnmp.proto import errind
+            # msgID INTEGER
+            if message[idx] != 0x02:
+                return None
+            idx += 1
+            msgid_len = message[idx]
+            idx += 1
+            msg_id = int.from_bytes(message[idx:idx+msgid_len], 'big')
+            idx += msgid_len
             
-            # Parse the outer structure first
-            msg, remaining = ber_decoder.decode(message, asn1Spec=rfc3412.SNMPv3Message())
+            # msgMaxSize INTEGER
+            if message[idx] != 0x02:
+                return None
+            idx += 1
+            maxsize_len = message[idx]
+            idx += 1
+            idx += maxsize_len
             
-            # Extract components we need
-            msg_version = msg.getComponentByName('msgVersion')
-            msg_global_data = msg.getComponentByName('msgGlobalData')
-            msg_security_params = msg.getComponentByName('msgSecurityParameters')
-            msg_data = msg.getComponentByName('msgData')
+            # msgFlags OCTET STRING (1 byte)
+            if message[idx] != 0x04:
+                return None
+            idx += 1
+            flags_len = message[idx]
+            idx += 1
+            msg_flags = message[idx]
+            idx += flags_len
             
-            # Decode security parameters
-            usm_params, _ = ber_decoder.decode(
-                msg_security_params,
-                asn1Spec=rfc3411.UsmSecurityParameters()
-            )
+            # Determine security level from flags
+            auth_flag = bool(msg_flags & 0x01)
+            priv_flag = bool(msg_flags & 0x02)
             
-            msg_auth_engine_id = usm_params.getComponentByName('msgAuthoritativeEngineID')
-            msg_auth_engine_boots = usm_params.getComponentByName('msgAuthoritativeEngineBoots')
-            msg_auth_engine_time = usm_params.getComponentByName('msgAuthoritativeEngineTime')
-            msg_user_name = usm_params.getComponentByName('msgUserName')
-            msg_auth_params = usm_params.getComponentByName('msgAuthenticationParameters')
-            msg_priv_params = usm_params.getComponentByName('msgPrivacyParameters')
+            # Skip remaining msgGlobalData (msgSecurityModel)
+            idx = global_start + global_len
             
-            # Check if message is encrypted
-            scoped_pdu_data = msg_data.getComponentByName('encryptedPDU')
-            if scoped_pdu_data is None:
-                # Try plaintext
-                scoped_pdu_data = msg_data.getComponentByName('plaintext')
+            # msgSecurityParameters OCTET STRING
+            if message[idx] != 0x04:
+                return None
+            idx += 1
+            sec_len, idx = _parse_ber_length(message, idx)
             
-            if scoped_pdu_data is None:
-                logger.debug("No PDU data found in message")
+            # Parse USM security parameters
+            usm_data = message[idx:idx+sec_len]
+            usm_params = self._parse_usm_params(usm_data)
+            if not usm_params:
                 return None
             
-            # If encrypted, we need to decrypt
-            if msg_data.getName() == 'encryptedPDU':
-                encrypted_data = bytes(scoped_pdu_data)
+            idx += sec_len
+            
+            # msgData - either plaintext ScopedPDU or encryptedPDU
+            if priv_flag:
+                # Encrypted - OCTET STRING containing encrypted ScopedPDU
+                if message[idx] != 0x04:
+                    return None
+                idx += 1
+                encrypted_len, idx = _parse_ber_length(message, idx)
+                encrypted_data = message[idx:idx+encrypted_len]
                 
-                # Get the privacy module
-                if user.priv_protocol.upper() == 'NONE':
-                    logger.debug("Message appears encrypted but user has no priv protocol")
+                # Decrypt the data
+                if not CRYPTO_AVAILABLE:
+                    logger.warning("Cannot decrypt - pycryptodome not available")
                     return None
                 
-                # Decrypt using the appropriate algorithm
                 decrypted_data = self._decrypt_pdu(
                     encrypted_data,
                     user,
-                    bytes(msg_priv_params),
-                    int(msg_auth_engine_boots),
-                    int(msg_auth_engine_time),
-                    bytes(msg_auth_engine_id)
+                    usm_params['priv_params'],
+                    usm_params['engine_boots'],
+                    usm_params['engine_time'],
+                    bytes.fromhex(engine_id)
                 )
                 
                 if decrypted_data is None:
                     return None
                 
-                # Decode the decrypted ScopedPDU
-                scoped_pdu, _ = ber_decoder.decode(
-                    decrypted_data,
-                    asn1Spec=rfc3412.ScopedPDU()
-                )
+                # Parse the decrypted ScopedPDU
+                scoped_pdu_data = decrypted_data
             else:
-                # Already plaintext
-                scoped_pdu = scoped_pdu_data
-            
-            # Extract the PDU from ScopedPDU
-            pdu = scoped_pdu.getComponentByName('data')
-            
-            # Get the actual PDU (could be various types)
-            # For traps, it should be SNMPv2-Trap-PDU
-            trap_pdu = pdu.getComponent()
-            
-            # Extract varbinds
-            varbind_list = trap_pdu.getComponentByName('variable-bindings')
-            if varbind_list is None:
-                # Try alternative names
-                for name in ['variableBindings', 'variable_bindings']:
-                    varbind_list = trap_pdu.getComponentByName(name)
-                    if varbind_list:
-                        break
-            
-            if varbind_list is None:
-                # Last resort - try positional access (index 3 for most PDUs)
-                try:
-                    varbind_list = trap_pdu.getComponentByPosition(3)
-                except Exception:
-                    logger.debug("Could not find varbinds in PDU")
+                # Plaintext ScopedPDU SEQUENCE
+                if message[idx] != 0x30:
                     return None
+                scoped_pdu_data = message[idx:]
             
-            # Build trap data dictionary
-            trap_data = {
-                'version': 'v3',
-                'engine_id': engine_id,
-                'username': str(msg_user_name),
-                'varbinds': []
-            }
+            # Parse ScopedPDU to extract varbinds
+            trap_data = self._parse_scoped_pdu(scoped_pdu_data)
             
-            # Extract request-id if present
-            try:
-                request_id = trap_pdu.getComponentByName('request-id')
-                if request_id is not None:
-                    trap_data['request_id'] = int(request_id)
-            except Exception:
-                trap_data['request_id'] = 0
-            
-            # Process varbinds
-            for vb in varbind_list:
-                try:
-                    oid = vb.getComponentByName('name')
-                    value = vb.getComponentByName('value')
-                    
-                    # Get the actual value component
-                    if hasattr(value, 'getComponent'):
-                        actual_value = value.getComponent()
-                    else:
-                        actual_value = value
-                    
-                    trap_data['varbinds'].append({
-                        'oid': str(oid),
-                        'value': actual_value,
-                        'type': actual_value.__class__.__name__
-                    })
-                except Exception as e:
-                    logger.debug(f"Error extracting varbind: {e}")
-            
-            logger.debug(f"Extracted {len(trap_data['varbinds'])} varbinds")
             return trap_data
             
         except Exception as e:
             logger.debug(f"Decryption attempt failed: {e}")
             import traceback
             logger.debug(traceback.format_exc())
+            return None
+    
+    def _parse_usm_params(self, usm_data: bytes) -> Optional[Dict]:
+        """Parse USM security parameters."""
+        try:
+            idx = 0
+            
+            # SEQUENCE
+            if usm_data[idx] != 0x30:
+                return None
+            idx += 1
+            _, idx = _parse_ber_length(usm_data, idx)
+            
+            # msgAuthoritativeEngineID OCTET STRING
+            if usm_data[idx] != 0x04:
+                return None
+            idx += 1
+            engine_len, idx = _parse_ber_length(usm_data, idx)
+            engine_id = usm_data[idx:idx+engine_len]
+            idx += engine_len
+            
+            # msgAuthoritativeEngineBoots INTEGER
+            if usm_data[idx] != 0x02:
+                return None
+            idx += 1
+            boots_len = usm_data[idx]
+            idx += 1
+            engine_boots = int.from_bytes(usm_data[idx:idx+boots_len], 'big')
+            idx += boots_len
+            
+            # msgAuthoritativeEngineTime INTEGER
+            if usm_data[idx] != 0x02:
+                return None
+            idx += 1
+            time_len = usm_data[idx]
+            idx += 1
+            engine_time = int.from_bytes(usm_data[idx:idx+time_len], 'big')
+            idx += time_len
+            
+            # msgUserName OCTET STRING
+            if usm_data[idx] != 0x04:
+                return None
+            idx += 1
+            name_len, idx = _parse_ber_length(usm_data, idx)
+            username = usm_data[idx:idx+name_len].decode('utf-8')
+            idx += name_len
+            
+            # msgAuthenticationParameters OCTET STRING
+            if usm_data[idx] != 0x04:
+                return None
+            idx += 1
+            auth_len, idx = _parse_ber_length(usm_data, idx)
+            auth_params = usm_data[idx:idx+auth_len]
+            idx += auth_len
+            
+            # msgPrivacyParameters OCTET STRING
+            if usm_data[idx] != 0x04:
+                return None
+            idx += 1
+            priv_len, idx = _parse_ber_length(usm_data, idx)
+            priv_params = usm_data[idx:idx+priv_len]
+            
+            return {
+                'engine_id': engine_id,
+                'engine_boots': engine_boots,
+                'engine_time': engine_time,
+                'username': username,
+                'auth_params': auth_params,
+                'priv_params': priv_params
+            }
+            
+        except Exception as e:
+            logger.debug(f"Failed to parse USM params: {e}")
             return None
     
     def _decrypt_pdu(
@@ -597,40 +613,17 @@ class SNMPv3Decryptor:
         engine_time: int,
         engine_id: bytes
     ) -> Optional[bytes]:
-        """
-        Decrypt the encrypted PDU data.
-        
-        Args:
-            encrypted_data: Encrypted PDU bytes
-            user: SNMPv3User with credentials
-            priv_params: Privacy parameters from message
-            engine_boots: Engine boots value
-            engine_time: Engine time value
-            engine_id: Engine ID bytes
-            
-        Returns:
-            Decrypted PDU bytes or None
-        """
+        """Decrypt the encrypted PDU data."""
         try:
-            from pysnmp.proto.secmod.rfc3414.priv import des, aes, aes192, aes256
-            from pysnmp.proto.secmod.rfc3414.auth import hmacmd5, hmacsha
-            from Crypto.Cipher import DES, AES
-            
             priv_protocol = user.priv_protocol.upper()
             auth_protocol = user.auth_protocol.upper()
             
             # Localize the privacy key
-            priv_key = self._localize_key(
-                user.priv_passphrase,
-                engine_id,
-                auth_protocol
-            )
+            priv_key = _localize_key(user.priv_passphrase, engine_id, auth_protocol)
             
             if priv_protocol in ('DES', '3DES'):
                 # DES decryption
-                # DES key is first 8 bytes of localized key
                 des_key = priv_key[:8]
-                # IV is priv_params XOR'd with last 8 bytes of key
                 pre_iv = priv_key[8:16]
                 iv = bytes(a ^ b for a, b in zip(pre_iv, priv_params[:8]))
                 
@@ -639,7 +632,6 @@ class SNMPv3Decryptor:
                 
             elif priv_protocol.startswith('AES'):
                 # AES decryption
-                # Key length depends on variant
                 if priv_protocol == 'AES128':
                     key_len = 16
                 elif priv_protocol == 'AES192':
@@ -647,9 +639,13 @@ class SNMPv3Decryptor:
                 else:  # AES256
                     key_len = 32
                 
+                # Extend key if needed using key extension
+                if len(priv_key) < key_len:
+                    priv_key = self._extend_key(priv_key, key_len, auth_protocol)
+                
                 aes_key = priv_key[:key_len]
                 
-                # IV for AES: engineBoots(4) + engineTime(4) + privParams(8)
+                # IV: engineBoots(4) + engineTime(4) + privParams(8)
                 iv = (
                     engine_boots.to_bytes(4, 'big') +
                     engine_time.to_bytes(4, 'big') +
@@ -665,77 +661,213 @@ class SNMPv3Decryptor:
             
             return decrypted
             
-        except ImportError:
-            logger.error("pycryptodome required for SNMPv3 decryption. "
-                        "Install with: pip3 install --break-system-packages pycryptodome")
-            return None
         except Exception as e:
             logger.debug(f"PDU decryption failed: {e}")
             return None
     
-    def _localize_key(
-        self,
-        passphrase: str,
-        engine_id: bytes,
-        auth_protocol: str
-    ) -> bytes:
-        """
-        Localize a passphrase to an engine-specific key.
-        
-        Uses the standard SNMPv3 key localization algorithm.
-        
-        Args:
-            passphrase: User passphrase
-            engine_id: Engine ID bytes
-            auth_protocol: Authentication protocol name
-            
-        Returns:
-            Localized key bytes
-        """
-        import hashlib
-        
-        # Select hash function
+    def _extend_key(self, key: bytes, target_len: int, auth_protocol: str) -> bytes:
+        """Extend key to required length for AES192/256."""
         if auth_protocol in ('MD5',):
             hash_func = hashlib.md5
-            digest_size = 16
+        elif auth_protocol == 'SHA224':
+            hash_func = hashlib.sha224
+        elif auth_protocol == 'SHA256':
+            hash_func = hashlib.sha256
+        elif auth_protocol == 'SHA384':
+            hash_func = hashlib.sha384
+        elif auth_protocol == 'SHA512':
+            hash_func = hashlib.sha512
         else:
-            # SHA and variants
-            if auth_protocol == 'SHA224':
-                hash_func = hashlib.sha224
-                digest_size = 28
-            elif auth_protocol == 'SHA256':
-                hash_func = hashlib.sha256
-                digest_size = 32
-            elif auth_protocol == 'SHA384':
-                hash_func = hashlib.sha384
-                digest_size = 48
-            elif auth_protocol == 'SHA512':
-                hash_func = hashlib.sha512
-                digest_size = 64
-            else:  # Default SHA1
-                hash_func = hashlib.sha1
-                digest_size = 20
+            hash_func = hashlib.sha1
         
-        # Step 1: Generate Ku from passphrase
-        # Repeat passphrase to get 1MB of data
-        password = passphrase.encode('utf-8')
-        password_len = len(password)
+        extended = key
+        while len(extended) < target_len:
+            h = hash_func()
+            h.update(key)
+            extended += h.digest()
         
-        h = hash_func()
-        count = 0
-        password_buf = password * (1048576 // password_len + 1)
+        return extended[:target_len]
+    
+    def _parse_scoped_pdu(self, data: bytes) -> Optional[Dict]:
+        """Parse ScopedPDU and extract trap varbinds."""
+        try:
+            idx = 0
+            
+            # ScopedPDU SEQUENCE
+            if data[idx] != 0x30:
+                return None
+            idx += 1
+            _, idx = _parse_ber_length(data, idx)
+            
+            # contextEngineID OCTET STRING
+            if data[idx] != 0x04:
+                return None
+            idx += 1
+            ctx_engine_len, idx = _parse_ber_length(data, idx)
+            idx += ctx_engine_len
+            
+            # contextName OCTET STRING
+            if data[idx] != 0x04:
+                return None
+            idx += 1
+            ctx_name_len, idx = _parse_ber_length(data, idx)
+            idx += ctx_name_len
+            
+            # PDU - could be various types, trap is typically 0xa7
+            pdu_tag = data[idx]
+            idx += 1
+            pdu_len, idx = _parse_ber_length(data, idx)
+            
+            # Parse PDU contents
+            # request-id INTEGER
+            if data[idx] != 0x02:
+                return None
+            idx += 1
+            reqid_len = data[idx]
+            idx += 1
+            request_id = int.from_bytes(data[idx:idx+reqid_len], 'big')
+            idx += reqid_len
+            
+            # error-status INTEGER
+            if data[idx] != 0x02:
+                return None
+            idx += 1
+            err_len = data[idx]
+            idx += 1 + err_len
+            
+            # error-index INTEGER
+            if data[idx] != 0x02:
+                return None
+            idx += 1
+            erridx_len = data[idx]
+            idx += 1 + erridx_len
+            
+            # variable-bindings SEQUENCE
+            if data[idx] != 0x30:
+                return None
+            idx += 1
+            vb_len, idx = _parse_ber_length(data, idx)
+            
+            varbinds = []
+            vb_end = idx + vb_len
+            
+            while idx < vb_end:
+                # VarBind SEQUENCE
+                if data[idx] != 0x30:
+                    break
+                idx += 1
+                vb_item_len, idx = _parse_ber_length(data, idx)
+                vb_item_end = idx + vb_item_len
+                
+                # name OBJECT IDENTIFIER
+                if data[idx] != 0x06:
+                    idx = vb_item_end
+                    continue
+                idx += 1
+                oid_len, idx = _parse_ber_length(data, idx)
+                oid_bytes = data[idx:idx+oid_len]
+                oid_str = self._decode_oid(oid_bytes)
+                idx += oid_len
+                
+                # value - various types
+                value_tag = data[idx]
+                idx += 1
+                value_len, idx = _parse_ber_length(data, idx)
+                value_bytes = data[idx:idx+value_len]
+                
+                value, value_type = self._decode_value(value_tag, value_bytes)
+                
+                varbinds.append({
+                    'oid': oid_str,
+                    'value': value,
+                    'type': value_type,
+                    'raw_tag': value_tag,
+                    'raw_bytes': value_bytes
+                })
+                
+                idx = vb_item_end
+            
+            return {
+                'version': 'v3',
+                'request_id': request_id,
+                'varbinds': varbinds
+            }
+            
+        except Exception as e:
+            logger.debug(f"Failed to parse ScopedPDU: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return None
+    
+    def _decode_oid(self, oid_bytes: bytes) -> str:
+        """Decode BER-encoded OID to string."""
+        if not oid_bytes:
+            return ""
         
-        for i in range(0, 1048576, 64):
-            h.update(password_buf[i:i+64])
+        components = []
         
-        ku = h.digest()
+        # First byte encodes first two components
+        first = oid_bytes[0]
+        components.append(str(first // 40))
+        components.append(str(first % 40))
         
-        # Step 2: Localize Ku with engine ID to get Kul
-        h = hash_func()
-        h.update(ku + engine_id + ku)
-        kul = h.digest()
+        # Remaining bytes
+        idx = 1
+        while idx < len(oid_bytes):
+            value = 0
+            while idx < len(oid_bytes):
+                byte = oid_bytes[idx]
+                value = (value << 7) | (byte & 0x7f)
+                idx += 1
+                if not (byte & 0x80):
+                    break
+            components.append(str(value))
         
-        return kul
+        return '.'.join(components)
+    
+    def _decode_value(self, tag: int, value_bytes: bytes) -> Tuple[Any, str]:
+        """Decode BER value based on tag."""
+        if tag == 0x02:  # INTEGER
+            if not value_bytes:
+                return 0, 'Integer'
+            value = int.from_bytes(value_bytes, 'big', signed=True)
+            return value, 'Integer'
+        
+        elif tag == 0x04:  # OCTET STRING
+            try:
+                return value_bytes.decode('utf-8'), 'OctetString'
+            except UnicodeDecodeError:
+                return value_bytes.hex(), 'OctetString'
+        
+        elif tag == 0x05:  # NULL
+            return None, 'Null'
+        
+        elif tag == 0x06:  # OBJECT IDENTIFIER
+            return self._decode_oid(value_bytes), 'ObjectIdentifier'
+        
+        elif tag == 0x40:  # IpAddress
+            if len(value_bytes) == 4:
+                return '.'.join(str(b) for b in value_bytes), 'IpAddress'
+            return value_bytes.hex(), 'IpAddress'
+        
+        elif tag == 0x41:  # Counter32
+            return int.from_bytes(value_bytes, 'big'), 'Counter32'
+        
+        elif tag == 0x42:  # Gauge32/Unsigned32
+            return int.from_bytes(value_bytes, 'big'), 'Gauge32'
+        
+        elif tag == 0x43:  # TimeTicks
+            return int.from_bytes(value_bytes, 'big'), 'TimeTicks'
+        
+        elif tag == 0x44:  # Opaque
+            return value_bytes.hex(), 'Opaque'
+        
+        elif tag == 0x46:  # Counter64
+            return int.from_bytes(value_bytes, 'big'), 'Counter64'
+        
+        else:
+            # Unknown type - return hex
+            return value_bytes.hex(), f'Unknown(0x{tag:02x})'
     
     def convert_to_snmpv2c(
         self,
@@ -745,94 +877,171 @@ class SNMPv3Decryptor:
         """
         Convert decrypted SNMPv3 trap data to SNMPv2c format.
         
-        Args:
-            trap_data: Trap data dictionary from decrypt_snmpv3_trap
-            community: SNMPv2c community string to use
-            
-        Returns:
-            SNMPv2c trap message bytes, or None if conversion fails
+        Builds a proper SNMPv2c trap message from scratch using BER encoding.
         """
-        if not PYSNMP_AVAILABLE:
-            return None
-        
         try:
-            from pysnmp.proto.api import v2c
-            from pyasn1.codec.ber import encoder as ber_encoder
+            # Build varbinds
+            varbinds_bytes = b''
             
-            # Create SNMPv2c message
-            msg = v2c.Message()
-            msg.setComponentByPosition(0, v2c.Integer(1))  # version = 1 (SNMPv2c)
-            msg.setComponentByPosition(1, v2c.OctetString(community))
-            
-            # Create trap PDU
-            pdu = v2c.TrapPDU()
-            pdu.setComponentByPosition(0, v2c.Integer(trap_data.get('request_id', 0)))
-            pdu.setComponentByPosition(1, v2c.Integer(0))  # error-status
-            pdu.setComponentByPosition(2, v2c.Integer(0))  # error-index
-            
-            # Create varbind list
-            varbinds = v2c.VarBindList()
-            
-            for idx, vb in enumerate(trap_data['varbinds']):
-                var_bind = v2c.VarBind()
-                
-                # Set OID
+            for vb in trap_data.get('varbinds', []):
                 oid_str = vb['oid']
-                var_bind.setComponentByPosition(0, v2c.ObjectIdentifier(oid_str))
-                
-                # Set value - handle the actual pysnmp value objects
                 value = vb['value']
                 value_type = vb['type']
                 
-                if hasattr(value, 'prettyPrint'):
-                    # It's already a pysnmp object, use it directly
-                    var_bind.setComponentByPosition(1, value)
-                else:
-                    # Convert string representation to appropriate type
-                    value_str = str(value)
-                    
-                    if 'Integer' in value_type:
-                        try:
-                            var_bind.setComponentByPosition(1, Integer32(int(value_str)))
-                        except ValueError:
-                            var_bind.setComponentByPosition(1, OctetString(value_str))
-                    elif 'ObjectIdentifier' in value_type or 'ObjectName' in value_type:
-                        var_bind.setComponentByPosition(1, OID(value_str))
-                    elif 'IpAddress' in value_type:
-                        var_bind.setComponentByPosition(1, IpAddress(value_str))
-                    elif 'Counter32' in value_type or 'Counter' in value_type:
-                        var_bind.setComponentByPosition(1, Counter32(int(value_str)))
-                    elif 'Counter64' in value_type:
-                        var_bind.setComponentByPosition(1, Counter64(int(value_str)))
-                    elif 'Gauge' in value_type or 'Unsigned' in value_type:
-                        var_bind.setComponentByPosition(1, Gauge32(int(value_str)))
-                    elif 'TimeTicks' in value_type:
-                        var_bind.setComponentByPosition(1, TimeTicks(int(value_str)))
-                    else:
-                        # Default to OctetString
-                        if isinstance(value, bytes):
-                            var_bind.setComponentByPosition(1, OctetString(value))
-                        else:
-                            var_bind.setComponentByPosition(1, OctetString(str(value)))
+                # Encode OID
+                oid_encoded = self._encode_oid(oid_str)
                 
-                varbinds.setComponentByPosition(idx, var_bind)
+                # Encode value based on type
+                if 'raw_tag' in vb and 'raw_bytes' in vb:
+                    # Use original encoding if available
+                    value_encoded = bytes([vb['raw_tag']]) + self._encode_length(len(vb['raw_bytes'])) + vb['raw_bytes']
+                else:
+                    value_encoded = self._encode_value(value, value_type)
+                
+                # VarBind SEQUENCE
+                vb_content = oid_encoded + value_encoded
+                vb_bytes = bytes([0x30]) + self._encode_length(len(vb_content)) + vb_content
+                varbinds_bytes += vb_bytes
             
-            pdu.setComponentByPosition(3, varbinds)
-            msg.setComponentByPosition(2, pdu)
+            # VarBindList SEQUENCE
+            varbind_list = bytes([0x30]) + self._encode_length(len(varbinds_bytes)) + varbinds_bytes
             
-            # Encode to bytes
-            encoded = ber_encoder.encode(msg)
+            # Build PDU
+            request_id = trap_data.get('request_id', 0)
+            request_id_bytes = self._encode_integer(request_id)
+            error_status = self._encode_integer(0)
+            error_index = self._encode_integer(0)
             
-            logger.debug(f"Converted to SNMPv2c: {len(encoded)} bytes, "
-                        f"{len(trap_data['varbinds'])} varbinds")
+            pdu_content = request_id_bytes + error_status + error_index + varbind_list
             
-            return bytes(encoded)
+            # SNMPv2-Trap-PDU (implicit tag 0xa7)
+            pdu = bytes([0xa7]) + self._encode_length(len(pdu_content)) + pdu_content
+            
+            # Build message
+            version = self._encode_integer(1)  # SNMPv2c = version 1
+            community_bytes = bytes([0x04]) + self._encode_length(len(community)) + community.encode('utf-8')
+            
+            message_content = version + community_bytes + pdu
+            message = bytes([0x30]) + self._encode_length(len(message_content)) + message_content
+            
+            logger.debug(f"Built SNMPv2c message: {len(message)} bytes, {len(trap_data.get('varbinds', []))} varbinds")
+            
+            return message
             
         except Exception as e:
             logger.error(f"SNMPv2c conversion failed: {e}")
             import traceback
             logger.debug(traceback.format_exc())
             return None
+    
+    def _encode_length(self, length: int) -> bytes:
+        """Encode BER length."""
+        if length < 128:
+            return bytes([length])
+        elif length < 256:
+            return bytes([0x81, length])
+        elif length < 65536:
+            return bytes([0x82, (length >> 8) & 0xff, length & 0xff])
+        else:
+            return bytes([0x83, (length >> 16) & 0xff, (length >> 8) & 0xff, length & 0xff])
+    
+    def _encode_integer(self, value: int) -> bytes:
+        """Encode BER INTEGER."""
+        if value == 0:
+            return bytes([0x02, 0x01, 0x00])
+        
+        # Handle negative numbers
+        if value < 0:
+            # Two's complement
+            byte_len = (value.bit_length() + 8) // 8
+            value_bytes = value.to_bytes(byte_len, 'big', signed=True)
+        else:
+            byte_len = (value.bit_length() + 7) // 8
+            value_bytes = value.to_bytes(byte_len, 'big')
+            # Add leading zero if high bit is set
+            if value_bytes[0] & 0x80:
+                value_bytes = bytes([0x00]) + value_bytes
+        
+        return bytes([0x02]) + self._encode_length(len(value_bytes)) + value_bytes
+    
+    def _encode_oid(self, oid_str: str) -> bytes:
+        """Encode OID string to BER."""
+        components = [int(c) for c in oid_str.split('.') if c]
+        
+        if len(components) < 2:
+            return bytes([0x06, 0x00])
+        
+        # First two components combined
+        result = bytes([components[0] * 40 + components[1]])
+        
+        # Remaining components
+        for comp in components[2:]:
+            if comp < 128:
+                result += bytes([comp])
+            else:
+                # Multi-byte encoding
+                enc = []
+                while comp > 0:
+                    enc.insert(0, (comp & 0x7f) | 0x80)
+                    comp >>= 7
+                enc[-1] &= 0x7f  # Clear high bit of last byte
+                result += bytes(enc)
+        
+        return bytes([0x06]) + self._encode_length(len(result)) + result
+    
+    def _encode_value(self, value: Any, value_type: str) -> bytes:
+        """Encode value based on type."""
+        if value_type == 'Integer' or 'Integer' in value_type:
+            return self._encode_integer(int(value) if value else 0)
+        
+        elif value_type == 'OctetString':
+            if isinstance(value, bytes):
+                data = value
+            else:
+                data = str(value).encode('utf-8')
+            return bytes([0x04]) + self._encode_length(len(data)) + data
+        
+        elif value_type == 'ObjectIdentifier':
+            return self._encode_oid(str(value))
+        
+        elif value_type == 'IpAddress':
+            parts = str(value).split('.')
+            if len(parts) == 4:
+                data = bytes([int(p) for p in parts])
+            else:
+                data = bytes.fromhex(str(value))
+            return bytes([0x40]) + self._encode_length(len(data)) + data
+        
+        elif value_type == 'Counter32':
+            val = int(value) if value else 0
+            data = val.to_bytes((val.bit_length() + 7) // 8 or 1, 'big')
+            return bytes([0x41]) + self._encode_length(len(data)) + data
+        
+        elif value_type == 'Gauge32':
+            val = int(value) if value else 0
+            data = val.to_bytes((val.bit_length() + 7) // 8 or 1, 'big')
+            return bytes([0x42]) + self._encode_length(len(data)) + data
+        
+        elif value_type == 'TimeTicks':
+            val = int(value) if value else 0
+            data = val.to_bytes((val.bit_length() + 7) // 8 or 1, 'big')
+            return bytes([0x43]) + self._encode_length(len(data)) + data
+        
+        elif value_type == 'Counter64':
+            val = int(value) if value else 0
+            data = val.to_bytes((val.bit_length() + 7) // 8 or 1, 'big')
+            return bytes([0x46]) + self._encode_length(len(data)) + data
+        
+        elif value_type == 'Null':
+            return bytes([0x05, 0x00])
+        
+        else:
+            # Default to OctetString
+            if isinstance(value, bytes):
+                data = value
+            else:
+                data = str(value).encode('utf-8')
+            return bytes([0x04]) + self._encode_length(len(data)) + data
 
 
 # Global decryptor instance
@@ -868,14 +1077,6 @@ def decrypt_and_convert_trap(
 ) -> Optional[bytes]:
     """
     Convenience function to decrypt SNMPv3 trap and convert to SNMPv2c.
-    
-    Args:
-        snmpv3_message: Raw SNMPv3 message bytes
-        engine_id: Optional Engine ID
-        community: SNMPv2c community string
-        
-    Returns:
-        SNMPv2c trap message bytes, or None if operation fails
     """
     decryptor = get_snmpv3_decryptor()
     
