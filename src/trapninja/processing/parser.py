@@ -96,13 +96,15 @@ def get_snmp_version(payload: bytes) -> Optional[int]:
 
 def is_snmpv2c(payload: bytes) -> bool:
     """
-    Ultra-fast SNMPv2c detection using byte signature.
+    Fast SNMPv2c detection.
     
-    Checks for the specific byte pattern of an SNMPv2c message:
+    Checks for the specific structure of an SNMPv2c message:
     - SEQUENCE tag (0x30)
     - INTEGER tag (0x02) for version
     - Version value 1 (SNMPv2c)
     - OCTET STRING tag (0x04) for community
+    
+    Handles both short and long form length encoding.
     
     Args:
         payload: Raw SNMP packet bytes
@@ -110,17 +112,53 @@ def is_snmpv2c(payload: bytes) -> bool:
     Returns:
         True if packet is SNMPv2c
     """
-    return (len(payload) >= 8 and
-            payload[0] == ASN1_SEQUENCE and
-            payload[2] == ASN1_INTEGER and
-            payload[3] == 0x01 and  # Length 1
-            payload[4] == SNMP_V2C and
-            payload[5] == ASN1_OCTET_STRING)
+    if len(payload) < 8:
+        return False
+    
+    # Must start with SEQUENCE
+    if payload[0] != ASN1_SEQUENCE:
+        return False
+    
+    # Skip SEQUENCE length (handles both short and long form)
+    idx = 1
+    if payload[idx] & 0x80:
+        # Long form: high bit set, low 7 bits = number of length bytes
+        num_len_bytes = payload[idx] & 0x7F
+        idx += 1 + num_len_bytes
+    else:
+        # Short form: length is the byte itself
+        idx += 1
+    
+    if idx + 4 > len(payload):
+        return False
+    
+    # Check for INTEGER tag (version)
+    if payload[idx] != ASN1_INTEGER:
+        return False
+    idx += 1
+    
+    # Version length should be 1
+    if payload[idx] != 0x01:
+        return False
+    idx += 1
+    
+    # Version value should be 1 (SNMPv2c)
+    if payload[idx] != SNMP_V2C:
+        return False
+    idx += 1
+    
+    # Next should be OCTET STRING (community)
+    if idx >= len(payload) or payload[idx] != ASN1_OCTET_STRING:
+        return False
+    
+    return True
 
 
 def is_snmpv1(payload: bytes) -> bool:
     """
     Fast SNMPv1 detection.
+    
+    Handles both short and long form length encoding.
     
     Args:
         payload: Raw SNMP packet bytes
@@ -128,11 +166,36 @@ def is_snmpv1(payload: bytes) -> bool:
     Returns:
         True if packet is SNMPv1
     """
-    return (len(payload) >= 6 and
-            payload[0] == ASN1_SEQUENCE and
-            payload[2] == ASN1_INTEGER and
-            payload[3] == 0x01 and
-            payload[4] == SNMP_V1)
+    if len(payload) < 6:
+        return False
+    
+    # Must start with SEQUENCE
+    if payload[0] != ASN1_SEQUENCE:
+        return False
+    
+    # Skip SEQUENCE length (handles both short and long form)
+    idx = 1
+    if payload[idx] & 0x80:
+        num_len_bytes = payload[idx] & 0x7F
+        idx += 1 + num_len_bytes
+    else:
+        idx += 1
+    
+    if idx + 3 > len(payload):
+        return False
+    
+    # Check for INTEGER tag (version)
+    if payload[idx] != ASN1_INTEGER:
+        return False
+    idx += 1
+    
+    # Version length should be 1
+    if payload[idx] != 0x01:
+        return False
+    idx += 1
+    
+    # Version value should be 0 (SNMPv1)
+    return payload[idx] == SNMP_V1
 
 
 def is_snmpv3(payload: bytes) -> bool:

@@ -276,9 +276,42 @@ class PacketWorker:
             
             self.stats.increment_processed()
             
+            # DEBUG: Log packet info for troubleshooting
+            if logger.isEnabledFor(logging.DEBUG):
+                # Check SNMP version at byte level
+                snmp_ver = "unknown"
+                if len(payload) >= 5 and payload[0] == 0x30:
+                    # Try to get version
+                    idx = 1
+                    if payload[idx] & 0x80:
+                        idx += (payload[idx] & 0x7f) + 1
+                    else:
+                        idx += 1
+                    if idx < len(payload) and payload[idx] == 0x02:  # INTEGER
+                        idx += 1
+                        if idx < len(payload):
+                            vlen = payload[idx]
+                            idx += 1
+                            if idx + vlen <= len(payload):
+                                ver = int.from_bytes(payload[idx:idx+vlen], 'big')
+                                snmp_ver = {0: "v1", 1: "v2c", 3: "v3"}.get(ver, f"v{ver}")
+                
+                logger.debug(
+                    f"Processing packet from {source_ip}: {len(payload)} bytes, "
+                    f"SNMP {snmp_ver}, first bytes: {payload[:10].hex()}"
+                )
+            
             # Quick IP block check
             if source_ip in config['blocked_ips']:
                 self.stats.increment_blocked()
+                return
+            
+            # Check for SNMPv3 FIRST before trying v2c fast path
+            # This is critical because is_snmpv2c() might not correctly reject all v3 packets
+            if is_snmpv3(payload):
+                logger.debug(f"SNMPv3 detected from {source_ip}, routing to v3 handler")
+                self.stats.record_slow_path()
+                self._process_snmpv3(packet_data, config)
                 return
             
             # Try fast path for SNMPv2c
@@ -328,7 +361,7 @@ class PacketWorker:
                     
                     return
             
-            # Slow path
+            # Slow path for everything else (v1, malformed, etc.)
             self.stats.record_slow_path()
             self._process_slow_path(packet_data, config)
             
