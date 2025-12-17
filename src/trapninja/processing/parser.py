@@ -137,7 +137,12 @@ def is_snmpv1(payload: bytes) -> bool:
 
 def is_snmpv3(payload: bytes) -> bool:
     """
-    Fast SNMPv3 detection.
+    Fast SNMPv3 detection using byte-level analysis.
+    
+    SNMPv3 structure:
+    - SEQUENCE (0x30)
+    - INTEGER version = 3
+    - SEQUENCE msgGlobalData (NOT OCTET STRING like v1/v2c community)
     
     Args:
         payload: Raw SNMP packet bytes
@@ -145,8 +150,57 @@ def is_snmpv3(payload: bytes) -> bool:
     Returns:
         True if packet is SNMPv3
     """
-    version = get_snmp_version(payload)
-    return version == SNMP_V3
+    if len(payload) < 10:
+        return False
+    
+    # Must start with SEQUENCE
+    if payload[0] != ASN1_SEQUENCE:
+        return False
+    
+    # Skip outer SEQUENCE length
+    idx = 1
+    if payload[idx] & 0x80:
+        # Long form length
+        num_octets = payload[idx] & 0x7F
+        idx += num_octets + 1
+    else:
+        idx += 1
+    
+    if idx >= len(payload):
+        return False
+    
+    # Check for INTEGER tag (version)
+    if payload[idx] != ASN1_INTEGER:
+        return False
+    idx += 1
+    
+    if idx >= len(payload):
+        return False
+    
+    # Get version length
+    version_len = payload[idx]
+    idx += 1
+    
+    if idx + version_len > len(payload):
+        return False
+    
+    # Get version value
+    version = 0
+    for i in range(version_len):
+        version = (version << 8) | payload[idx + i]
+    
+    # SNMPv3 has version = 3
+    if version != 3:
+        return False
+    
+    idx += version_len
+    
+    # After version, SNMPv3 has SEQUENCE (msgGlobalData)
+    # v1/v2c have OCTET STRING (community)
+    if idx < len(payload) and payload[idx] == ASN1_SEQUENCE:
+        return True
+    
+    return False
 
 
 # =============================================================================

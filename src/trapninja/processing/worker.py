@@ -20,7 +20,7 @@ import threading
 import logging
 from typing import Optional, List, Dict, Any
 
-from .parser import is_snmpv2c, extract_trap_oid_fast, parse_snmp_packet
+from .parser import is_snmpv2c, is_snmpv3, extract_trap_oid_fast, parse_snmp_packet
 from .forwarder import forward_packet
 from .stats import ProcessingStats, StatsCollector, get_global_stats
 
@@ -341,12 +341,15 @@ class PacketWorker:
         source_ip = packet_data['src_ip']
         payload = packet_data['payload']
         
-        snmp_packet, version = parse_snmp_packet(payload)
-        
-        # Handle SNMPv3
-        if version == "v3":
+        # CRITICAL: Check for SNMPv3 at byte level FIRST
+        # Scapy's SNMP parser cannot handle SNMPv3 - it will fail or return wrong results
+        if is_snmpv3(payload):
+            logger.debug(f"SNMPv3 packet detected from {source_ip} ({len(payload)} bytes)")
             self._process_snmpv3(packet_data, config)
             return
+        
+        # Try Scapy parsing for v1/v2c
+        snmp_packet, version = parse_snmp_packet(payload)
         
         # Parsing failed - forward anyway
         if not snmp_packet:
@@ -412,18 +415,33 @@ class PacketWorker:
         source_ip = packet_data['src_ip']
         payload = packet_data['payload']
         
+        logger.debug(f"Processing SNMPv3 trap from {source_ip} ({len(payload)} bytes)")
+        
+        # Try to extract engine ID and username for logging
+        try:
+            from ..snmpv3_decryption import extract_engine_id_from_bytes, extract_username_from_bytes
+            engine_id = extract_engine_id_from_bytes(payload)
+            username = extract_username_from_bytes(payload)
+            logger.debug(f"SNMPv3 trap: engine_id={engine_id}, username={username}")
+        except Exception as e:
+            logger.debug(f"Could not extract SNMPv3 metadata: {e}")
+            engine_id = None
+            username = None
+        
         # Try decryption
         try:
             from ..snmpv3_decryption import get_snmpv3_decryptor
             decryptor = get_snmpv3_decryptor()
             
             if decryptor:
+                logger.debug(f"Attempting SNMPv3 decryption for engine {engine_id}")
                 result = decryptor.decrypt_snmpv3_trap(payload)
                 
                 if result:
-                    engine_id, trap_data = result
-                    logger.debug(
-                        f"SNMPv3 decrypted: engine={engine_id}, "
+                    result_engine_id, trap_data = result
+                    logger.info(
+                        f"SNMPv3 decrypted from {source_ip}: engine={result_engine_id}, "
+                        f"user={trap_data.get('username', 'N/A')}, "
                         f"varbinds={len(trap_data.get('varbinds', []))}"
                     )
                     
@@ -444,12 +462,15 @@ class PacketWorker:
                             f"{len(v2c_payload) if v2c_payload else 0} bytes"
                         )
                 else:
-                    logger.debug(f"SNMPv3 decryption returned no result for {source_ip}")
+                    logger.warning(
+                        f"SNMPv3 decryption failed for {source_ip}: "
+                        f"engine={engine_id}, user={username}"
+                    )
             else:
-                logger.debug("SNMPv3 decryptor not available")
+                logger.warning("SNMPv3 decryptor not initialized")
                 
         except ImportError as e:
-            logger.debug(f"SNMPv3 module not available: {e}")
+            logger.warning(f"SNMPv3 module not available: {e}")
         except Exception as e:
             logger.warning(f"SNMPv3 processing error: {e}")
             import traceback
