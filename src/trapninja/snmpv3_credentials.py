@@ -138,7 +138,7 @@ class SNMPv3CredentialStore:
         salt = hashlib.sha256(password).digest()
         
         # Derive key using PBKDF2
-        kdf = PBKDF2(
+        kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
             salt=salt,

@@ -54,6 +54,7 @@ trapninja/
 │   ├── CACHE.md
 │   ├── METRICS.md
 │   ├── GRANULAR_STATS.md
+│   ├── SNMPV3_CREDENTIALS.md
 │   ├── TROUBLESHOOTING.md
 │   └── ...
 │

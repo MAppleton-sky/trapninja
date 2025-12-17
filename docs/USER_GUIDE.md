@@ -352,6 +352,8 @@ python3.9 -O trapninja.py --snmpv3-status
 
 ### Add SNMPv3 User
 
+Interactive mode (recommended - passwords not shown on screen):
+
 ```bash
 python3.9 -O trapninja.py --snmpv3-add-user \
     --username myuser \
@@ -360,7 +362,29 @@ python3.9 -O trapninja.py --snmpv3-add-user \
     --priv-protocol AES128
 ```
 
-You'll be prompted for auth and priv passwords.
+You'll be prompted to enter and confirm both passphrases:
+
+```
+Authentication passphrase for myuser: 
+Confirm authentication passphrase: 
+Privacy passphrase for myuser: 
+Confirm privacy passphrase: 
+✓ Added user myuser for engine 80001f888056565656565656
+```
+
+For scripted deployments, passphrases can be provided directly:
+
+```bash
+python3.9 -O trapninja.py --snmpv3-add-user \
+    --username myuser \
+    --engine-id 80001f888056565656565656 \
+    --auth-protocol SHA \
+    --auth-passphrase "MyAuthPassword123" \
+    --priv-protocol AES128 \
+    --priv-passphrase "MyPrivPassword456"
+```
+
+**Note:** Passphrases must be at least 8 characters.
 
 ### List Configured Users
 
@@ -371,8 +395,12 @@ python3.9 -O trapninja.py --snmpv3-list-users
 ### Remove User
 
 ```bash
-python3.9 -O trapninja.py --snmpv3-remove-user --username myuser
+python3.9 -O trapninja.py --snmpv3-remove-user \
+    --engine-id 80001f888056565656565656 \
+    --username myuser
 ```
+
+See [SNMPV3_CREDENTIALS.md](SNMPV3_CREDENTIALS.md) for complete documentation including supported protocols, Engine ID formats, vendor-specific examples, and troubleshooting.
 
 ---
 
@@ -547,6 +575,7 @@ python3.9 -O trapninja.py --stats-help
 | [CACHE.md](CACHE.md) | Redis cache setup |
 | [METRICS.md](METRICS.md) | Prometheus metrics reference |
 | [GRANULAR_STATS.md](GRANULAR_STATS.md) | Statistics system details |
+| [SNMPV3_CREDENTIALS.md](SNMPV3_CREDENTIALS.md) | SNMPv3 user credentials and decryption |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Problem diagnosis |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System internals |
 

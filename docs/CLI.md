@@ -105,25 +105,45 @@ python trapninja.py --ha-help
 ### SNMPv3 Credentials
 
 ```bash
-# Add SNMPv3 user
+# Add SNMPv3 user (interactive - prompts for passwords)
 python trapninja.py --snmpv3-add-user \
     --username myuser \
     --engine-id 80001f888056565656565656 \
     --auth-protocol SHA \
     --priv-protocol AES128
 
+# Add SNMPv3 user (with inline passwords for scripting)
+python trapninja.py --snmpv3-add-user \
+    --username myuser \
+    --engine-id 80001f888056565656565656 \
+    --auth-protocol SHA \
+    --auth-passphrase "MyAuthPassword123" \
+    --priv-protocol AES128 \
+    --priv-passphrase "MyPrivPassword456"
+
 # Remove SNMPv3 user
-python trapninja.py --snmpv3-remove-user myuser
+python trapninja.py --snmpv3-remove-user \
+    --engine-id 80001f888056565656565656 \
+    --username myuser
 
 # List SNMPv3 users
 python trapninja.py --snmpv3-list-users
 
 # Show SNMPv3 user details
-python trapninja.py --snmpv3-show-user myuser
+python trapninja.py --snmpv3-show-user \
+    --engine-id 80001f888056565656565656 \
+    --username myuser
 
 # Check SNMPv3 status
 python trapninja.py --snmpv3-status
+
+# Test decryption with captured trap
+python trapninja.py --snmpv3-test-decrypt \
+    --trap-file /tmp/trap.bin \
+    --verbose
 ```
+
+See [SNMPV3_CREDENTIALS.md](SNMPV3_CREDENTIALS.md) for complete documentation including supported protocols, Engine ID formats, and vendor-specific examples.
 
 ### Configuration Options
 
