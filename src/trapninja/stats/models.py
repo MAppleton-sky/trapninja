@@ -32,19 +32,24 @@ class RateTracker:
     
     Uses a deque of timestamps to calculate rates efficiently.
     Memory-bounded by max_samples.
+    Thread-safe for concurrent access.
     """
     window_seconds: int = 60
     max_samples: int = 10000
     _timestamps: deque = field(default_factory=lambda: deque(maxlen=10000))
+    _lock: Any = field(default_factory=lambda: __import__('threading').Lock())
     
     def __post_init__(self):
+        import threading
         self._timestamps = deque(maxlen=self.max_samples)
+        self._lock = threading.Lock()
     
     def record(self, timestamp: float = None):
         """Record an event."""
         if timestamp is None:
             timestamp = time.time()
-        self._timestamps.append(timestamp)
+        with self._lock:
+            self._timestamps.append(timestamp)
     
     def get_rate(self, window_seconds: int = None) -> float:
         """
@@ -59,11 +64,15 @@ class RateTracker:
         if window_seconds is None:
             window_seconds = self.window_seconds
         
-        if not self._timestamps:
+        # Take a snapshot to avoid mutation during iteration
+        with self._lock:
+            timestamps = list(self._timestamps)
+        
+        if not timestamps:
             return 0.0
         
         cutoff = time.time() - window_seconds
-        count = sum(1 for ts in self._timestamps if ts >= cutoff)
+        count = sum(1 for ts in timestamps if ts >= cutoff)
         
         return count / window_seconds if window_seconds > 0 else 0.0
     
@@ -72,11 +81,15 @@ class RateTracker:
         if window_seconds is None:
             window_seconds = self.window_seconds
         
-        if not self._timestamps:
+        # Take a snapshot to avoid mutation during iteration
+        with self._lock:
+            timestamps = list(self._timestamps)
+        
+        if not timestamps:
             return 0
         
         cutoff = time.time() - window_seconds
-        return sum(1 for ts in self._timestamps if ts >= cutoff)
+        return sum(1 for ts in timestamps if ts >= cutoff)
     
     def cleanup(self, max_age: int = None):
         """Remove old timestamps beyond max_age."""
@@ -84,8 +97,9 @@ class RateTracker:
             max_age = self.window_seconds * 2
         
         cutoff = time.time() - max_age
-        while self._timestamps and self._timestamps[0] < cutoff:
-            self._timestamps.popleft()
+        with self._lock:
+            while self._timestamps and self._timestamps[0] < cutoff:
+                self._timestamps.popleft()
 
 
 @dataclass
