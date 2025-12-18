@@ -426,9 +426,10 @@ class GranularStatsCollector:
                 'destinations': len(self._dest_stats),
             },
             'rates': {
+                # Calculate rate from last minute, then project to other periods
                 'per_second': round(self._global_rate.get_rate(60), 2),
-                'per_minute': round(self._global_rate.get_count(60), 2),
-                'per_hour': round(self._global_rate.get_count(3600), 2),
+                'per_minute': round(self._global_rate.get_rate(60) * 60, 2),
+                'per_hour': round(self._global_rate.get_rate(60) * 3600, 2),
             },
             'limits': {
                 'max_ips': self.config.max_ips,

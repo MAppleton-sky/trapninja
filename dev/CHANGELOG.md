@@ -16,6 +16,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.1] - 2025-12-18
+
+### Fixed
+
+#### Statistics CLI TypeError
+- **Fixed `_format_timestamp()` function** to handle both float (Unix timestamp) and
+  string (ISO format) timestamps. The daemon returns Unix timestamps but the CLI
+  function only handled ISO strings, causing `TypeError: argument of type 'float' is not iterable`
+  when displaying statistics summary.
+
+#### Rate Calculation Bug
+- **Fixed incorrect rate projections** in statistics summary. Previously:
+  - `per_minute` showed raw event count (not rate)
+  - `per_hour` showed same value as per_minute due to limited sample window
+- **Now correctly calculates projected rates**:
+  - `per_second`: Actual events/second over last 60s
+  - `per_minute`: per_second × 60 (projected rate)
+  - `per_hour`: per_second × 3600 (projected rate)
+
+### Documentation
+- Updated `GRANULAR_STATS.md` with corrected example output and rate value explanations
+
+---
+
 ## [0.7.0] - 2025-12-12
 
 ### Added
@@ -571,7 +595,10 @@ Before releasing 1.0.0, we need:
 
 | Version | Date | Type | Key Features | Status |
 |---------|------|------|--------------|--------|
-| **0.5.0** | 2025-01-15 | Minor | HA, SNMPv3, CLI refactoring | **Current** |
+| **0.7.1** | 2025-12-18 | Patch | Stats CLI fix, Rate calculation fix | **Current** |
+| 0.7.0 | 2025-12-12 | Minor | Granular statistics, Stats API | Beta |
+| 0.6.0 | 2025-06-15 | Minor | Redis caching, Unified metrics | Beta |
+| 0.5.x | 2025-01-15 | Minor | HA, SNMPv3, CLI refactoring | Beta |
 | 0.4.0 | 2024-12-15 | Minor | eBPF acceleration | Beta |
 | 0.3.0 | 2024-11-01 | Minor | Enhanced filtering, Metrics | Beta |
 | 0.2.0 | 2024-09-15 | Minor | Multi-port, Destinations | Beta |

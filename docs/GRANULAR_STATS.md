@@ -60,23 +60,38 @@ trapninja stats summary --json --pretty
 
 Example output:
 ```
-=== TrapNinja Statistics Summary ===
+============================================================
+  TrapNinja Granular Statistics Summary
+============================================================
 
 TOTALS:
-  Traps Received:   1,234,567
-  Forwarded:        1,200,000
-  Blocked:          30,000
-  Redirected:       4,567
+  Total Traps:        1,234,567
+  Forwarded:          1,200,000
+  Blocked:               30,000
+  Redirected:             4,567
+  Dropped:                    0
+
+COUNTS:
+  Unique IPs:             3,456
+  Unique OIDs:              892
+  Destinations:               5
 
 RATES:
-  Current (1 min):  245.3/min
-  Average:          4.1/sec
+  Per Second:            166.67
+  Per Minute:          10000.00
+  Per Hour:           600000.00
 
-TRACKING:
-  Unique IPs:       3,456
-  Unique OIDs:      892
-  Destinations:     5
+MEMORY USAGE:
+  IP Tracking:       3456/10000
+  OID Tracking:        892/5000
+
+Last Updated: 2025-01-15 14:30:45
 ```
+
+**Rate Values:**
+- `Per Second` - Current rate based on the last 60-second window
+- `Per Minute` - Projected rate (per_second × 60)
+- `Per Hour` - Projected rate (per_second × 3600)
 
 ### Top Source IPs
 

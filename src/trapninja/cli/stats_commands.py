@@ -91,15 +91,28 @@ def _output_json(data: Any, pretty: bool = False):
         print(json.dumps(data, default=str))
 
 
-def _format_timestamp(ts: str) -> str:
-    """Format ISO timestamp for display."""
-    if not ts or 'T' not in ts:
-        return ts or 'N/A'
+def _format_timestamp(ts) -> str:
+    """Format timestamp for display. Accepts float (Unix) or string (ISO) timestamps."""
+    if not ts:
+        return 'N/A'
+    
     try:
-        dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
-        return dt.strftime('%Y-%m-%d %H:%M:%S')
-    except:
-        return ts
+        # Handle float (Unix timestamp)
+        if isinstance(ts, (int, float)):
+            dt = datetime.fromtimestamp(ts)
+            return dt.strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Handle ISO string
+        if isinstance(ts, str):
+            if 'T' in ts:
+                dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                return dt.strftime('%Y-%m-%d %H:%M:%S')
+            # Already formatted or unknown format
+            return ts
+        
+        return str(ts)
+    except Exception:
+        return str(ts) if ts else 'N/A'
 
 
 def _sort_stats_list(stats_list: List[Dict], sort_by: str) -> List[Dict]:
