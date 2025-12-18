@@ -16,6 +16,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.3] - 2025-12-18
+
+### Fixed
+
+#### Rate Calculation: Remove 10,000/min Hard Cap
+- **Replaced timestamp-based RateTracker with time-bucketed counting**. The previous
+  implementation stored individual timestamps in a deque with `max_samples=10000`,
+  causing rates to cap at 10,000/minute regardless of actual traffic.
+- **New implementation uses 1-second buckets** with per-bucket counters, allowing
+  accurate rate measurement for any traffic volume with fixed memory (~480 bytes
+  per tracker for 60-second window vs unbounded growth previously).
+- **Automatic bucket cleanup** removes buckets older than 2x window to prevent
+  unbounded memory growth.
+
+### Changed
+- Removed unused `deque` import from `stats/models.py`
+
+---
+
 ## [0.7.2] - 2025-12-18
 
 ### Fixed
@@ -613,7 +632,8 @@ Before releasing 1.0.0, we need:
 
 | Version | Date | Type | Key Features | Status |
 |---------|------|------|--------------|--------|
-| **0.7.2** | 2025-12-18 | Patch | Thread-safety fix for stats export | **Current** |
+| **0.7.3** | 2025-12-18 | Patch | Remove rate calculation 10k/min cap | **Current** |
+| 0.7.2 | 2025-12-18 | Patch | Thread-safety fix for stats export | Beta |
 | 0.7.1 | 2025-12-18 | Patch | Stats CLI fix, Rate calculation fix | Beta |
 | 0.7.0 | 2025-12-12 | Minor | Granular statistics, Stats API | Beta |
 | 0.6.0 | 2025-06-15 | Minor | Redis caching, Unified metrics | Beta |

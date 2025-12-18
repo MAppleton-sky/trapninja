@@ -11,7 +11,7 @@ Version: 1.0.0
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Set
-from collections import Counter, deque
+from collections import Counter
 from datetime import datetime, timedelta
 from enum import Enum
 
@@ -28,28 +28,40 @@ class TimeWindow(Enum):
 @dataclass
 class RateTracker:
     """
-    Tracks event rates using a sliding window.
+    Tracks event rates using time-bucketed counting.
     
-    Uses a deque of timestamps to calculate rates efficiently.
-    Memory-bounded by max_samples.
+    Uses 1-second buckets to count events, allowing accurate rate calculation
+    for any traffic volume with fixed memory (one int per second in window).
     Thread-safe for concurrent access.
+    
+    Memory usage: ~8 bytes per bucket (64-bit int) × window_seconds
+    For 60-second window: ~480 bytes per tracker
     """
     window_seconds: int = 60
-    max_samples: int = 10000
-    _timestamps: deque = field(default_factory=lambda: deque(maxlen=10000))
+    _bucket_counts: Dict[int, int] = field(default_factory=dict)
     _lock: Any = field(default_factory=lambda: __import__('threading').Lock())
     
     def __post_init__(self):
         import threading
-        self._timestamps = deque(maxlen=self.max_samples)
+        self._bucket_counts = {}
         self._lock = threading.Lock()
     
     def record(self, timestamp: float = None):
         """Record an event."""
         if timestamp is None:
             timestamp = time.time()
+        bucket = int(timestamp)  # 1-second buckets
         with self._lock:
-            self._timestamps.append(timestamp)
+            self._bucket_counts[bucket] = self._bucket_counts.get(bucket, 0) + 1
+            # Cleanup old buckets to prevent unbounded growth
+            self._cleanup_old_buckets(timestamp)
+    
+    def _cleanup_old_buckets(self, now: float):
+        """Remove buckets older than 2x window (called under lock)."""
+        cutoff = int(now) - (self.window_seconds * 2)
+        old_buckets = [b for b in self._bucket_counts if b < cutoff]
+        for b in old_buckets:
+            del self._bucket_counts[b]
     
     def get_rate(self, window_seconds: int = None) -> float:
         """
@@ -64,16 +76,7 @@ class RateTracker:
         if window_seconds is None:
             window_seconds = self.window_seconds
         
-        # Take a snapshot to avoid mutation during iteration
-        with self._lock:
-            timestamps = list(self._timestamps)
-        
-        if not timestamps:
-            return 0.0
-        
-        cutoff = time.time() - window_seconds
-        count = sum(1 for ts in timestamps if ts >= cutoff)
-        
+        count = self.get_count(window_seconds)
         return count / window_seconds if window_seconds > 0 else 0.0
     
     def get_count(self, window_seconds: int = None) -> int:
@@ -81,25 +84,25 @@ class RateTracker:
         if window_seconds is None:
             window_seconds = self.window_seconds
         
-        # Take a snapshot to avoid mutation during iteration
+        now = time.time()
+        cutoff = int(now) - window_seconds
+        
         with self._lock:
-            timestamps = list(self._timestamps)
-        
-        if not timestamps:
-            return 0
-        
-        cutoff = time.time() - window_seconds
-        return sum(1 for ts in timestamps if ts >= cutoff)
+            return sum(
+                count for bucket, count in self._bucket_counts.items()
+                if bucket >= cutoff
+            )
     
     def cleanup(self, max_age: int = None):
-        """Remove old timestamps beyond max_age."""
+        """Remove old buckets beyond max_age."""
         if max_age is None:
             max_age = self.window_seconds * 2
         
-        cutoff = time.time() - max_age
+        cutoff = int(time.time()) - max_age
         with self._lock:
-            while self._timestamps and self._timestamps[0] < cutoff:
-                self._timestamps.popleft()
+            old_buckets = [b for b in self._bucket_counts if b < cutoff]
+            for b in old_buckets:
+                del self._bucket_counts[b]
 
 
 @dataclass
