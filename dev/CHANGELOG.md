@@ -16,6 +16,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.5] - 2025-12-18
+
+### Fixed
+
+#### SNMPv3 Traps Now Respect Redirection Rules
+- **Critical fix**: SNMPv3 traps were bypassing all redirection logic and always
+  going to default destinations. After decryption and conversion to SNMPv2c,
+  the code now properly checks:
+  1. IP-based redirection rules (`redirected_ips.json`)
+  2. OID-based redirection rules (`redirected_oids.json`)
+- Also extracts and records trap OID from converted payload for granular statistics
+
+---
+
 ## [0.7.4] - 2025-12-18
 
 ### Fixed
@@ -654,7 +668,8 @@ Before releasing 1.0.0, we need:
 
 | Version | Date | Type | Key Features | Status |
 |---------|------|------|--------------|--------|
-| **0.7.4** | 2025-12-18 | Patch | Export metrics on startup, Redirection docs | **Current** |
+| **0.7.5** | 2025-12-18 | Patch | SNMPv3 redirection fix | **Current** |
+| 0.7.4 | 2025-12-18 | Patch | Export metrics on startup, Redirection docs | Beta |
 | 0.7.3 | 2025-12-18 | Patch | Remove rate calculation 10k/min cap | Beta |
 | 0.7.2 | 2025-12-18 | Patch | Thread-safety fix for stats export | Beta |
 | 0.7.1 | 2025-12-18 | Patch | Stats CLI fix, Rate calculation fix | Beta |

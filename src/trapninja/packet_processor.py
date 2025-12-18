@@ -942,15 +942,53 @@ class BatchProcessor:
                         f"SNMPv3->v2c conversion: {len(payload)} -> {len(v2c_payload)} bytes"
                     )
                     
-                    # Cache the converted trap
-                    cache_trap('default', source_ip, v2c_payload, None)
+                    # Extract OID from converted payload for redirection checks
+                    trap_oid = extract_oid_fast(v2c_payload)
                     
-                    # Forward if HA allows
+                    # Check IP-based redirection
+                    if source_ip in config['redirected_ips']:
+                        tag = config['redirected_ips'][source_ip]
+                        if tag in config['redirected_destinations']:
+                            cache_trap(tag, source_ip, v2c_payload, trap_oid)
+                            
+                            if ha_forwarding_enabled:
+                                forward_fast(source_ip, v2c_payload,
+                                            config['redirected_destinations'][tag])
+                                _stats.increment_redirected()
+                                _record_granular_stats(source_ip, oid=trap_oid,
+                                                       action='redirected', destination=tag)
+                                notify_trap_processed()
+                            else:
+                                _stats.increment_ha_blocked()
+                                _record_granular_stats(source_ip, oid=trap_oid, action='dropped')
+                            return True
+                    
+                    # Check OID-based redirection
+                    if trap_oid and trap_oid in config['redirected_oids']:
+                        tag = config['redirected_oids'][trap_oid]
+                        if tag in config['redirected_destinations']:
+                            cache_trap(tag, source_ip, v2c_payload, trap_oid)
+                            
+                            if ha_forwarding_enabled:
+                                forward_fast(source_ip, v2c_payload,
+                                            config['redirected_destinations'][tag])
+                                _stats.increment_redirected()
+                                _record_granular_stats(source_ip, oid=trap_oid,
+                                                       action='redirected', destination=tag)
+                                notify_trap_processed()
+                            else:
+                                _stats.increment_ha_blocked()
+                                _record_granular_stats(source_ip, oid=trap_oid, action='dropped')
+                            return True
+                    
+                    # No redirection - forward to default destinations
+                    cache_trap('default', source_ip, v2c_payload, trap_oid)
+                    
                     if ha_forwarding_enabled:
                         if config['destinations']:
                             forward_fast(source_ip, v2c_payload, config['destinations'])
                             _stats.increment_forwarded()
-                            _record_granular_stats(source_ip, oid=None,
+                            _record_granular_stats(source_ip, oid=trap_oid,
                                                    action='forwarded', destination='default')
                             notify_trap_processed()
                     else:
