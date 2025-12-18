@@ -287,7 +287,9 @@ class GranularStatsCollector:
         Returns:
             List of IP stats dictionaries
         """
-        ip_list = list(self._ip_stats.values())
+        # Snapshot under lock to avoid mutation during iteration
+        with self._lock:
+            ip_list = list(self._ip_stats.values())
         
         if sort_by == 'total':
             ip_list.sort(key=lambda x: x.total_traps, reverse=True)
@@ -312,7 +314,9 @@ class GranularStatsCollector:
         Returns:
             List of OID stats dictionaries
         """
-        oid_list = list(self._oid_stats.values())
+        # Snapshot under lock to avoid mutation during iteration
+        with self._lock:
+            oid_list = list(self._oid_stats.values())
         
         if sort_by == 'total':
             oid_list.sort(key=lambda x: x.total_traps, reverse=True)
@@ -327,7 +331,10 @@ class GranularStatsCollector:
     
     def get_all_destinations(self) -> List[Dict[str, Any]]:
         """Get stats for all destinations."""
-        return [d.to_dict(include_details=True) for d in self._dest_stats.values()]
+        # Snapshot under lock to avoid mutation during iteration
+        with self._lock:
+            dest_list = list(self._dest_stats.values())
+        return [d.to_dict(include_details=True) for d in dest_list]
     
     def get_snapshot(self, top_n: int = 50) -> StatsSnapshot:
         """
@@ -361,10 +368,13 @@ class GranularStatsCollector:
         snapshot.top_oids = self.get_top_oids(top_n, sort_by='total')
         snapshot.top_destinations = self.get_all_destinations()
         
-        # Time range
-        if self._ip_stats:
-            all_first_seen = [ip.first_seen for ip in self._ip_stats.values()]
-            all_last_seen = [ip.last_seen for ip in self._ip_stats.values()]
+        # Time range - snapshot under lock to avoid mutation during iteration
+        with self._lock:
+            ip_stats_list = list(self._ip_stats.values())
+        
+        if ip_stats_list:
+            all_first_seen = [ip.first_seen for ip in ip_stats_list]
+            all_last_seen = [ip.last_seen for ip in ip_stats_list]
             snapshot.oldest_data = min(all_first_seen) if all_first_seen else 0
             snapshot.newest_data = max(all_last_seen) if all_last_seen else 0
         
@@ -381,8 +391,12 @@ class GranularStatsCollector:
         Returns:
             List of matching IP stats
         """
+        # Snapshot under lock to avoid mutation during iteration
+        with self._lock:
+            ip_items = list(self._ip_stats.items())
+        
         results = []
-        for ip, stats in self._ip_stats.items():
+        for ip, stats in ip_items:
             if ip.startswith(pattern):
                 results.append(stats.to_dict(include_details=False))
                 if len(results) >= limit:
@@ -400,8 +414,12 @@ class GranularStatsCollector:
         Returns:
             List of matching OID stats
         """
+        # Snapshot under lock to avoid mutation during iteration
+        with self._lock:
+            oid_items = list(self._oid_stats.items())
+        
         results = []
-        for oid, stats in self._oid_stats.items():
+        for oid, stats in oid_items:
             if oid.startswith(pattern):
                 results.append(stats.to_dict(include_details=False))
                 if len(results) >= limit:
@@ -450,6 +468,14 @@ class GranularStatsCollector:
         Returns:
             Prometheus-formatted metrics string
         """
+        # Snapshot all stats under lock to avoid mutation during iteration
+        with self._lock:
+            ip_stats_list = list(self._ip_stats.values())
+            oid_stats_list = list(self._oid_stats.values())
+            dest_stats_list = list(self._dest_stats.values())
+            unique_ips = len(self._ip_stats)
+            unique_oids = len(self._oid_stats)
+        
         lines = []
         
         # Header
@@ -460,14 +486,14 @@ class GranularStatsCollector:
         # Per-IP metrics (top 50 by volume)
         lines.append("# HELP trapninja_ip_traps_total Total traps from IP")
         lines.append("# TYPE trapninja_ip_traps_total counter")
-        for ip_stat in sorted(self._ip_stats.values(), 
+        for ip_stat in sorted(ip_stats_list, 
                               key=lambda x: x.total_traps, reverse=True)[:50]:
             lines.append(f'trapninja_ip_traps_total{{ip="{ip_stat.ip_address}"}} {ip_stat.total_traps}')
         
         lines.append("")
         lines.append("# HELP trapninja_ip_rate_per_minute Current trap rate from IP")
         lines.append("# TYPE trapninja_ip_rate_per_minute gauge")
-        for ip_stat in sorted(self._ip_stats.values(),
+        for ip_stat in sorted(ip_stats_list,
                               key=lambda x: x.rate_per_minute, reverse=True)[:50]:
             if ip_stat.rate_per_minute > 0:
                 lines.append(f'trapninja_ip_rate_per_minute{{ip="{ip_stat.ip_address}"}} {ip_stat.rate_per_minute:.2f}')
@@ -476,14 +502,14 @@ class GranularStatsCollector:
         lines.append("")
         lines.append("# HELP trapninja_oid_traps_total Total traps with OID")
         lines.append("# TYPE trapninja_oid_traps_total counter")
-        for oid_stat in sorted(self._oid_stats.values(),
+        for oid_stat in sorted(oid_stats_list,
                                key=lambda x: x.total_traps, reverse=True)[:50]:
             lines.append(f'trapninja_oid_traps_total{{oid="{oid_stat.oid}"}} {oid_stat.total_traps}')
         
         lines.append("")
         lines.append("# HELP trapninja_oid_rate_per_minute Current trap rate for OID")
         lines.append("# TYPE trapninja_oid_rate_per_minute gauge")
-        for oid_stat in sorted(self._oid_stats.values(),
+        for oid_stat in sorted(oid_stats_list,
                                key=lambda x: x.rate_per_minute, reverse=True)[:50]:
             if oid_stat.rate_per_minute > 0:
                 lines.append(f'trapninja_oid_rate_per_minute{{oid="{oid_stat.oid}"}} {oid_stat.rate_per_minute:.2f}')
@@ -492,13 +518,13 @@ class GranularStatsCollector:
         lines.append("")
         lines.append("# HELP trapninja_dest_forwards_total Total forwards to destination")
         lines.append("# TYPE trapninja_dest_forwards_total counter")
-        for dest_stat in self._dest_stats.values():
+        for dest_stat in dest_stats_list:
             lines.append(f'trapninja_dest_forwards_total{{destination="{dest_stat.destination}"}} {dest_stat.total_forwarded}')
         
         # Global summary
         lines.append("")
-        lines.append(f"trapninja_granular_unique_ips {len(self._ip_stats)}")
-        lines.append(f"trapninja_granular_unique_oids {len(self._oid_stats)}")
+        lines.append(f"trapninja_granular_unique_ips {unique_ips}")
+        lines.append(f"trapninja_granular_unique_oids {unique_oids}")
         
         return "\n".join(lines)
     
@@ -534,21 +560,23 @@ class GranularStatsCollector:
         """Remove stale entries that haven't been seen recently."""
         cutoff = time.time() - self.config.stale_threshold
         
-        # Cleanup IPs
-        stale_ips = [
-            ip for ip, stats in self._ip_stats.items()
-            if stats.last_seen < cutoff
-        ]
-        for ip in stale_ips:
-            del self._ip_stats[ip]
-        
-        # Cleanup OIDs
-        stale_oids = [
-            oid for oid, stats in self._oid_stats.items()
-            if stats.last_seen < cutoff
-        ]
-        for oid in stale_oids:
-            del self._oid_stats[oid]
+        # Identify stale entries under lock, then delete
+        with self._lock:
+            # Cleanup IPs
+            stale_ips = [
+                ip for ip, stats in self._ip_stats.items()
+                if stats.last_seen < cutoff
+            ]
+            for ip in stale_ips:
+                del self._ip_stats[ip]
+            
+            # Cleanup OIDs
+            stale_oids = [
+                oid for oid, stats in self._oid_stats.items()
+                if stats.last_seen < cutoff
+            ]
+            for oid in stale_oids:
+                del self._oid_stats[oid]
         
         if stale_ips or stale_oids:
             logger.debug(f"Cleanup: removed {len(stale_ips)} stale IPs, "

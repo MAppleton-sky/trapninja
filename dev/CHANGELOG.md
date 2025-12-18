@@ -16,6 +16,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.2] - 2025-12-18
+
+### Fixed
+
+#### Thread Safety: OrderedDict Mutation During Iteration
+- **Fixed race condition in stats collector** causing `OrderedDict mutated during iteration`
+  errors during high-traffic scenarios. The background export thread was iterating over
+  the LRU dictionaries while the packet processing thread modified them.
+- **All iteration operations now snapshot under lock**:
+  - `export_prometheus()` - snapshots IP/OID/destination stats before iterating
+  - `get_snapshot()` - snapshots for time range calculation
+  - `get_top_ips()` / `get_top_oids()` - snapshots before sorting
+  - `get_all_destinations()` - snapshots before iteration
+  - `search_ips()` / `search_oids()` - snapshots before searching
+  - `_cleanup_stale()` - identifies and deletes stale entries under single lock
+
+---
+
 ## [0.7.1] - 2025-12-18
 
 ### Fixed
@@ -595,7 +613,8 @@ Before releasing 1.0.0, we need:
 
 | Version | Date | Type | Key Features | Status |
 |---------|------|------|--------------|--------|
-| **0.7.1** | 2025-12-18 | Patch | Stats CLI fix, Rate calculation fix | **Current** |
+| **0.7.2** | 2025-12-18 | Patch | Thread-safety fix for stats export | **Current** |
+| 0.7.1 | 2025-12-18 | Patch | Stats CLI fix, Rate calculation fix | Beta |
 | 0.7.0 | 2025-12-12 | Minor | Granular statistics, Stats API | Beta |
 | 0.6.0 | 2025-06-15 | Minor | Redis caching, Unified metrics | Beta |
 | 0.5.x | 2025-01-15 | Minor | HA, SNMPv3, CLI refactoring | Beta |
