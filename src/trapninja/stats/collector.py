@@ -151,6 +151,8 @@ class GranularStatsCollector:
         self._running = True
         self._schedule_cleanup()
         self._schedule_export()
+        # Initial export so files exist immediately
+        self._export_stats()
         logger.info("GranularStatsCollector started")
     
     def stop(self):

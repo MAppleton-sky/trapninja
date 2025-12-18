@@ -1,6 +1,6 @@
 # TrapNinja User Guide
 
-**Version 0.7.0 (Beta)**
+**Version 0.7.4 (Beta)**
 
 A high-performance SNMP trap forwarder for telecommunications environments.
 
@@ -122,6 +122,181 @@ python3.9 -O trapninja.py --unblock-oid 1.3.6.1.4.1.8072.2.3.0.1
 ### Changes Apply Immediately
 
 Filtering changes take effect immediately without restart.
+
+---
+
+## Trap Redirection
+
+Redirection allows you to route specific traps to different destinations based on source IP or trap OID. This is useful for:
+
+- Sending security-related traps to a Security Operations Center (SOC)
+- Routing configuration change traps to a separate monitoring system
+- Directing vendor-specific traps to specialized NOC teams
+
+### How Redirection Works
+
+```
+┌─────────────┐     ┌──────────────────┐     ┌─────────────────────┐
+│ Incoming    │     │ Check Redirect   │     │ Forward to:         │
+│ Trap        │────▶│ Rules            │────▶│ - Default dest OR   │
+│             │     │ (IP then OID)    │     │ - Redirect dest     │
+└─────────────┘     └──────────────────┘     └─────────────────────┘
+```
+
+1. TrapNinja checks if the source IP matches a redirection rule
+2. If no IP match, checks if the trap OID matches a redirection rule
+3. If a match is found, the trap is sent to the redirect destination(s) instead of the default
+4. If no match, the trap goes to the normal destination(s)
+
+**Note:** Redirected traps are sent *instead of* the default destination, not in addition to it.
+
+### Configuration Files
+
+Redirection uses three configuration files in the `config/` directory:
+
+| File | Purpose |
+|------|--------|
+| `redirected_ips.json` | Map source IPs to destination tags |
+| `redirected_oids.json` | Map trap OIDs to destination tags |
+| `redirected_destinations.json` | Define destination groups by tag |
+
+### Step 1: Define Destination Groups
+
+Edit `config/redirected_destinations.json` to define where redirected traps should go:
+
+```json
+{
+  "security": [
+    ["10.234.50.10", 162],
+    ["10.234.50.11", 162]
+  ],
+  "config-changes": [
+    ["10.234.60.20", 162]
+  ],
+  "voice-noc": [
+    ["10.234.70.30", 162],
+    ["10.234.70.31", 162]
+  ]
+}
+```
+
+Each tag (e.g., "security") maps to a list of `["ip", port]` destinations.
+
+### Step 2: Create IP-Based Redirections
+
+Edit `config/redirected_ips.json` to redirect all traps from specific IPs:
+
+```json
+[
+  ["10.100.1.50", "security"],
+  ["10.100.1.51", "security"],
+  ["10.200.5.100", "voice-noc"]
+]
+```
+
+Format: `["source_ip", "destination_tag"]`
+
+**Use case:** All traps from firewall 10.100.1.50 go to the security team.
+
+### Step 3: Create OID-Based Redirections
+
+Edit `config/redirected_oids.json` to redirect specific trap types:
+
+```json
+[
+  ["1.3.6.1.4.1.9.9.43.2.0.1", "config-changes"],
+  ["1.3.6.1.4.1.9.9.43.2.0.2", "config-changes"],
+  ["1.3.6.1.6.3.1.1.5.5", "security"]
+]
+```
+
+Format: `["trap_oid", "destination_tag"]`
+
+**Common OIDs to redirect:**
+
+| OID | Description | Suggested Tag |
+|-----|-------------|---------------|
+| `1.3.6.1.6.3.1.1.5.5` | Authentication Failure | security |
+| `1.3.6.1.4.1.9.9.43.2.0.1` | Cisco Config Change | config-changes |
+| `1.3.6.1.4.1.2636.4.1.1` | Juniper Chassis Alarm | critical |
+
+### Priority: IP vs OID
+
+If both an IP rule and OID rule could match:
+- **IP rules are checked first**
+- If the source IP matches a rule, that redirection is used
+- OID rules are only checked if no IP rule matches
+
+### Example: Complete Setup
+
+**Scenario:** Route security traps to SOC, config changes to change management.
+
+`config/redirected_destinations.json`:
+```json
+{
+  "soc": [
+    ["10.50.1.100", 162]
+  ],
+  "change-mgmt": [
+    ["10.50.2.100", 162]
+  ]
+}
+```
+
+`config/redirected_ips.json`:
+```json
+[
+  ["10.1.1.1", "soc"],
+  ["10.1.1.2", "soc"]
+]
+```
+
+`config/redirected_oids.json`:
+```json
+[
+  ["1.3.6.1.6.3.1.1.5.5", "soc"],
+  ["1.3.6.1.4.1.9.9.43.2.0.1", "change-mgmt"],
+  ["1.3.6.1.4.1.9.9.43.2.0.2", "change-mgmt"]
+]
+```
+
+### Verify Redirection
+
+After editing config files, verify with statistics:
+
+```bash
+# Check overall redirected count
+python3.9 -O trapninja.py --stats-summary
+
+# Look for "Redirected" in output
+```
+
+You can also check the log file:
+```bash
+grep -i redirect /var/log/trapninja.log | tail -10
+```
+
+### Configuration Reload
+
+Redirection configuration is checked periodically (every 60 seconds by default). Changes will take effect automatically without restart.
+
+To force an immediate reload, restart the service:
+```bash
+python3.9 -O trapninja.py --restart
+```
+
+### Troubleshooting Redirection
+
+**Traps not being redirected:**
+1. Verify JSON syntax is valid: `python3 -m json.tool config/redirected_ips.json`
+2. Check that the destination tag exists in `redirected_destinations.json`
+3. Verify IP/OID format is correct (no typos)
+4. Check logs: `grep -i redirect /var/log/trapninja.log`
+
+**Traps going to wrong destination:**
+1. Remember IP rules take priority over OID rules
+2. Check for overlapping rules
+3. Verify the tag names match exactly (case-sensitive)
 
 ---
 
@@ -410,10 +585,13 @@ All configuration files are in the `config/` directory.
 
 | File | Purpose |
 |------|---------|
-| `destinations.json` | Forwarding destinations |
+| `destinations.json` | Default forwarding destinations |
 | `listen_ports.json` | UDP ports to listen on |
 | `blocked_ips.json` | IPs to block (managed via CLI) |
 | `blocked_traps.json` | OIDs to block (managed via CLI) |
+| `redirected_ips.json` | IPs to redirect (edit manually) |
+| `redirected_oids.json` | OIDs to redirect (edit manually) |
+| `redirected_destinations.json` | Redirect destination groups |
 | `ha_config.json` | High Availability settings |
 | `cache_config.json` | Redis cache settings |
 | `stats_config.json` | Granular statistics settings |
@@ -581,4 +759,4 @@ python3.9 -O trapninja.py --stats-help
 
 ---
 
-*TrapNinja v0.7.0 (Beta) - Target production release: Q2 2025*
+*TrapNinja v0.7.4 (Beta) - Target production release: Q2 2025*

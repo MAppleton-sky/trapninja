@@ -16,6 +16,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.4] - 2025-12-18
+
+### Fixed
+
+#### Metrics Files Not Available on Startup
+- **Added initial export on collector start**. Previously, `trapninja_granular.prom`
+  and `trapninja_granular.json` were not created until 60 seconds after service start.
+  Now files are created immediately when the stats collector starts.
+
+### Documentation
+
+#### Added Trap Redirection Documentation
+- **Added comprehensive Trap Redirection section to USER_GUIDE.md** covering:
+  - How redirection works (IP rules checked before OID rules)
+  - Step-by-step configuration for all three config files
+  - Common OIDs to redirect with suggested tags
+  - Complete example setup for SOC and change management routing
+  - Verification and troubleshooting guidance
+- **Updated Configuration Files table** to include redirection config files
+
+---
+
 ## [0.7.3] - 2025-12-18
 
 ### Fixed
@@ -632,7 +654,8 @@ Before releasing 1.0.0, we need:
 
 | Version | Date | Type | Key Features | Status |
 |---------|------|------|--------------|--------|
-| **0.7.3** | 2025-12-18 | Patch | Remove rate calculation 10k/min cap | **Current** |
+| **0.7.4** | 2025-12-18 | Patch | Export metrics on startup, Redirection docs | **Current** |
+| 0.7.3 | 2025-12-18 | Patch | Remove rate calculation 10k/min cap | Beta |
 | 0.7.2 | 2025-12-18 | Patch | Thread-safety fix for stats export | Beta |
 | 0.7.1 | 2025-12-18 | Patch | Stats CLI fix, Rate calculation fix | Beta |
 | 0.7.0 | 2025-12-12 | Minor | Granular statistics, Stats API | Beta |
