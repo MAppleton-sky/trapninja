@@ -382,21 +382,22 @@ def handle_stats_top_oids(args: Namespace) -> int:
         return 0
     
     # Header
-    print(f"{'#':>3}  {'OID':<42} {'Total':>10} {'Rate/min':>9} {'Peak/min':>9} {'Peak Time':<19}")
-    print("-" * 105)
+    print(f"{'#':>3}  {'OID':<40} {'Total':>10} {'Rate/min':>9} {'Peak/min':>9} {'Sources':>8} {'Peak Time':<19}")
+    print("-" * 115)
     
     for i, oid in enumerate(oids, 1):
         oid_str = oid.get('oid', 'N/A')
         # Truncate long OIDs
-        if len(oid_str) > 40:
-            oid_str = oid_str[:37] + '...'
+        if len(oid_str) > 38:
+            oid_str = oid_str[:35] + '...'
         
         peak_time = _format_timestamp(oid.get('peak_timestamp', '')) if oid.get('peak_timestamp') else 'N/A'
         print(f"{i:>3}  "
-              f"{oid_str:<42} "
+              f"{oid_str:<40} "
               f"{oid.get('total_traps', 0):>10,} "
               f"{oid.get('rate_per_minute', 0):>9.1f} "
               f"{oid.get('peak_rate_per_minute', 0):>9.1f} "
+              f"{oid.get('unique_sources', 0):>8} "
               f"{peak_time:<19}")
     
     print()
