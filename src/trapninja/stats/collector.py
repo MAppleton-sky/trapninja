@@ -430,9 +430,13 @@ class GranularStatsCollector:
     
     def get_summary(self) -> Dict[str, Any]:
         """Get a quick summary for dashboards."""
+        now = time.time()
+        uptime_seconds = now - self._start_time
+        
         return {
-            'timestamp': time.time(),
-            'uptime_seconds': time.time() - self._start_time,
+            'timestamp': now,
+            'collection_started': self._start_time,
+            'uptime_seconds': uptime_seconds,
             'totals': {
                 'traps': self._total_traps,
                 'forwarded': self._total_forwarded,
@@ -450,6 +454,12 @@ class GranularStatsCollector:
                 'per_second': round(self._global_rate.get_rate(60), 2),
                 'per_minute': round(self._global_rate.get_rate(60) * 60, 2),
                 'per_hour': round(self._global_rate.get_rate(60) * 3600, 2),
+            },
+            'averages': {
+                # Calculate average rates over full collection period
+                'traps_per_second': round(self._total_traps / uptime_seconds, 2) if uptime_seconds > 0 else 0,
+                'traps_per_minute': round((self._total_traps / uptime_seconds) * 60, 2) if uptime_seconds > 0 else 0,
+                'traps_per_hour': round((self._total_traps / uptime_seconds) * 3600, 2) if uptime_seconds > 0 else 0,
             },
             'limits': {
                 'max_ips': self.config.max_ips,

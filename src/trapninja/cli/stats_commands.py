@@ -115,6 +115,74 @@ def _format_timestamp(ts) -> str:
         return str(ts) if ts else 'N/A'
 
 
+def _format_duration(seconds: float) -> str:
+    """Format duration in seconds to human-readable string."""
+    if not seconds or seconds <= 0:
+        return '0s'
+    
+    seconds = int(seconds)
+    
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+    
+    parts = []
+    if days > 0:
+        parts.append(f"{days}d")
+    if hours > 0:
+        parts.append(f"{hours}h")
+    if minutes > 0:
+        parts.append(f"{minutes}m")
+    if secs > 0 or not parts:
+        parts.append(f"{secs}s")
+    
+    return ' '.join(parts)
+
+
+def _get_collection_period() -> tuple:
+    """
+    Get collection period info from daemon or file.
+    
+    Returns:
+        tuple: (started_timestamp, uptime_seconds) or (None, None) if unavailable
+    """
+    # Try daemon first
+    data = _query_daemon_stats({'action': 'summary'})
+    
+    # Fall back to file
+    if data is None:
+        data = _get_stats_from_file()
+    
+    if not data:
+        return None, None
+    
+    summary = data.get('summary', data)
+    started = summary.get('collection_started', data.get('collection_started'))
+    uptime = summary.get('uptime_seconds', data.get('uptime_seconds', 0))
+    
+    return started, uptime
+
+
+def _print_collection_header(title: str):
+    """
+    Print a stats header with collection period info.
+    
+    Args:
+        title: The title to display
+    """
+    started, uptime = _get_collection_period()
+    
+    if uptime and uptime > 0:
+        period_str = f" (collected over {_format_duration(uptime)})"
+    else:
+        period_str = ""
+    
+    print(f"\n" + "=" * 90)
+    print(f"  {title}{period_str}")
+    print("=" * 90 + "\n")
+
+
 def _sort_stats_list(stats_list: List[Dict], sort_by: str) -> List[Dict]:
     """Sort a list of stats dictionaries by the specified field."""
     if not stats_list:
@@ -168,8 +236,18 @@ def handle_stats_summary(args: Namespace) -> int:
     totals = summary.get('totals', summary)
     counts = summary.get('counts', {})
     rates = summary.get('rates', {})
+    averages = summary.get('averages', {})
     
-    print("TOTALS:")
+    # Collection period information
+    uptime_seconds = summary.get('uptime_seconds', data.get('uptime_seconds', 0))
+    collection_started = summary.get('collection_started', data.get('collection_started'))
+    
+    print("COLLECTION PERIOD:")
+    if collection_started:
+        print(f"  Started:           {_format_timestamp(collection_started)}")
+    print(f"  Duration:          {_format_duration(uptime_seconds)}")
+    
+    print("\nTOTALS:")
     print(f"  Total Traps:       {totals.get('traps', totals.get('total_traps', 0)):>12,}")
     print(f"  Forwarded:         {totals.get('forwarded', totals.get('total_forwarded', 0)):>12,}")
     print(f"  Blocked:           {totals.get('blocked', totals.get('total_blocked', 0)):>12,}")
@@ -183,12 +261,18 @@ def handle_stats_summary(args: Namespace) -> int:
         print(f"  Destinations:      {counts.get('destinations', 0):>12}")
     
     if rates:
-        print("\nRATES:")
+        print("\nCURRENT RATES (last minute):")
         print(f"  Per Second:        {rates.get('per_second', 0):>12.2f}")
         print(f"  Per Minute:        {rates.get('per_minute', 0):>12.2f}")
         print(f"  Per Hour:          {rates.get('per_hour', 0):>12.2f}")
     
-    limits = data.get('limits', {})
+    if averages:
+        print(f"\nAVERAGE RATES (over {_format_duration(uptime_seconds)}):")
+        print(f"  Per Second:        {averages.get('traps_per_second', 0):>12.2f}")
+        print(f"  Per Minute:        {averages.get('traps_per_minute', 0):>12.2f}")
+        print(f"  Per Hour:          {averages.get('traps_per_hour', 0):>12.2f}")
+    
+    limits = data.get('limits', summary.get('limits', {}))
     if limits:
         print("\nMEMORY USAGE:")
         print(f"  IP Tracking:       {limits.get('ip_usage', 'N/A'):>12}")
@@ -233,9 +317,7 @@ def handle_stats_top_ips(args: Namespace) -> int:
         _output_json(ips, pretty)
         return 0
     
-    print("\n" + "=" * 90)
-    print(f"  Top {count} Source IPs (sorted by {sort_by})")
-    print("=" * 90 + "\n")
+    _print_collection_header(f"Top {count} Source IPs (sorted by {sort_by})")
     
     if not ips:
         print("No IP statistics available yet.")
@@ -290,9 +372,7 @@ def handle_stats_top_oids(args: Namespace) -> int:
         _output_json(oids, pretty)
         return 0
     
-    print("\n" + "=" * 95)
-    print(f"  Top {count} OIDs (sorted by {sort_by})")
-    print("=" * 95 + "\n")
+    _print_collection_header(f"Top {count} OIDs (sorted by {sort_by})")
     
     if not oids:
         print("No OID statistics available yet.")
@@ -343,8 +423,11 @@ def handle_stats_ip_detail(args: Namespace) -> int:
         _output_json(ip_data, pretty)
         return 0
     
+    started, uptime = _get_collection_period()
+    period_info = f" (stats from last {_format_duration(uptime)})" if uptime else ""
+    
     print("\n" + "=" * 60)
-    print(f"  Statistics for IP: {ip_address}")
+    print(f"  Statistics for IP: {ip_address}{period_info}")
     print("=" * 60 + "\n")
     
     print("COUNTS:")
@@ -410,8 +493,11 @@ def handle_stats_oid_detail(args: Namespace) -> int:
         _output_json(oid_data, pretty)
         return 0
     
+    started, uptime = _get_collection_period()
+    period_info = f" (stats from last {_format_duration(uptime)})" if uptime else ""
+    
     print("\n" + "=" * 60)
-    print(f"  Statistics for OID")
+    print(f"  Statistics for OID{period_info}")
     print("=" * 60)
     print(f"OID: {oid}\n")
     
@@ -465,9 +551,7 @@ def handle_stats_destinations(args: Namespace) -> int:
         _output_json(dests, pretty)
         return 0
     
-    print("\n" + "=" * 60)
-    print("  Destination Statistics")
-    print("=" * 60 + "\n")
+    _print_collection_header("Destination Statistics")
     
     if not dests:
         print("No destination statistics available yet.")

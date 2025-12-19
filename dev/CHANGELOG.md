@@ -16,6 +16,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.6] - 2025-12-19
+
+### Enhanced
+
+#### Statistics Now Show Collection Period Across All Commands
+- **All stats commands now display collection period context**:
+  - `--stats-summary` - Full collection period section with start time, duration, and averages
+  - `--stats-top-ips` - Header shows "(collected over 2d 14h 23m)"
+  - `--stats-top-oids` - Header shows "(collected over 2d 14h 23m)"
+  - `--stats-ip` - Header shows "(stats from last 2d 14h 23m)"
+  - `--stats-oid` - Header shows "(stats from last 2d 14h 23m)"
+  - `--stats-destinations` - Header shows "(collected over 2d 14h 23m)"
+- **Summary now includes average rates over full collection period**:
+  - "Current Rates (last minute)" - real-time throughput
+  - "Average Rates (over Xd Xh Xm)" - historical average
+- **Human-readable duration format** (e.g., "2d 14h 23m 15s")
+- This provides context so "13,000,000 traps" shows scale
+  (whether over 6 hours, 2 days, or a week)
+
+---
+
 ## [0.7.5] - 2025-12-18
 
 ### Fixed
@@ -668,7 +689,8 @@ Before releasing 1.0.0, we need:
 
 | Version | Date | Type | Key Features | Status |
 |---------|------|------|--------------|--------|
-| **0.7.5** | 2025-12-18 | Patch | SNMPv3 redirection fix | **Current** |
+| **0.7.6** | 2025-12-19 | Enhancement | Stats collection period & averages | **Current** |
+| 0.7.5 | 2025-12-18 | Patch | SNMPv3 redirection fix | Beta |
 | 0.7.4 | 2025-12-18 | Patch | Export metrics on startup, Redirection docs | Beta |
 | 0.7.3 | 2025-12-18 | Patch | Remove rate calculation 10k/min cap | Beta |
 | 0.7.2 | 2025-12-18 | Patch | Thread-safety fix for stats export | Beta |
