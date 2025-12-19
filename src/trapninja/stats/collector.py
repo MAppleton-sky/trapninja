@@ -284,7 +284,7 @@ class GranularStatsCollector:
         
         Args:
             n: Number of IPs to return
-            sort_by: 'total', 'rate', 'blocked', 'recent'
+            sort_by: 'total', 'rate', 'peak', 'blocked', 'recent'
             
         Returns:
             List of IP stats dictionaries
@@ -297,6 +297,8 @@ class GranularStatsCollector:
             ip_list.sort(key=lambda x: x.total_traps, reverse=True)
         elif sort_by == 'rate':
             ip_list.sort(key=lambda x: x.rate_per_minute, reverse=True)
+        elif sort_by == 'peak':
+            ip_list.sort(key=lambda x: x.peak_rate_per_minute, reverse=True)
         elif sort_by == 'blocked':
             ip_list.sort(key=lambda x: x.blocked, reverse=True)
         elif sort_by == 'recent':
@@ -311,7 +313,7 @@ class GranularStatsCollector:
         
         Args:
             n: Number of OIDs to return
-            sort_by: 'total', 'rate', 'blocked', 'recent'
+            sort_by: 'total', 'rate', 'peak', 'blocked', 'recent'
             
         Returns:
             List of OID stats dictionaries
@@ -324,6 +326,8 @@ class GranularStatsCollector:
             oid_list.sort(key=lambda x: x.total_traps, reverse=True)
         elif sort_by == 'rate':
             oid_list.sort(key=lambda x: x.rate_per_minute, reverse=True)
+        elif sort_by == 'peak':
+            oid_list.sort(key=lambda x: x.peak_rate_per_minute, reverse=True)
         elif sort_by == 'blocked':
             oid_list.sort(key=lambda x: x.blocked, reverse=True)
         elif sort_by == 'recent':

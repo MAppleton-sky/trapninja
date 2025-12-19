@@ -16,6 +16,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.7] - 2025-12-19
+
+### Enhanced
+
+#### Peak Rate Tracking for IPs and OIDs
+- **Track highest rate ever observed** for each IP and OID
+- Peak rate is checked every 5 seconds during trap processing
+- New data exposed:
+  - `peak_rate_per_minute`: Highest traps/minute ever seen
+  - `peak_timestamp`: When the peak occurred
+- **New sort option**: `--sort peak` for `--stats-top-ips` and `--stats-top-oids`
+- **Updated table displays** now show:
+  - `Rate/min`: Current rate (last 60 seconds)
+  - `Peak/min`: Highest rate ever observed  
+  - `Peak Time`: When the peak occurred
+- **Detailed views** (`--stats-ip`, `--stats-oid`) show:
+  - Current/Second, Current/Minute rates
+  - Peak/Minute rate and when it occurred
+- Use case: Identify IPs/OIDs that caused burst activity even if they're quiet now
+
+Example:
+```
+# Find IPs that had the highest burst activity
+trapninja --stats-top-ips --sort peak
+
+# Find trap types that caused alarm floods  
+trapninja --stats-top-oids --sort peak
+```
+
+---
+
 ## [0.7.6] - 2025-12-19
 
 ### Enhanced
@@ -689,7 +720,8 @@ Before releasing 1.0.0, we need:
 
 | Version | Date | Type | Key Features | Status |
 |---------|------|------|--------------|--------|
-| **0.7.6** | 2025-12-19 | Enhancement | Stats collection period & averages | **Current** |
+| **0.7.7** | 2025-12-19 | Enhancement | Peak rate tracking & --sort peak | **Current** |
+| 0.7.6 | 2025-12-19 | Enhancement | Stats collection period & averages | Beta |
 | 0.7.5 | 2025-12-18 | Patch | SNMPv3 redirection fix | Beta |
 | 0.7.4 | 2025-12-18 | Patch | Export metrics on startup, Redirection docs | Beta |
 | 0.7.3 | 2025-12-18 | Patch | Remove rate calculation 10k/min cap | Beta |

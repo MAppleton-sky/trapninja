@@ -192,6 +192,8 @@ def _sort_stats_list(stats_list: List[Dict], sort_by: str) -> List[Dict]:
         return sorted(stats_list, key=lambda x: x.get('total_traps', 0), reverse=True)
     elif sort_by == 'rate':
         return sorted(stats_list, key=lambda x: x.get('rate_per_minute', 0), reverse=True)
+    elif sort_by == 'peak':
+        return sorted(stats_list, key=lambda x: x.get('peak_rate_per_minute', 0), reverse=True)
     elif sort_by == 'blocked':
         return sorted(stats_list, key=lambda x: x.get('blocked', 0), reverse=True)
     elif sort_by == 'recent':
@@ -324,18 +326,19 @@ def handle_stats_top_ips(args: Namespace) -> int:
         return 0
     
     # Header
-    print(f"{'#':>3}  {'IP Address':<20} {'Total':>10} {'Fwd':>8} {'Blk':>8} {'Rate/min':>10} {'Last Seen':<20}")
-    print("-" * 90)
+    print(f"{'#':>3}  {'IP Address':<18} {'Total':>10} {'Rate/min':>9} {'Peak/min':>9} {'Peak Time':<19} {'Last Seen':<19}")
+    print("-" * 100)
     
     for i, ip in enumerate(ips, 1):
         last_seen = _format_timestamp(ip.get('last_seen', ''))
+        peak_time = _format_timestamp(ip.get('peak_timestamp', '')) if ip.get('peak_timestamp') else 'N/A'
         print(f"{i:>3}  "
-              f"{ip.get('ip_address', 'N/A'):<20} "
+              f"{ip.get('ip_address', 'N/A'):<18} "
               f"{ip.get('total_traps', 0):>10,} "
-              f"{ip.get('forwarded', 0):>8,} "
-              f"{ip.get('blocked', 0):>8,} "
-              f"{ip.get('rate_per_minute', 0):>10.2f} "
-              f"{last_seen:<20}")
+              f"{ip.get('rate_per_minute', 0):>9.1f} "
+              f"{ip.get('peak_rate_per_minute', 0):>9.1f} "
+              f"{peak_time:<19} "
+              f"{last_seen:<19}")
     
     print()
     return 0
@@ -379,20 +382,22 @@ def handle_stats_top_oids(args: Namespace) -> int:
         return 0
     
     # Header
-    print(f"{'#':>3}  {'OID':<50} {'Total':>10} {'Rate/min':>10} {'Sources':>8}")
-    print("-" * 95)
+    print(f"{'#':>3}  {'OID':<42} {'Total':>10} {'Rate/min':>9} {'Peak/min':>9} {'Peak Time':<19}")
+    print("-" * 105)
     
     for i, oid in enumerate(oids, 1):
         oid_str = oid.get('oid', 'N/A')
         # Truncate long OIDs
-        if len(oid_str) > 48:
-            oid_str = oid_str[:45] + '...'
+        if len(oid_str) > 40:
+            oid_str = oid_str[:37] + '...'
         
+        peak_time = _format_timestamp(oid.get('peak_timestamp', '')) if oid.get('peak_timestamp') else 'N/A'
         print(f"{i:>3}  "
-              f"{oid_str:<50} "
+              f"{oid_str:<42} "
               f"{oid.get('total_traps', 0):>10,} "
-              f"{oid.get('rate_per_minute', 0):>10.2f} "
-              f"{oid.get('unique_sources', 0):>8}")
+              f"{oid.get('rate_per_minute', 0):>9.1f} "
+              f"{oid.get('peak_rate_per_minute', 0):>9.1f} "
+              f"{peak_time:<19}")
     
     print()
     return 0
@@ -444,8 +449,12 @@ def handle_stats_ip_detail(args: Namespace) -> int:
     print(f"  Idle:            {ip_data.get('idle_seconds', 0):.0f} seconds")
     
     print("\nRATES:")
-    print(f"  Per Second:      {ip_data.get('rate_per_second', 0):>12.4f}")
-    print(f"  Per Minute:      {ip_data.get('rate_per_minute', 0):>12.2f}")
+    print(f"  Current/Second:  {ip_data.get('rate_per_second', 0):>12.4f}")
+    print(f"  Current/Minute:  {ip_data.get('rate_per_minute', 0):>12.2f}")
+    print(f"  Peak/Minute:     {ip_data.get('peak_rate_per_minute', 0):>12.2f}")
+    peak_ts = ip_data.get('peak_timestamp')
+    if peak_ts:
+        print(f"  Peak Occurred:   {_format_timestamp(peak_ts):>12}")
     
     top_oids = ip_data.get('top_oids', [])
     if top_oids:
@@ -513,8 +522,12 @@ def handle_stats_oid_detail(args: Namespace) -> int:
     print(f"  Last Seen:       {_format_timestamp(oid_data.get('last_seen', ''))}")
     
     print("\nRATES:")
-    print(f"  Per Second:      {oid_data.get('rate_per_second', 0):>12.4f}")
-    print(f"  Per Minute:      {oid_data.get('rate_per_minute', 0):>12.2f}")
+    print(f"  Current/Second:  {oid_data.get('rate_per_second', 0):>12.4f}")
+    print(f"  Current/Minute:  {oid_data.get('rate_per_minute', 0):>12.2f}")
+    print(f"  Peak/Minute:     {oid_data.get('peak_rate_per_minute', 0):>12.2f}")
+    peak_ts = oid_data.get('peak_timestamp')
+    if peak_ts:
+        print(f"  Peak Occurred:   {_format_timestamp(peak_ts):>12}")
     
     top_ips = oid_data.get('top_source_ips', [])
     if top_ips:
@@ -692,7 +705,12 @@ OPTIONS
 -------
 
   -n, --count <N>           Number of items to show (default: 10)
-  -s, --sort <FIELD>        Sort by: total, rate, blocked, recent
+  -s, --sort <FIELD>        Sort by: total, rate, peak, blocked, recent
+                            - total: highest total trap count
+                            - rate: highest current rate (last 60 seconds)
+                            - peak: highest peak rate ever observed
+                            - blocked: most blocked traps
+                            - recent: most recently seen
   --json                    Output as JSON
   --pretty                  Pretty-print JSON output
   -f, --format <FMT>        Export format: json, prometheus
@@ -701,8 +719,14 @@ OPTIONS
 EXAMPLES
 --------
 
-# Show top 20 source IPs sorted by rate
+# Show top 20 source IPs sorted by current rate
 trapninja --stats-top-ips -n 20 --sort rate
+
+# Show top 10 IPs that had the highest burst activity (peak rate)
+trapninja --stats-top-ips --sort peak
+
+# Show top OIDs by peak rate (identify burst trap types)
+trapninja --stats-top-oids --sort peak
 
 # Get details for a specific IP
 trapninja --stats-ip --ip 10.0.0.1

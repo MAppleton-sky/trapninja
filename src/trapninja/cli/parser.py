@@ -272,7 +272,7 @@ Examples:
     parser.add_argument('--count', '-n', type=int, default=10,
                        help='Number of items to show in stats lists (default: 10)')
     parser.add_argument('--sort', '-s', type=str, default='total',
-                       choices=['total', 'rate', 'blocked', 'recent'],
+                       choices=['total', 'rate', 'peak', 'blocked', 'recent'],
                        help='Sort order for stats lists (default: total)')
     parser.add_argument('--format', '-f', type=str, default='json',
                        choices=['json', 'prometheus'],

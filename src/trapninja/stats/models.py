@@ -34,17 +34,25 @@ class RateTracker:
     for any traffic volume with fixed memory (one int per second in window).
     Thread-safe for concurrent access.
     
+    Also tracks peak rate (highest rate observed) and when it occurred.
+    
     Memory usage: ~8 bytes per bucket (64-bit int) × window_seconds
     For 60-second window: ~480 bytes per tracker
     """
     window_seconds: int = 60
     _bucket_counts: Dict[int, int] = field(default_factory=dict)
     _lock: Any = field(default_factory=lambda: __import__('threading').Lock())
+    _peak_rate: float = 0.0
+    _peak_timestamp: float = 0.0
+    _last_rate_check: float = 0.0
     
     def __post_init__(self):
         import threading
         self._bucket_counts = {}
         self._lock = threading.Lock()
+        self._peak_rate = 0.0
+        self._peak_timestamp = 0.0
+        self._last_rate_check = 0.0
     
     def record(self, timestamp: float = None):
         """Record an event."""
@@ -55,6 +63,10 @@ class RateTracker:
             self._bucket_counts[bucket] = self._bucket_counts.get(bucket, 0) + 1
             # Cleanup old buckets to prevent unbounded growth
             self._cleanup_old_buckets(timestamp)
+            # Check for new peak rate (but not on every event - every 5 seconds)
+            if timestamp - self._last_rate_check >= 5.0:
+                self._check_peak_rate(timestamp)
+                self._last_rate_check = timestamp
     
     def _cleanup_old_buckets(self, now: float):
         """Remove buckets older than 2x window (called under lock)."""
@@ -62,6 +74,22 @@ class RateTracker:
         old_buckets = [b for b in self._bucket_counts if b < cutoff]
         for b in old_buckets:
             del self._bucket_counts[b]
+    
+    def _check_peak_rate(self, now: float):
+        """Check if current rate is a new peak (called under lock)."""
+        current_rate = self._get_count_unlocked(60)
+        if current_rate > self._peak_rate:
+            self._peak_rate = current_rate
+            self._peak_timestamp = now
+    
+    def _get_count_unlocked(self, window_seconds: int) -> int:
+        """Get count without acquiring lock (caller must hold lock)."""
+        now = time.time()
+        cutoff = int(now) - window_seconds
+        return sum(
+            count for bucket, count in self._bucket_counts.items()
+            if bucket >= cutoff
+        )
     
     def get_rate(self, window_seconds: int = None) -> float:
         """
@@ -92,6 +120,16 @@ class RateTracker:
                 count for bucket, count in self._bucket_counts.items()
                 if bucket >= cutoff
             )
+    
+    def get_peak_rate(self) -> float:
+        """Get the peak rate (events per minute) ever observed."""
+        with self._lock:
+            return self._peak_rate
+    
+    def get_peak_timestamp(self) -> float:
+        """Get timestamp when peak rate was observed."""
+        with self._lock:
+            return self._peak_timestamp
     
     def cleanup(self, max_age: int = None):
         """Remove old buckets beyond max_age."""
@@ -185,6 +223,16 @@ class IPStats:
         return self._rate_tracker.get_count(60)
     
     @property
+    def peak_rate_per_minute(self) -> float:
+        """Peak rate (traps/minute) ever observed."""
+        return self._rate_tracker.get_peak_rate()
+    
+    @property
+    def peak_timestamp(self) -> float:
+        """Timestamp when peak rate was observed."""
+        return self._rate_tracker.get_peak_timestamp()
+    
+    @property
     def age_seconds(self) -> float:
         """Seconds since first seen."""
         return time.time() - self.first_seen
@@ -211,6 +259,8 @@ class IPStats:
             'last_seen': datetime.fromtimestamp(self.last_seen).isoformat(),
             'rate_per_minute': round(self.rate_per_minute, 2),
             'rate_per_second': round(self.rate_per_second, 4),
+            'peak_rate_per_minute': round(self.peak_rate_per_minute, 2),
+            'peak_timestamp': datetime.fromtimestamp(self.peak_timestamp).isoformat() if self.peak_timestamp > 0 else None,
             'age_seconds': round(self.age_seconds, 1),
             'idle_seconds': round(self.idle_seconds, 1),
         }
@@ -304,6 +354,16 @@ class OIDStats:
         return self._rate_tracker.get_count(60)
     
     @property
+    def peak_rate_per_minute(self) -> float:
+        """Peak rate (traps/minute) ever observed."""
+        return self._rate_tracker.get_peak_rate()
+    
+    @property
+    def peak_timestamp(self) -> float:
+        """Timestamp when peak rate was observed."""
+        return self._rate_tracker.get_peak_timestamp()
+    
+    @property
     def age_seconds(self) -> float:
         """Seconds since first seen."""
         return time.time() - self.first_seen
@@ -330,6 +390,8 @@ class OIDStats:
             'last_seen': datetime.fromtimestamp(self.last_seen).isoformat(),
             'rate_per_minute': round(self.rate_per_minute, 2),
             'rate_per_second': round(self.rate_per_second, 4),
+            'peak_rate_per_minute': round(self.peak_rate_per_minute, 2),
+            'peak_timestamp': datetime.fromtimestamp(self.peak_timestamp).isoformat() if self.peak_timestamp > 0 else None,
             'age_seconds': round(self.age_seconds, 1),
             'idle_seconds': round(self.idle_seconds, 1),
             # Always include unique_sources count for top lists
