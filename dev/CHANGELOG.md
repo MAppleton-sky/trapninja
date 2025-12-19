@@ -16,6 +16,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.8] - 2025-12-19
+
+### Enhanced
+
+#### Enhanced Prometheus/Observability Export
+Reworked metrics export to focus on what observability platforms can't calculate natively:
+
+**New Global Metrics:**
+- `trapninja_traps_total` - Total traps received (counter)
+- `trapninja_traps_forwarded_total` - Total forwarded (counter)
+- `trapninja_traps_blocked_total` - Total blocked (counter)
+- `trapninja_traps_redirected_total` - Total redirected (counter)
+- `trapninja_unique_sources` - Unique source IPs (gauge)
+- `trapninja_unique_oids` - Unique OIDs seen (gauge)
+- `trapninja_uptime_seconds` - Stats collection uptime (gauge)
+
+**New Per-IP Metrics:**
+- `trapninja_ip_peak_rate_per_minute{ip="x"}` - Highest rate ever (persists after IP goes silent)
+- `trapninja_ip_blocked_total{ip="x"}` - Blocked count per IP
+
+**New Per-OID Metrics:**
+- `trapninja_oid_peak_rate_per_minute{oid="x"}` - Highest rate ever observed
+- `trapninja_oid_unique_sources{oid="x"}` - Unique IPs sending this OID (widespread vs localized)
+
+**New Per-Destination Metrics:**
+- `trapninja_dest_failures_total{destination="x"}` - Failed forwards
+
+**Design Rationale:**
+- Export peak rates because observability platforms can't calculate max for silent sources
+- Export unique_sources because it shows if an issue is widespread or localized
+- Don't export averages (Prometheus `rate()` calculates this natively)
+- All metrics have proper `# HELP` and `# TYPE` annotations
+
+---
+
 ## [0.7.7] - 2025-12-19
 
 ### Enhanced
@@ -720,7 +755,8 @@ Before releasing 1.0.0, we need:
 
 | Version | Date | Type | Key Features | Status |
 |---------|------|------|--------------|--------|
-| **0.7.7** | 2025-12-19 | Enhancement | Peak rate tracking & --sort peak | **Current** |
+| **0.7.8** | 2025-12-19 | Enhancement | Enhanced Prometheus export with peak rates | **Current** |
+| 0.7.7 | 2025-12-19 | Enhancement | Peak rate tracking & --sort peak | Beta |
 | 0.7.6 | 2025-12-19 | Enhancement | Stats collection period & averages | Beta |
 | 0.7.5 | 2025-12-18 | Patch | SNMPv3 redirection fix | Beta |
 | 0.7.4 | 2025-12-18 | Patch | Export metrics on startup, Redirection docs | Beta |

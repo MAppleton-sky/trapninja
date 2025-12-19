@@ -481,9 +481,20 @@ class GranularStatsCollector:
         """
         Export stats in Prometheus format with labels.
         
+        Exports metrics that are valuable for observability platforms:
+        - Counters: totals (let Prometheus calculate rates)
+        - Gauges: current rates, peak rates (not derivable from counters for silent sources)
+        
+        NOT exported (observability platforms calculate natively):
+        - Average rates (use rate() function)
+        - Collection period (use process_start_time_seconds)
+        
         Returns:
             Prometheus-formatted metrics string
         """
+        now = time.time()
+        uptime = now - self._start_time
+        
         # Snapshot all stats under lock to avoid mutation during iteration
         with self._lock:
             ip_stats_list = list(self._ip_stats.values())
@@ -496,25 +507,87 @@ class GranularStatsCollector:
         
         # Header
         lines.append("# TrapNinja Granular Statistics")
-        lines.append(f"# Timestamp: {time.time()}")
+        lines.append(f"# Timestamp: {now}")
         lines.append("")
         
-        # Per-IP metrics (top 50 by volume)
-        lines.append("# HELP trapninja_ip_traps_total Total traps from IP")
+        # =================================================================
+        # GLOBAL METRICS
+        # =================================================================
+        lines.append("# HELP trapninja_traps_total Total traps received")
+        lines.append("# TYPE trapninja_traps_total counter")
+        lines.append(f"trapninja_traps_total {self._total_traps}")
+        
+        lines.append("")
+        lines.append("# HELP trapninja_traps_forwarded_total Total traps forwarded")
+        lines.append("# TYPE trapninja_traps_forwarded_total counter")
+        lines.append(f"trapninja_traps_forwarded_total {self._total_forwarded}")
+        
+        lines.append("")
+        lines.append("# HELP trapninja_traps_blocked_total Total traps blocked")
+        lines.append("# TYPE trapninja_traps_blocked_total counter")
+        lines.append(f"trapninja_traps_blocked_total {self._total_blocked}")
+        
+        lines.append("")
+        lines.append("# HELP trapninja_traps_redirected_total Total traps redirected")
+        lines.append("# TYPE trapninja_traps_redirected_total counter")
+        lines.append(f"trapninja_traps_redirected_total {self._total_redirected}")
+        
+        lines.append("")
+        lines.append("# HELP trapninja_unique_sources Number of unique source IPs")
+        lines.append("# TYPE trapninja_unique_sources gauge")
+        lines.append(f"trapninja_unique_sources {unique_ips}")
+        
+        lines.append("")
+        lines.append("# HELP trapninja_unique_oids Number of unique trap OIDs")
+        lines.append("# TYPE trapninja_unique_oids gauge")
+        lines.append(f"trapninja_unique_oids {unique_oids}")
+        
+        lines.append("")
+        lines.append("# HELP trapninja_uptime_seconds Seconds since stats collection started")
+        lines.append("# TYPE trapninja_uptime_seconds gauge")
+        lines.append(f"trapninja_uptime_seconds {uptime:.0f}")
+        
+        # =================================================================
+        # PER-IP METRICS (top 50 by volume)
+        # =================================================================
+        lines.append("")
+        lines.append("# HELP trapninja_ip_traps_total Total traps from source IP")
         lines.append("# TYPE trapninja_ip_traps_total counter")
         for ip_stat in sorted(ip_stats_list, 
                               key=lambda x: x.total_traps, reverse=True)[:50]:
             lines.append(f'trapninja_ip_traps_total{{ip="{ip_stat.ip_address}"}} {ip_stat.total_traps}')
         
+        # Current rate - useful as instant gauge
         lines.append("")
-        lines.append("# HELP trapninja_ip_rate_per_minute Current trap rate from IP")
+        lines.append("# HELP trapninja_ip_rate_per_minute Current trap rate from IP (last 60s)")
         lines.append("# TYPE trapninja_ip_rate_per_minute gauge")
         for ip_stat in sorted(ip_stats_list,
                               key=lambda x: x.rate_per_minute, reverse=True)[:50]:
             if ip_stat.rate_per_minute > 0:
                 lines.append(f'trapninja_ip_rate_per_minute{{ip="{ip_stat.ip_address}"}} {ip_stat.rate_per_minute:.2f}')
         
-        # Per-OID metrics (top 50 by volume)
+        # Peak rate - valuable because observability platforms can't calculate
+        # this for sources that have gone silent
+        lines.append("")
+        lines.append("# HELP trapninja_ip_peak_rate_per_minute Highest trap rate ever observed from IP")
+        lines.append("# TYPE trapninja_ip_peak_rate_per_minute gauge")
+        for ip_stat in sorted(ip_stats_list,
+                              key=lambda x: x.peak_rate_per_minute, reverse=True)[:50]:
+            if ip_stat.peak_rate_per_minute > 0:
+                lines.append(f'trapninja_ip_peak_rate_per_minute{{ip="{ip_stat.ip_address}"}} {ip_stat.peak_rate_per_minute:.2f}')
+        
+        # Blocked count per IP - useful for identifying problematic sources
+        lines.append("")
+        lines.append("# HELP trapninja_ip_blocked_total Traps blocked from IP")
+        lines.append("# TYPE trapninja_ip_blocked_total counter")
+        for ip_stat in sorted(ip_stats_list,
+                              key=lambda x: x.blocked, reverse=True)[:50]:
+            if ip_stat.blocked > 0:
+                lines.append(f'trapninja_ip_blocked_total{{ip="{ip_stat.ip_address}"}} {ip_stat.blocked}')
+        
+        # =================================================================
+        # PER-OID METRICS (top 50 by volume)
+        # =================================================================
         lines.append("")
         lines.append("# HELP trapninja_oid_traps_total Total traps with OID")
         lines.append("# TYPE trapninja_oid_traps_total counter")
@@ -522,25 +595,47 @@ class GranularStatsCollector:
                                key=lambda x: x.total_traps, reverse=True)[:50]:
             lines.append(f'trapninja_oid_traps_total{{oid="{oid_stat.oid}"}} {oid_stat.total_traps}')
         
+        # Current rate
         lines.append("")
-        lines.append("# HELP trapninja_oid_rate_per_minute Current trap rate for OID")
+        lines.append("# HELP trapninja_oid_rate_per_minute Current trap rate for OID (last 60s)")
         lines.append("# TYPE trapninja_oid_rate_per_minute gauge")
         for oid_stat in sorted(oid_stats_list,
                                key=lambda x: x.rate_per_minute, reverse=True)[:50]:
             if oid_stat.rate_per_minute > 0:
                 lines.append(f'trapninja_oid_rate_per_minute{{oid="{oid_stat.oid}"}} {oid_stat.rate_per_minute:.2f}')
         
-        # Per-destination metrics
+        # Peak rate - valuable for identifying trap types that cause floods
+        lines.append("")
+        lines.append("# HELP trapninja_oid_peak_rate_per_minute Highest trap rate ever observed for OID")
+        lines.append("# TYPE trapninja_oid_peak_rate_per_minute gauge")
+        for oid_stat in sorted(oid_stats_list,
+                               key=lambda x: x.peak_rate_per_minute, reverse=True)[:50]:
+            if oid_stat.peak_rate_per_minute > 0:
+                lines.append(f'trapninja_oid_peak_rate_per_minute{{oid="{oid_stat.oid}"}} {oid_stat.peak_rate_per_minute:.2f}')
+        
+        # Unique sources per OID - useful for identifying widespread vs localized issues
+        lines.append("")
+        lines.append("# HELP trapninja_oid_unique_sources Number of unique source IPs for OID")
+        lines.append("# TYPE trapninja_oid_unique_sources gauge")
+        for oid_stat in sorted(oid_stats_list,
+                               key=lambda x: x.total_traps, reverse=True)[:50]:
+            lines.append(f'trapninja_oid_unique_sources{{oid="{oid_stat.oid}"}} {len(oid_stat.ip_counts)}')
+        
+        # =================================================================
+        # PER-DESTINATION METRICS
+        # =================================================================
         lines.append("")
         lines.append("# HELP trapninja_dest_forwards_total Total forwards to destination")
         lines.append("# TYPE trapninja_dest_forwards_total counter")
         for dest_stat in dest_stats_list:
             lines.append(f'trapninja_dest_forwards_total{{destination="{dest_stat.destination}"}} {dest_stat.total_forwarded}')
         
-        # Global summary
         lines.append("")
-        lines.append(f"trapninja_granular_unique_ips {unique_ips}")
-        lines.append(f"trapninja_granular_unique_oids {unique_oids}")
+        lines.append("# HELP trapninja_dest_failures_total Failed forwards to destination")
+        lines.append("# TYPE trapninja_dest_failures_total counter")
+        for dest_stat in dest_stats_list:
+            if dest_stat.failed > 0:
+                lines.append(f'trapninja_dest_failures_total{{destination="{dest_stat.destination}"}} {dest_stat.failed}')
         
         return "\n".join(lines)
     
