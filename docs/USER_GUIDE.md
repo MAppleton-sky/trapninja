@@ -1,4 +1,4 @@
-# TrapNinja User Guide
+ # TrapNinja User Guide
 
 **Version 0.7.4 (Beta)**
 

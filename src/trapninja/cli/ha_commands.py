@@ -628,6 +628,38 @@ BEST PRACTICES:
   ✗ Don't disable split-brain detection
   ✗ Don't forget to test recovery scenarios
 
+
+CONFIGURATION SYNCHRONIZATION (NEW!):
+─────────────────────────────────────
+
+  The HA cluster can automatically synchronize shared configuration
+  between Primary and Secondary nodes without requiring Redis.
+  
+  Synchronized configs:
+    • destinations.json
+    • blocked_ips.json
+    • blocked_traps.json
+    • redirected_ips.json
+    • redirected_oids.json
+    • redirected_destinations.json
+  
+  NOT synchronized (server-specific):
+    • ha_config.json
+    • listen_ports.json
+    • cache_config.json
+  
+  Commands:
+    python trapninja.py --config-sync-status   # Show sync status
+    python trapninja.py --config-sync          # Trigger manual sync
+    python trapninja.py --config-sync --force  # Force sync (ignore checksums)
+  
+  How it works:
+    • Primary is authoritative for shared config
+    • Changes on Primary are automatically pushed to Secondary
+    • Config checksums are included in heartbeats
+    • Mismatch triggers automatic sync after 3 heartbeats
+    • Manual sync available via CLI
+
 ═══════════════════════════════════════════════════════════════════════
 
 For more information:
@@ -635,3 +667,187 @@ For more information:
   • Architecture: /opt/trapninja/HA_ARCHITECTURE.md
 """)
     return True
+
+
+# ============================================================================
+# NEW: Configuration Synchronization Commands
+# ============================================================================
+
+def show_config_sync_status() -> bool:
+    """
+    Show configuration synchronization status.
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    from ..control import ControlSocket
+    
+    try:
+        # Get HA status which includes config sync status
+        try:
+            response = ControlSocket.send_command('ha_status')
+        except ConnectionRefusedError:
+            print("❌ HA cluster not running")
+            return False
+        except Exception as e:
+            print(f"❌ Error communicating with daemon: {e}")
+            return False
+        
+        if response.get('status') != ControlSocket.SUCCESS:
+            print("❌ Error getting status:", response.get('error'))
+            return False
+        
+        ha_status = response.get('data', {})
+        config_sync = ha_status.get('config_sync')
+        
+        print("=" * 70)
+        print("Configuration Synchronization Status")
+        print("=" * 70)
+        
+        if not config_sync:
+            print("\n  Config sync is not enabled.")
+            print("  To enable, restart with config_dir parameter.")
+            return True
+        
+        enabled = config_sync.get('enabled', False)
+        is_primary = config_sync.get('is_primary', False)
+        local_checksum = config_sync.get('local_checksum', 'N/A')
+        remote_checksum = config_sync.get('remote_checksum', 'N/A')
+        checksums_match = config_sync.get('checksums_match', False)
+        
+        print(f"\n  Enabled: {enabled}")
+        print(f"  Role: {'PRIMARY (authoritative)' if is_primary else 'SECONDARY (receiver)'}")
+        
+        print(f"\n  Checksums:")
+        print(f"    Local:  {local_checksum[:16]}..." if local_checksum != 'N/A' else "    Local:  N/A")
+        print(f"    Remote: {remote_checksum[:16]}..." if remote_checksum and remote_checksum != 'N/A' else "    Remote: N/A")
+        
+        if checksums_match:
+            print(f"\n  ✓ Configurations are IN SYNC")
+        else:
+            print(f"\n  ⚠️  Configuration MISMATCH detected")
+            print(f"      Run 'python trapninja.py --config-sync' to synchronize")
+        
+        mismatch_count = config_sync.get('mismatch_count', 0)
+        if mismatch_count > 0:
+            print(f"\n  Mismatch count: {mismatch_count}")
+            print(f"  (Auto-sync triggers at 3 mismatches)")
+        
+        last_sync = config_sync.get('last_sync_time')
+        if last_sync:
+            import time
+            seconds_ago = time.time() - last_sync
+            if seconds_ago < 60:
+                print(f"\n  Last sync: {seconds_ago:.1f}s ago")
+            elif seconds_ago < 3600:
+                print(f"\n  Last sync: {seconds_ago/60:.1f} minutes ago")
+            else:
+                print(f"\n  Last sync: {seconds_ago/3600:.1f} hours ago")
+        
+        last_result = config_sync.get('last_sync_result')
+        if last_result:
+            print(f"\n  Last sync result:")
+            print(f"    Success: {last_result.get('success', False)}")
+            print(f"    Mode: {last_result.get('mode', 'unknown')}")
+            print(f"    Message: {last_result.get('message', 'N/A')}")
+            files = last_result.get('files_synced', [])
+            if files:
+                print(f"    Files synced: {len(files)}")
+        
+        print(f"\n  Tracked configuration files:")
+        for f in config_sync.get('files_tracked', []):
+            print(f"    • {f}")
+        
+        print("=" * 70)
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error showing config sync status: {e}")
+        return False
+
+
+def trigger_config_sync(force: bool = False) -> bool:
+    """
+    Manually trigger configuration synchronization.
+    
+    Args:
+        force: If True, force sync regardless of checksums
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    from ..control import ControlSocket
+    
+    try:
+        print("=" * 70)
+        print("Configuration Synchronization")
+        print("=" * 70)
+        
+        # Get current status first
+        try:
+            response = ControlSocket.send_command('ha_status')
+        except ConnectionRefusedError:
+            print("\n❌ HA cluster not running")
+            return False
+        except Exception as e:
+            print(f"\n❌ Error communicating with daemon: {e}")
+            return False
+        
+        if response.get('status') != ControlSocket.SUCCESS:
+            print("\n❌ Error getting status:", response.get('error'))
+            return False
+        
+        ha_status = response.get('data', {})
+        config_sync_status = ha_status.get('config_sync')
+        
+        if not config_sync_status:
+            print("\n❌ Config sync is not available")
+            return False
+        
+        is_primary = config_sync_status.get('is_primary', False)
+        
+        print(f"\n  Role: {'PRIMARY' if is_primary else 'SECONDARY'}")
+        print(f"  Mode: {'PUSH to peer' if is_primary else 'PULL from peer'}")
+        print(f"  Force: {force}")
+        
+        if force:
+            print("\n  ⚠️  FORCE mode - will sync regardless of checksums")
+        
+        # Trigger sync via control socket
+        try:
+            sync_response = ControlSocket.send_command(
+                'config_sync',
+                {'force': force}
+            )
+        except Exception as e:
+            print(f"\n❌ Error triggering sync: {e}")
+            return False
+        
+        if sync_response.get('status') == ControlSocket.SUCCESS:
+            result = sync_response.get('data', {})
+            success = result.get('success', False)
+            message = result.get('message', 'Unknown')
+            files = result.get('files_synced', [])
+            
+            if success:
+                print(f"\n  ✓ Sync completed successfully")
+                print(f"    {message}")
+                if files:
+                    print(f"\n    Files synchronized:")
+                    for f in files:
+                        print(f"      • {f}")
+            else:
+                print(f"\n  ⚠️  Sync completed with issues")
+                print(f"    {message}")
+            
+            print("\n  Run '--config-sync-status' to verify synchronization")
+            print("=" * 70)
+            return success
+        else:
+            print(f"\n❌ Sync failed: {sync_response.get('error', 'Unknown error')}")
+            print("=" * 70)
+            return False
+        
+    except Exception as e:
+        print(f"❌ Error during config sync: {e}")
+        return False

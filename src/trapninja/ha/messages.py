@@ -31,6 +31,10 @@ class HAMessageType(Enum):
         STATUS_REQUEST: Request peer status
         STATUS_RESPONSE: Response with status
         SHUTDOWN: Notify peer of shutdown
+        CONFIG_SYNC: Configuration synchronization
+        CONFIG_REQUEST: Request full config bundle
+        CONFIG_PUSH: Push config to peer
+        CONFIG_ACK: Acknowledge config receipt
     """
     HEARTBEAT = "heartbeat"
     HEARTBEAT_ACK = "heartbeat_ack"
@@ -40,6 +44,11 @@ class HAMessageType(Enum):
     STATUS_REQUEST = "status_request"
     STATUS_RESPONSE = "status_response"
     SHUTDOWN = "shutdown"
+    # Config sync message types
+    CONFIG_SYNC = "config_sync"
+    CONFIG_REQUEST = "config_request"
+    CONFIG_PUSH = "config_push"
+    CONFIG_ACK = "config_ack"
     
     def __str__(self) -> str:
         return self.value
@@ -49,7 +58,9 @@ class HAMessageType(Enum):
         """Check if this message type requires a response."""
         return self in (
             HAMessageType.HEARTBEAT,
-            HAMessageType.STATUS_REQUEST
+            HAMessageType.STATUS_REQUEST,
+            HAMessageType.CONFIG_REQUEST,
+            HAMessageType.CONFIG_PUSH
         )
     
     @property
@@ -59,7 +70,18 @@ class HAMessageType(Enum):
             HAMessageType.CLAIM_PRIMARY,
             HAMessageType.YIELD_PRIMARY,
             HAMessageType.FORCE_SECONDARY,
-            HAMessageType.SHUTDOWN
+            HAMessageType.SHUTDOWN,
+            HAMessageType.CONFIG_PUSH
+        )
+    
+    @property
+    def is_config_sync(self) -> bool:
+        """Check if this is a config sync message."""
+        return self in (
+            HAMessageType.CONFIG_SYNC,
+            HAMessageType.CONFIG_REQUEST,
+            HAMessageType.CONFIG_PUSH,
+            HAMessageType.CONFIG_ACK
         )
 
 
@@ -82,6 +104,7 @@ class HAMessage:
         last_trap_time: Timestamp of last processed trap
         checksum: MD5 checksum for integrity
         payload: Optional additional data
+        config_checksum: Checksum of shared configuration (for sync detection)
     """
     msg_type: HAMessageType
     sender_id: str
@@ -93,6 +116,7 @@ class HAMessage:
     last_trap_time: Optional[float] = None
     checksum: Optional[str] = None
     payload: Optional[Dict[str, Any]] = None
+    config_checksum: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -110,7 +134,8 @@ class HAMessage:
             'priority': self.priority,
             'uptime': self.uptime,
             'last_trap_time': self.last_trap_time,
-            'checksum': self.checksum
+            'checksum': self.checksum,
+            'config_checksum': self.config_checksum
         }
         if self.payload:
             data['payload'] = self.payload
@@ -155,7 +180,8 @@ class HAMessage:
             uptime=data['uptime'],
             last_trap_time=data.get('last_trap_time'),
             checksum=data.get('checksum'),
-            payload=data.get('payload')
+            payload=data.get('payload'),
+            config_checksum=data.get('config_checksum')
         )
     
     @classmethod
@@ -241,6 +267,11 @@ class MessageFactory:
         self.priority = priority
         self._sequence = 0
         self._start_time = __import__('time').time()
+        self._config_checksum: Optional[str] = None
+    
+    def set_config_checksum(self, checksum: str):
+        """Set the config checksum to include in messages."""
+        self._config_checksum = checksum
     
     def _next_sequence(self) -> int:
         """Get next sequence number."""
@@ -256,7 +287,8 @@ class MessageFactory:
         msg_type: HAMessageType,
         state: HAState,
         last_trap_time: Optional[float] = None,
-        payload: Optional[Dict[str, Any]] = None
+        payload: Optional[Dict[str, Any]] = None,
+        config_checksum: Optional[str] = None
     ) -> HAMessage:
         """
         Create a new HA message.
@@ -266,6 +298,7 @@ class MessageFactory:
             state: Current HA state
             last_trap_time: Timestamp of last processed trap
             payload: Optional additional data
+            config_checksum: Optional config checksum override
             
         Returns:
             Signed HAMessage instance
@@ -279,7 +312,8 @@ class MessageFactory:
             priority=self.priority,
             uptime=self._uptime(),
             last_trap_time=last_trap_time,
-            payload=payload
+            payload=payload,
+            config_checksum=config_checksum or self._config_checksum
         )
         return message.sign()
     
@@ -314,3 +348,19 @@ class MessageFactory:
     def shutdown(self, state: HAState) -> HAMessage:
         """Create a shutdown notification message."""
         return self.create(HAMessageType.SHUTDOWN, state)
+    
+    def config_request(self, state: HAState) -> HAMessage:
+        """Create a config request message."""
+        return self.create(HAMessageType.CONFIG_REQUEST, state)
+    
+    def config_push(self, state: HAState, bundle_data: Dict[str, Any]) -> HAMessage:
+        """Create a config push message with bundle payload."""
+        return self.create(HAMessageType.CONFIG_PUSH, state, payload={'bundle': bundle_data})
+    
+    def config_ack(self, state: HAState, success: bool, message: str = "") -> HAMessage:
+        """Create a config acknowledgment message."""
+        return self.create(
+            HAMessageType.CONFIG_ACK,
+            state,
+            payload={'success': success, 'message': message}
+        )

@@ -21,6 +21,13 @@ from .state import HAState, HAStateManager
 from .messages import HAMessage, HAMessageType, MessageFactory
 from .config import HAConfig
 
+# Try to import config sync (optional feature)
+try:
+    from .sync import ConfigSyncManager, ConfigBundle
+    CONFIG_SYNC_AVAILABLE = True
+except ImportError:
+    CONFIG_SYNC_AVAILABLE = False
+
 logger = logging.getLogger("trapninja")
 
 
@@ -45,7 +52,9 @@ class HACluster:
     def __init__(
         self,
         config: HAConfig,
-        trap_forwarder_callback: Callable[[bool], None]
+        trap_forwarder_callback: Callable[[bool], None],
+        config_dir: Optional[str] = None,
+        on_config_changed: Optional[Callable[[], None]] = None
     ):
         """
         Initialize HA cluster.
@@ -53,9 +62,13 @@ class HACluster:
         Args:
             config: HA configuration
             trap_forwarder_callback: Callback to enable/disable forwarding
+            config_dir: Path to configuration directory (for config sync)
+            on_config_changed: Callback when config is updated by sync
         """
         self.config = config
         self.trap_forwarder_callback = trap_forwarder_callback
+        self.config_dir = config_dir
+        self.on_config_changed = on_config_changed
         
         # Instance identification
         self.instance_id = str(uuid.uuid4())
@@ -89,8 +102,21 @@ class HACluster:
         self.split_brain_detected = False
         self.manual_override = False
         
+        # Config sync manager (optional)
+        self.config_sync: Optional['ConfigSyncManager'] = None
+        if CONFIG_SYNC_AVAILABLE and config_dir:
+            self.config_sync = ConfigSyncManager(
+                config_dir=config_dir,
+                instance_id=self.instance_id,
+                peer_host=config.peer_host,
+                peer_port=config.peer_port,
+                on_config_changed=on_config_changed
+            )
+        
         logger.info(f"HA Cluster initialized - Instance ID: {self.instance_id[:8]}...")
         logger.info(f"Mode: {config.mode}, Priority: {config.priority}")
+        if self.config_sync:
+            logger.info("Config sync enabled")
     
     @property
     def current_state(self) -> HAState:
@@ -134,6 +160,9 @@ class HACluster:
                     if self.peer_state == HAState.PRIMARY:
                         logger.info("Peer is PRIMARY - becoming SECONDARY")
                         self._set_state(HAState.SECONDARY)
+                        # Start config sync as secondary
+                        if self.config_sync:
+                            self.config_sync.start(is_primary=False)
                     elif self.peer_state == HAState.SECONDARY:
                         if self.config.priority > self.peer_priority:
                             logger.info("Higher priority - claiming PRIMARY")
@@ -153,6 +182,15 @@ class HACluster:
             # Start heartbeat
             self._start_heartbeat()
             
+            # Update config sync with initial state
+            if self.config_sync and not self.config_sync._monitor_thread:
+                is_primary = self.current_state == HAState.PRIMARY
+                self.config_sync.start(is_primary=is_primary)
+                # Update message factory with config checksum
+                self.msg_factory.set_config_checksum(
+                    self.config_sync.get_local_checksum()
+                )
+            
             logger.info(f"HA cluster started in {self.current_state.value} mode")
             return True
             
@@ -169,6 +207,10 @@ class HACluster:
             self._send_message(HAMessageType.YIELD_PRIMARY)
         
         self.stop_event.set()
+        
+        # Stop config sync
+        if self.config_sync:
+            self.config_sync.stop()
         
         # Cancel failover timer
         if self.failover_timer:
@@ -194,7 +236,7 @@ class HACluster:
                 (time.time() - self.peer_last_seen) < self.config.heartbeat_timeout
             )
             
-            return {
+            status = {
                 "instance_id": self.instance_id,
                 "state": self.current_state.value,
                 "is_forwarding": self.is_forwarding,
@@ -211,6 +253,12 @@ class HACluster:
                 "auto_failback": self.config.auto_failback,
                 "enabled": self.config.enabled
             }
+            
+            # Add config sync status if available
+            if self.config_sync:
+                status["config_sync"] = self.config_sync.get_status()
+            
+            return status
     
     def notify_trap_processed(self):
         """Notify that a trap was processed."""
@@ -293,6 +341,11 @@ class HACluster:
                         self._enable_forwarding()
                     else:
                         self._disable_forwarding()
+                    
+                    # Update config sync primary status
+                    if self.config_sync:
+                        is_primary = new_state == HAState.PRIMARY
+                        self.config_sync.set_primary(is_primary)
     
     def _enable_forwarding(self):
         """Enable trap forwarding."""
@@ -480,6 +533,12 @@ class HACluster:
         if self.current_state == HAState.STANDALONE:
             return
         
+        # Update config checksum in message factory
+        if self.config_sync:
+            self.msg_factory.set_config_checksum(
+                self.config_sync.get_local_checksum()
+            )
+        
         msg = self.msg_factory.heartbeat(self.current_state, self.last_trap_time)
         self._send_message_to_peer(msg)
     
@@ -522,6 +581,8 @@ class HACluster:
             HAMessageType.CLAIM_PRIMARY: self._handle_claim_primary,
             HAMessageType.YIELD_PRIMARY: self._handle_yield_primary,
             HAMessageType.FORCE_SECONDARY: self._handle_force_secondary,
+            HAMessageType.CONFIG_REQUEST: self._handle_config_request,
+            HAMessageType.CONFIG_PUSH: self._handle_config_push,
         }
         
         handler = handlers.get(message.msg_type)
@@ -534,6 +595,10 @@ class HACluster:
         self.peer_state = message.state
         self.peer_priority = message.priority
         self.peer_uptime = message.uptime
+        
+        # Update config sync with peer's config checksum
+        if self.config_sync and message.config_checksum:
+            self.config_sync.update_remote_checksum(message.config_checksum)
     
     def _handle_heartbeat(self, message: HAMessage):
         """Handle heartbeat from peer."""
@@ -671,6 +736,62 @@ class HACluster:
             
             self.peer_last_seen = None
             self.peer_state = None
+    
+    def _handle_config_request(self, message: HAMessage):
+        """Handle config request from peer."""
+        if not self.config_sync:
+            logger.warning("Config request received but config sync not available")
+            return
+        
+        if not self.current_state == HAState.PRIMARY:
+            logger.debug("Config request received but we are not primary")
+            return
+        
+        # Response handled in connection handler
+        logger.info(f"Config request from {message.sender_id[:8]}...")
+    
+    def _handle_config_push(self, message: HAMessage):
+        """Handle config push from peer."""
+        if not self.config_sync:
+            logger.warning("Config push received but config sync not available")
+            return
+        
+        if self.current_state == HAState.PRIMARY:
+            logger.warning("Config push received but we are primary - rejecting")
+            return
+        
+        if message.payload and 'bundle' in message.payload:
+            bundle_data = message.payload['bundle']
+            try:
+                bundle = ConfigBundle.from_dict(bundle_data)
+                success, msg = self.config_sync.handle_config_push(bundle.to_bytes())
+                logger.info(f"Config push handled: success={success}, {msg}")
+            except Exception as e:
+                logger.error(f"Failed to handle config push: {e}")
+    
+    def sync_config(self, force: bool = False) -> Dict[str, Any]:
+        """
+        Manually trigger config synchronization.
+        
+        Args:
+            force: If True, force sync regardless of checksums
+            
+        Returns:
+            Dict with sync result details
+        """
+        if not self.config_sync:
+            return {
+                'success': False,
+                'message': 'Config sync not available'
+            }
+        
+        from .sync import SyncMode
+        mode = SyncMode.FORCE if force else (
+            SyncMode.PUSH if self.current_state == HAState.PRIMARY else SyncMode.PULL
+        )
+        
+        result = self.config_sync.sync_now(mode)
+        return result.to_dict()
     
     def _close_sockets(self):
         """Close all sockets."""

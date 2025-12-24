@@ -174,6 +174,48 @@ def execute_command(args: Namespace) -> int:
     elif args.ha_help:
         return 0 if ha_commands.show_ha_help() else 1
 
+    # Config sync commands
+    elif hasattr(args, 'sync_status') and args.sync_status:
+        from . import sync_commands
+        return 0 if sync_commands.show_sync_status() else 1
+    
+    elif hasattr(args, 'sync_diff') and args.sync_diff:
+        from . import sync_commands
+        return 0 if sync_commands.sync_diff() else 1
+    
+    elif hasattr(args, 'sync_push') and args.sync_push:
+        from . import sync_commands
+        force = getattr(args, 'force', False)
+        config_type = getattr(args, 'config', None)
+        return 0 if sync_commands.sync_push(config_type=config_type, force=force) else 1
+    
+    elif hasattr(args, 'sync_pull') and args.sync_pull:
+        from . import sync_commands
+        force = getattr(args, 'force', False)
+        config_type = getattr(args, 'config', None)
+        return 0 if sync_commands.sync_pull(config_type=config_type, force=force) else 1
+    
+    elif hasattr(args, 'enable_sync') and args.enable_sync:
+        from . import sync_commands
+        return 0 if sync_commands.enable_sync() else 1
+    
+    elif hasattr(args, 'disable_sync') and args.disable_sync:
+        from . import sync_commands
+        return 0 if sync_commands.disable_sync() else 1
+    
+    elif hasattr(args, 'configure_sync') and args.configure_sync:
+        from . import sync_commands
+        return 0 if sync_commands.configure_sync(
+            enabled=True,
+            sync_on_startup=getattr(args, 'sync_on_startup', True) or True,
+            push_on_file_change=getattr(args, 'push_on_file_change', True) or True,
+            version_check_interval=getattr(args, 'version_check_interval', None) or 30,
+        ) else 1
+    
+    elif hasattr(args, 'sync_help') and args.sync_help:
+        from . import sync_commands
+        return 0 if sync_commands.show_sync_help() else 1
+
     # Update global configuration before executing commands
     update_global_config(args)
 

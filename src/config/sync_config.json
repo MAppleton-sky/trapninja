@@ -1,0 +1,9 @@
+{
+  "enabled": false,
+  "sync_on_startup": true,
+  "sync_on_promotion": true,
+  "push_on_file_change": true,
+  "version_check_interval": 30,
+  "primary_authority": true,
+  "sync_timeout": 10.0
+}

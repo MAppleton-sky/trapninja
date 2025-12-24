@@ -15,6 +15,7 @@ Supported commands:
 - ha_promote: Promote to PRIMARY role
 - ha_demote: Demote to SECONDARY role
 - ha_force_failover: Force failover to SECONDARY
+- config_sync: Trigger configuration synchronization
 - service_status: Get service status
 """
 
@@ -210,6 +211,8 @@ class ControlSocket:
             return self._handle_service_status(request)
         elif command == 'stats':
             return self._handle_stats(request)
+        elif command == 'config_sync':
+            return self._handle_config_sync(request)
         elif command == 'ping':
             return {'status': self.SUCCESS, 'message': 'pong'}
         else:
@@ -350,6 +353,39 @@ class ControlSocket:
             return {
                 'status': self.ERROR,
                 'error': f'Error getting service status: {e}'
+            }
+
+    def _handle_config_sync(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle configuration synchronization request"""
+        try:
+            from .ha import get_ha_cluster
+
+            ha_cluster = get_ha_cluster()
+            if not ha_cluster:
+                return {
+                    'status': self.NOT_FOUND,
+                    'error': 'HA cluster not running'
+                }
+
+            # Check if config sync is available
+            if not hasattr(ha_cluster, 'sync_config') or not ha_cluster.config_sync:
+                return {
+                    'status': self.NOT_FOUND,
+                    'error': 'Config sync not available'
+                }
+
+            force = request.get('force', False)
+            result = ha_cluster.sync_config(force=force)
+
+            return {
+                'status': self.SUCCESS,
+                'data': result
+            }
+        except Exception as e:
+            logger.error(f"Error handling config sync: {e}")
+            return {
+                'status': self.ERROR,
+                'error': f'Error during config sync: {e}'
             }
 
     def _handle_stats(self, request: Dict[str, Any]) -> Dict[str, Any]:

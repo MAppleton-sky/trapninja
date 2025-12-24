@@ -323,6 +323,53 @@ cat config/ha_config.json | python -m json.tool
 grep "HA:" /var/log/trapninja.log | tail -50
 ```
 
+## Configuration Synchronization
+
+TrapNinja HA includes automatic configuration synchronization between Primary and Secondary nodes. This feature keeps shared configurations (destinations, block lists, redirection rules) in sync without requiring Redis.
+
+### How It Works
+
+1. **Heartbeat Checksums**: Each heartbeat includes a checksum of shared configurations
+2. **Automatic Detection**: If checksums differ for 3+ heartbeats, sync is triggered
+3. **Push on Change**: Config changes on Primary are automatically pushed to Secondary
+4. **Primary-Authoritative**: Primary is the single source of truth
+
+### Synchronized Configurations
+
+- `destinations.json` - Trap forwarding destinations
+- `blocked_ips.json` - Blocked source IPs
+- `blocked_traps.json` - Blocked trap OIDs
+- `redirected_ips.json` - IP-based redirection rules
+- `redirected_oids.json` - OID-based redirection rules
+- `redirected_destinations.json` - Redirection destination groups
+
+### NOT Synchronized (Server-Specific)
+
+- `ha_config.json` - Different on each node (mode, peer, priority)
+- `listen_ports.json` - May differ for testing
+- `cache_config.json` - Cache may not be on all servers
+
+### Config Sync Commands
+
+```bash
+# Show sync status
+python trapninja.py --config-sync-status
+
+# Trigger manual sync
+python trapninja.py --config-sync
+
+# Force sync (ignore checksums)
+python trapninja.py --config-sync --force
+```
+
+### Making Config Changes
+
+1. **Always modify on Primary**: Changes should be made on the Primary server
+2. **Automatic propagation**: Changes are automatically pushed to Secondary
+3. **Verify sync**: Use `--config-sync-status` to confirm propagation
+
+For detailed config sync documentation, see [CONFIG_SYNC.md](CONFIG_SYNC.md).
+
 ## Best Practices
 
 ### Deployment
@@ -386,4 +433,37 @@ grep "HA:" /var/log/trapninja.log | tail -50
 
 ---
 
-**Last Updated**: 2025-01-10
+## Configuration Synchronization
+
+TrapNinja supports automatic synchronization of shared configurations between HA nodes. This ensures both nodes have identical trap handling rules.
+
+### Enable Config Sync
+
+```bash
+# Enable on both nodes
+python trapninja.py --enable-sync
+
+# Check status
+python trapninja.py --sync-status
+
+# Show differences
+python trapninja.py --sync-diff
+```
+
+### Synced vs Local Configs
+
+**Synced** (identical on both nodes):
+- `destinations.json`
+- `blocked_ips.json`, `blocked_traps.json`
+- `redirected_*.json`
+
+**Local** (node-specific):
+- `ha_config.json`
+- `cache_config.json`
+- `listen_ports.json`
+
+See [CONFIG_SYNC.md](CONFIG_SYNC.md) for detailed documentation.
+
+---
+
+**Last Updated**: 2025-01-15
