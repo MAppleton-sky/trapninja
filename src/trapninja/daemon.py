@@ -19,6 +19,29 @@ from .service import run_service
 logger = logging.getLogger("trapninja")
 
 
+def _build_process_check_cmd(own_pid: int) -> str:
+    """
+    Build the ps command to find running TrapNinja processes.
+    
+    Excludes:
+    - grep itself
+    - CLI commands (--start, --restart, --stop, --status)
+    - The calling process (own_pid)
+    
+    Args:
+        own_pid: PID of the calling process to exclude
+        
+    Returns:
+        Shell command string for finding TrapNinja daemon processes
+    """
+    return (
+        f"ps aux | grep -i 'trapninja\\|trapNinja' | grep -v grep "
+        f"| grep -v '\\-\\-start' | grep -v '\\-\\-restart' "
+        f"| grep -v '\\-\\-stop' | grep -v '\\-\\-status' "
+        f"| grep -v \" {own_pid} \""
+    )
+
+
 def run_command_safe(command, timeout=30):
     """
     Run a command safely with Python 3.6 compatibility
@@ -59,8 +82,8 @@ def start_daemon():
     # Get our own PID to exclude from the check
     own_pid = os.getpid()
 
-    # Check for running instances, excluding our own process
-    cmd = f"ps aux | grep -i 'trapninja\\|trapNinja' | grep -v grep | grep -v \" {own_pid} \" | grep -v \"grep\""
+    # Check for running instances, excluding our own process and CLI commands
+    cmd = _build_process_check_cmd(own_pid)
     processes = run_command_safe(cmd)
 
     if processes:
@@ -193,8 +216,8 @@ def stop_daemon():
     else:
         print("No PID file found")
 
-    # Find all running instances, excluding our own stop command
-    cmd = f"ps aux | grep -i 'trapninja\\|trapNinja' | grep -v grep | grep -v '\\-\\-status' | grep -v '\\-\\-stop' | grep -v \" {own_pid} \""
+    # Find all running instances, excluding our own stop command and other CLI commands
+    cmd = _build_process_check_cmd(own_pid)
     processes = run_command_safe(cmd)
 
     if not processes:
@@ -272,8 +295,7 @@ def stop_daemon():
 
     # Verify all processes are stopped
     time.sleep(1)
-    cmd = f"ps aux | grep -i 'trapninja\\|trapNinja' | grep -v grep | grep -v '\\-\\-status' | grep -v '\\-\\-stop' | grep -v \" {own_pid} \""
-    remaining = run_command_safe(cmd)
+    remaining = run_command_safe(_build_process_check_cmd(own_pid))
 
     if remaining:
         print("\nWARNING: Some TrapNinja processes may still be running:")
@@ -297,8 +319,7 @@ def status_daemon():
     # First check for PID file
     if not os.path.exists(PID_FILE):
         # No PID file, but check for running processes anyway
-        cmd = f"ps aux | grep -i 'trapninja\\|trapNinja' | grep -v grep | grep -v \" {own_pid} \" | grep -v \"\\-\\-status\" | grep -v \"\\-\\-stop\" | grep -v \"\\-\\-start\""
-        processes = run_command_safe(cmd)
+        processes = run_command_safe(_build_process_check_cmd(own_pid))
 
         if processes:
             print("TrapNinja appears to be running but PID file is missing:")
@@ -364,8 +385,7 @@ def status_daemon():
                 pass
 
             # Check if it's running under a different PID
-            cmd = f"ps aux | grep -i 'trapninja\\|trapNinja' | grep -v grep | grep -v \" {own_pid} \" | grep -v \"\\-\\-status\" | grep -v \"\\-\\-stop\" | grep -v \"\\-\\-start\""
-            processes = run_command_safe(cmd)
+            processes = run_command_safe(_build_process_check_cmd(own_pid))
 
             if processes:
                 print("\nHowever, TrapNinja appears to be running with a different PID:")
@@ -375,8 +395,7 @@ def status_daemon():
     except Exception as e:
         print(f"Error checking status: {e}")
         print("Checking for running processes anyway...")
-        cmd = f"ps aux | grep -i 'trapninja\\|trapNinja' | grep -v grep | grep -v \" {own_pid} \" | grep -v \"\\-\\-status\" | grep -v \"\\-\\-stop\" | grep -v \"\\-\\-start\""
-        processes = run_command_safe(cmd)
+        processes = run_command_safe(_build_process_check_cmd(own_pid))
 
         if processes:
             print("TrapNinja appears to be running:")

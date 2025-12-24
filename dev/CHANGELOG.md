@@ -32,9 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Impact**: HA clusters can now run mixed versions during upgrades without checksum
   failures. Nodes running 0.7.9+ will correctly validate messages from older versions.
 
+#### Restart Command Leaves Daemon Stopped
+- **Fixed `--restart` leaving TrapNinja stopped instead of restarting**. The
+  `start_daemon()` function detected its own `--restart` process in the process list
+  and incorrectly concluded TrapNinja was already running.
+- **Root cause**: Process detection excluded `--stop` and `--status` but not `--restart`
+  or `--start`, causing false "already running" detection during restart.
+- **Solution**: Added `--restart` and `--start` to exclusion list in process detection.
+  Refactored to use `_build_process_check_cmd()` helper to ensure consistent exclusions.
+
 ### Changed
 - Improved HA checksum failure logging to indicate possible version mismatch
 - Added debug logging with received vs calculated checksums for troubleshooting
+- Refactored daemon process detection into `_build_process_check_cmd()` helper
 
 ---
 
@@ -777,7 +787,7 @@ Before releasing 1.0.0, we need:
 
 | Version | Date | Type | Key Features | Status |
 |---------|------|------|--------------|--------|
-| **0.7.9** | 2025-12-24 | Patch | HA checksum version compatibility fix | **Current** |
+| **0.7.9** | 2025-12-24 | Patch | HA checksum compat, restart fix | **Current** |
 | 0.7.8 | 2025-12-19 | Enhancement | Enhanced Prometheus export with peak rates | Beta |
 | 0.7.7 | 2025-12-19 | Enhancement | Peak rate tracking & --sort peak | Beta |
 | 0.7.6 | 2025-12-19 | Enhancement | Stats collection period & averages | Beta |
