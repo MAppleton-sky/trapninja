@@ -103,7 +103,7 @@ pip3.9 install --break-system-packages scapy
 pip3.9 install --break-system-packages redis
 
 # Optional - SNMPv3 decryption
-pip3.9 install --break-system-packages pysnmp pyasn1 cryptography
+pip3.9 install --break-system-packages pysnmp pyasn1 cryptography pycryptodome
 ```
 
 #### Air-Gapped Installation (No Internet)
@@ -118,7 +118,8 @@ pip3.9 download -d /tmp/trapninja-packages \
     redis \
     pysnmp \
     pyasn1 \
-    cryptography
+    cryptography \
+    pycryptodome
 
 # Create tarball
 cd /tmp
@@ -132,7 +133,7 @@ On the air-gapped system:
 tar xzvf trapninja-packages.tar.gz
 pip3.9 install --break-system-packages --no-index \
     --find-links=/path/to/trapninja-packages/ \
-    scapy redis pysnmp pyasn1 cryptography
+    scapy redis pysnmp pyasn1 cryptography pycryptodome
 ```
 
 ### 4. Verify Installation
@@ -203,7 +204,8 @@ python3.9 -O trapninja.py --check-config
 | redis-server | Redis daemon | `dnf install redis` |
 | pysnmp | SNMPv3 decryption | `pip3.9 install --break-system-packages pysnmp` |
 | pyasn1 | ASN.1 parsing for SNMP | `pip3.9 install --break-system-packages pyasn1` |
-| cryptography | Encryption support | `pip3.9 install --break-system-packages cryptography` |
+| cryptography | Credential encryption | `pip3.9 install --break-system-packages cryptography` |
+| pycryptodome | SNMPv3 AES/DES decryption | `pip3.9 install --break-system-packages pycryptodome` |
 | bcc/python3-bcc | eBPF acceleration | `dnf install bcc python3-bcc` |
 
 ## Feature Availability

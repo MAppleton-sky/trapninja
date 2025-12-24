@@ -6,7 +6,7 @@ Defines message types and serialization for HA cluster communication.
 Messages are used for heartbeats, state coordination, and commands.
 
 Author: TrapNinja Team
-Version: 2.0.0
+Version: 2.1.0
 """
 
 import json
@@ -118,13 +118,18 @@ class HAMessage:
     payload: Optional[Dict[str, Any]] = None
     config_checksum: Optional[str] = None
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self, for_checksum: bool = False) -> Dict[str, Any]:
         """
         Convert message to dictionary for JSON serialization.
+        
+        Args:
+            for_checksum: If True, use backward-compatible format for checksum
+                          calculation (excludes newer optional fields when null).
         
         Returns:
             Dictionary representation of message
         """
+        # Core fields - always included (match original message format)
         data = {
             'msg_type': self.msg_type.value,
             'sender_id': self.sender_id,
@@ -133,12 +138,19 @@ class HAMessage:
             'state': self.state.value,
             'priority': self.priority,
             'uptime': self.uptime,
-            'last_trap_time': self.last_trap_time,
-            'checksum': self.checksum,
-            'config_checksum': self.config_checksum
+            'last_trap_time': self.last_trap_time,  # Always include for compat
+            'checksum': self.checksum,               # Always include for compat
         }
+        
+        # Newer optional fields - only include if they have values (for backward compat)
+        # These fields may not exist in older versions, so exclude from checksum
+        # calculation if null to maintain checksum compatibility
+        if not for_checksum or self.config_checksum is not None:
+            data['config_checksum'] = self.config_checksum
+        
         if self.payload:
             data['payload'] = self.payload
+            
         return data
     
     def to_json(self) -> str:
@@ -215,11 +227,14 @@ class HAMessage:
         Calculate MD5 checksum of message content.
         
         The checksum covers all fields except the checksum itself.
+        Uses backward-compatible serialization to handle version differences
+        between HA cluster nodes.
         
         Returns:
             Hex-encoded MD5 checksum
         """
-        data = self.to_dict()
+        # Use backward-compatible dict (excludes newer fields when null)
+        data = self.to_dict(for_checksum=True)
         data.pop('checksum', None)
         content = json.dumps(data, sort_keys=True)
         return hashlib.md5(content.encode()).hexdigest()

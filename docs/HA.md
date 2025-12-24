@@ -370,6 +370,73 @@ python trapninja.py --config-sync --force
 
 For detailed config sync documentation, see [CONFIG_SYNC.md](CONFIG_SYNC.md).
 
+## Rolling Upgrades and Version Compatibility
+
+TrapNinja HA supports mixed-version operation during rolling upgrades.
+
+### Version Compatibility (0.7.9+)
+
+Starting with version 0.7.9, TrapNinja HA uses backward-compatible message
+serialization that allows nodes running different versions to communicate
+without checksum failures.
+
+**How it works:**
+- Newer optional fields (like `config_checksum`) are excluded from checksum
+  calculation when null
+- Older versions that don't have these fields will produce matching checksums
+- This enables zero-downtime upgrades in HA clusters
+
+### Rolling Upgrade Procedure
+
+1. **Upgrade Secondary First**:
+   ```bash
+   # On Secondary
+   python trapninja.py --stop
+   # Deploy new version
+   python trapninja.py --start
+   ```
+
+2. **Verify Secondary Health**:
+   ```bash
+   python trapninja.py --ha-status
+   # Confirm SECONDARY state, peer connected
+   ```
+
+3. **Failover to Secondary**:
+   ```bash
+   # On Primary
+   python trapninja.py --demote
+   ```
+
+4. **Upgrade Original Primary**:
+   ```bash
+   python trapninja.py --stop
+   # Deploy new version
+   python trapninja.py --start
+   ```
+
+5. **Optional: Restore Original Roles**:
+   ```bash
+   # If you want original primary back as primary
+   python trapninja.py --promote
+   ```
+
+### Troubleshooting Version Mismatches
+
+If you see "HA message checksum failed" in logs:
+
+1. **Check Versions**: Ensure both nodes are running 0.7.9 or later
+2. **View Debug Logs**: Check debug output for checksum details
+3. **Upgrade Both Nodes**: If running pre-0.7.9 on either node, upgrade both
+
+```bash
+# Enable debug logging temporarily
+export TRAPNINJA_LOG_LEVEL=DEBUG
+python trapninja.py --start
+```
+
+---
+
 ## Best Practices
 
 ### Deployment
@@ -466,4 +533,4 @@ See [CONFIG_SYNC.md](CONFIG_SYNC.md) for detailed documentation.
 
 ---
 
-**Last Updated**: 2025-01-15
+**Last Updated**: 2025-12-24

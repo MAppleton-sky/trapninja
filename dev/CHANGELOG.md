@@ -16,6 +16,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.9] - 2025-12-24
+
+### Fixed
+
+#### HA Message Checksum Compatibility Between Versions
+- **Fixed checksum validation failures during rolling upgrades**. When HA nodes ran
+  different versions, the secondary would log "HA message checksum failed" because
+  newer versions include `config_checksum` field in message serialization.
+- **Root cause**: The `to_dict()` method always included `config_checksum: null` even
+  when the field didn't exist in older versions. The MD5 checksum would differ because
+  the original message's JSON didn't contain this field.
+- **Solution**: Modified `to_dict(for_checksum=True)` to exclude newer optional fields
+  when they are null, ensuring backward-compatible checksum calculation.
+- **Impact**: HA clusters can now run mixed versions during upgrades without checksum
+  failures. Nodes running 0.7.9+ will correctly validate messages from older versions.
+
+### Changed
+- Improved HA checksum failure logging to indicate possible version mismatch
+- Added debug logging with received vs calculated checksums for troubleshooting
+
+---
+
 ## [0.7.8] - 2025-12-19
 
 ### Enhanced
@@ -755,7 +777,8 @@ Before releasing 1.0.0, we need:
 
 | Version | Date | Type | Key Features | Status |
 |---------|------|------|--------------|--------|
-| **0.7.8** | 2025-12-19 | Enhancement | Enhanced Prometheus export with peak rates | **Current** |
+| **0.7.9** | 2025-12-24 | Patch | HA checksum version compatibility fix | **Current** |
+| 0.7.8 | 2025-12-19 | Enhancement | Enhanced Prometheus export with peak rates | Beta |
 | 0.7.7 | 2025-12-19 | Enhancement | Peak rate tracking & --sort peak | Beta |
 | 0.7.6 | 2025-12-19 | Enhancement | Stats collection period & averages | Beta |
 | 0.7.5 | 2025-12-18 | Patch | SNMPv3 redirection fix | Beta |

@@ -486,7 +486,16 @@ class HACluster:
                 return
             
             if not message.verify():
-                logger.warning(f"HA message checksum failed from {addr}")
+                logger.warning(
+                    f"HA message checksum failed from {addr} - "
+                    f"possible version mismatch between HA nodes. "
+                    f"Received: type={message.msg_type.value}, "
+                    f"sender={message.sender_id[:8]}..."
+                )
+                logger.debug(
+                    f"Checksum details - received: {message.checksum}, "
+                    f"calculated: {message.calculate_checksum()}"
+                )
                 return
             
             self._process_message(message, addr)
