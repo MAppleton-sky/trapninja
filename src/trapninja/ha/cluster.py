@@ -21,14 +21,16 @@ from .state import HAState, HAStateManager
 from .messages import HAMessage, HAMessageType, MessageFactory
 from .config import HAConfig
 
+logger = logging.getLogger("trapninja")
+
 # Try to import config sync (optional feature)
 try:
     from .sync import ConfigSyncManager, ConfigBundle
     CONFIG_SYNC_AVAILABLE = True
-except ImportError:
+    logger.debug("Config sync module imported successfully")
+except ImportError as e:
     CONFIG_SYNC_AVAILABLE = False
-
-logger = logging.getLogger("trapninja")
+    logger.warning(f"Config sync module not available: {e}")
 
 
 class HACluster:
@@ -105,13 +107,25 @@ class HACluster:
         # Config sync manager (optional)
         self.config_sync: Optional['ConfigSyncManager'] = None
         if CONFIG_SYNC_AVAILABLE and config_dir:
-            self.config_sync = ConfigSyncManager(
-                config_dir=config_dir,
-                instance_id=self.instance_id,
-                peer_host=config.peer_host,
-                peer_port=config.peer_port,
-                on_config_changed=on_config_changed
-            )
+            logger.info(f"Initializing config sync: config_dir={config_dir}")
+            logger.info(f"Config sync peer: {config.peer_host}:{config.peer_port}")
+            try:
+                self.config_sync = ConfigSyncManager(
+                    config_dir=config_dir,
+                    instance_id=self.instance_id,
+                    peer_host=config.peer_host,
+                    peer_port=config.peer_port,
+                    on_config_changed=on_config_changed
+                )
+                logger.info("ConfigSyncManager created successfully")
+            except Exception as e:
+                logger.error(f"Failed to create ConfigSyncManager: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
+        elif not CONFIG_SYNC_AVAILABLE:
+            logger.info("Config sync not available (module import failed)")
+        elif not config_dir:
+            logger.info("Config sync disabled (no config_dir provided)")
         
         logger.info(f"HA Cluster initialized - Instance ID: {self.instance_id[:8]}...")
         logger.info(f"Mode: {config.mode}, Priority: {config.priority}")

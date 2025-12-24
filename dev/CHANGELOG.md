@@ -16,6 +16,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.11] - 2025-12-24
+
+### Fixed
+
+#### Config Sync Still Not Working After 0.7.10
+- **Fixed `initialize_ha()` not passing `config_dir` to `HACluster`**. Even though
+  the `ConfigSyncManager` was correctly rewritten in 0.7.10, the `initialize_ha()`
+  function in `api.py` wasn't updated to accept and pass the `config_dir` parameter.
+- **Solution**: Updated `initialize_ha()` signature to accept `config_dir` and
+  `on_config_changed` parameters, and updated `service.py` to pass `CONFIG_DIR`.
+
+### Changed
+- Added diagnostic logging during config sync initialization to help debug issues
+- Logger now created before config sync import to enable error logging
+- HACluster now logs whether config sync is available, enabled, or why it's disabled
+
+### Verification
+After updating, check logs for:
+```
+Initializing config sync: config_dir=/etc/trapninja
+Config sync peer: 192.168.x.x:8162
+ConfigSyncManager created successfully
+Config sync enabled
+```
+
+If you see "Config sync not available" or "module import failed", check for
+Python import errors in the sync module.
+
+---
+
 ## [0.7.10] - 2025-12-24
 
 ### Fixed
@@ -846,8 +876,8 @@ Before releasing 1.0.0, we need:
 
 | Version | Date | Type | Key Features | Status |
 |---------|------|------|--------------|--------|
-| **0.7.10** | 2025-12-24 | Fix | HA config sync working, Secondary pulls on startup | **Current** |
-| 0.7.9 | 2025-12-24 | Patch | HA checksum compat, restart fix | Beta |
+| **0.7.11** | 2025-12-24 | Fix | Config sync init fix, pass config_dir to HACluster | **Current** |
+| 0.7.10 | 2025-12-24 | Fix | HA config sync working, Secondary pulls on startup | Beta |
 | 0.7.8 | 2025-12-19 | Enhancement | Enhanced Prometheus export with peak rates | Beta |
 | 0.7.7 | 2025-12-19 | Enhancement | Peak rate tracking & --sort peak | Beta |
 | 0.7.6 | 2025-12-19 | Enhancement | Stats collection period & averages | Beta |

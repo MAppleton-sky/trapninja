@@ -328,8 +328,8 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
             logger.info(f"HA enabled - Mode: {ha_config.mode}, Priority: {ha_config.priority}")
             logger.info(f"Peer: {ha_config.peer_host}:{ha_config.peer_port}")
 
-            # Initialize HA cluster
-            if not initialize_ha(ha_config, trap_forwarder_control):
+            # Initialize HA cluster with config_dir for config sync
+            if not initialize_ha(ha_config, trap_forwarder_control, config_dir=CONFIG_DIR):
                 logger.error("Failed to initialize HA cluster")
                 return 1
 
