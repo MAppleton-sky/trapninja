@@ -475,10 +475,27 @@ class HACluster:
         """Handle incoming peer connection."""
         try:
             conn.settimeout(5.0)
-            data = conn.recv(4096)
+            data = conn.recv(65536)  # Larger buffer for config sync
             if not data:
                 return
             
+            # Try to parse as JSON first (config sync messages)
+            try:
+                json_data = json.loads(data.decode('utf-8'))
+                msg_type = json_data.get('type', '')
+                
+                # Handle config sync messages
+                if msg_type == 'config_request':
+                    self._handle_config_request_json(conn, json_data, addr)
+                    return
+                elif msg_type == 'config_push':
+                    self._handle_config_push_json(conn, json_data, addr)
+                    return
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                # Not a JSON message, try as HAMessage
+                pass
+            
+            # Parse as HAMessage
             try:
                 message = HAMessage.from_bytes(data)
             except Exception as e:
@@ -515,6 +532,67 @@ class HACluster:
             logger.error(f"Error handling connection from {addr}: {e}")
         finally:
             conn.close()
+    
+    def _handle_config_request_json(self, conn: socket.socket, data: dict, addr: tuple):
+        """Handle JSON config request from peer."""
+        sender = data.get('sender', 'unknown')[:8]
+        logger.info(f"Config request from {sender}... at {addr}")
+        
+        if not self.config_sync:
+            logger.warning("Config request received but config sync not available")
+            response = {'type': 'error', 'error': 'Config sync not available'}
+            conn.send(json.dumps(response).encode('utf-8'))
+            return
+        
+        if self.current_state != HAState.PRIMARY:
+            logger.debug("Config request received but we are not PRIMARY")
+            response = {'type': 'error', 'error': 'Not PRIMARY'}
+            conn.send(json.dumps(response).encode('utf-8'))
+            return
+        
+        # Get config bundle and send response
+        bundle = self.config_sync.handle_config_request()
+        if bundle:
+            response = {
+                'type': 'config_response',
+                'bundle': bundle.to_dict(),
+            }
+            conn.send(json.dumps(response).encode('utf-8'))
+            logger.info(f"Sent config bundle to {sender}...")
+        else:
+            response = {'type': 'error', 'error': 'Failed to create bundle'}
+            conn.send(json.dumps(response).encode('utf-8'))
+    
+    def _handle_config_push_json(self, conn: socket.socket, data: dict, addr: tuple):
+        """Handle JSON config push from peer."""
+        sender = data.get('sender', 'unknown')[:8]
+        logger.info(f"Config push from {sender}... at {addr}")
+        
+        if not self.config_sync:
+            logger.warning("Config push received but config sync not available")
+            response = {'success': False, 'error': 'Config sync not available'}
+            conn.send(json.dumps(response).encode('utf-8'))
+            return
+        
+        if self.current_state == HAState.PRIMARY:
+            logger.warning("Config push received but we are PRIMARY - rejecting")
+            response = {'success': False, 'error': 'Cannot push to PRIMARY'}
+            conn.send(json.dumps(response).encode('utf-8'))
+            return
+        
+        # Apply the bundle
+        bundle_data = data.get('bundle', {})
+        try:
+            from .sync import ConfigBundle
+            bundle = ConfigBundle.from_dict(bundle_data)
+            success, msg = self.config_sync.handle_config_push(bundle.to_bytes())
+            response = {'success': success, 'message': msg}
+            conn.send(json.dumps(response).encode('utf-8'))
+            logger.info(f"Config push result: success={success}, {msg}")
+        except Exception as e:
+            logger.error(f"Failed to handle config push: {e}")
+            response = {'success': False, 'error': str(e)}
+            conn.send(json.dumps(response).encode('utf-8'))
     
     def _start_heartbeat(self):
         """Start heartbeat thread."""
@@ -794,13 +872,20 @@ class HACluster:
                 'message': 'Config sync not available'
             }
         
-        from .sync import SyncMode
-        mode = SyncMode.FORCE if force else (
-            SyncMode.PUSH if self.current_state == HAState.PRIMARY else SyncMode.PULL
-        )
-        
-        result = self.config_sync.sync_now(mode)
-        return result.to_dict()
+        if self.current_state == HAState.PRIMARY:
+            success = self.config_sync.push_configs()
+            return {
+                'success': success,
+                'message': 'Pushed configs to peer' if success else 'Push failed',
+                'direction': 'push'
+            }
+        else:
+            success = self.config_sync.pull_configs()
+            return {
+                'success': success,
+                'message': 'Pulled configs from PRIMARY' if success else 'Pull failed',
+                'direction': 'pull'
+            }
     
     def _close_sockets(self):
         """Close all sockets."""

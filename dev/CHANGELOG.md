@@ -16,6 +16,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.10] - 2025-12-24
+
+### Fixed
+
+#### HA Config Sync Not Working
+- **Fixed config sync between HA nodes not functioning**. The `ConfigSyncManager`
+  constructor signature in `manager.py` didn't match how `cluster.py` was calling it,
+  causing config sync to silently fail to initialize.
+- **Root cause**: The sync manager expected `ConfigSyncConfig`, `get_ha_state()`, and
+  `get_peer_info()` callbacks, but `cluster.py` was passing `peer_host`, `peer_port`
+  directly. This caused a `TypeError` that was caught by the `try/except` import,
+  setting `CONFIG_SYNC_AVAILABLE = False`.
+- **Solution**: Rewrote `ConfigSyncManager` with simplified interface matching what
+  `HACluster` provides. Now accepts `peer_host`, `peer_port` directly.
+
+#### Secondary Doesn't Pull Configs on Startup
+- **Fixed Secondary not receiving configs from Primary on startup**. When a node
+  started as Secondary, it should pull shared configurations from Primary.
+- **Solution**: `ConfigSyncManager.start(is_primary=False)` now automatically pulls
+  all shared configs from Primary after a brief delay. Configs are written to the
+  local config directory (`/etc/trapninja/` or configured path).
+
+### Changed
+
+#### Config Sync Message Handling
+- Config sync now uses JSON messages over the HA TCP socket instead of HAMessage
+  binary protocol. This simplifies handling and allows larger config payloads.
+- Added `_handle_config_request_json()` and `_handle_config_push_json()` handlers
+  in `cluster.py` to process config sync messages.
+- Increased receive buffer to 65536 bytes to accommodate full config bundles.
+
+#### Shared Config Files
+The following files are synchronized between HA nodes:
+- `destinations.json` - Trap forwarding destinations
+- `blocked_ips.json` - Blocked source IP addresses  
+- `blocked_traps.json` - Blocked trap OIDs
+- `redirected_ips.json` - IP-based redirection rules
+- `redirected_oids.json` - OID-based redirection rules
+- `redirected_destinations.json` - Redirection target destinations
+
+Local-only configs (never synced): `ha_config.json`, `cache_config.json`,
+`listen_ports.json`, `capture_config.json`, `shadow_config.json`, `stats_config.json`,
+`sync_config.json`
+
+### Usage
+
+Config sync is automatic when HA is enabled:
+1. **Secondary startup**: Pulls all shared configs from Primary
+2. **Primary file change**: Automatically pushes to Secondary (monitored every 10s)
+3. **Checksum mismatch**: If heartbeat checksums differ 3+ times, Secondary pulls
+4. **State change**: Becoming Secondary triggers a pull; becoming Primary enables push
+
+Manual sync via CLI:
+```bash
+trapninja.py --ha-sync      # Sync configs based on current role
+```
+
+---
+
 ## [0.7.9] - 2025-12-24
 
 ### Fixed
@@ -787,7 +846,8 @@ Before releasing 1.0.0, we need:
 
 | Version | Date | Type | Key Features | Status |
 |---------|------|------|--------------|--------|
-| **0.7.9** | 2025-12-24 | Patch | HA checksum compat, restart fix | **Current** |
+| **0.7.10** | 2025-12-24 | Fix | HA config sync working, Secondary pulls on startup | **Current** |
+| 0.7.9 | 2025-12-24 | Patch | HA checksum compat, restart fix | Beta |
 | 0.7.8 | 2025-12-19 | Enhancement | Enhanced Prometheus export with peak rates | Beta |
 | 0.7.7 | 2025-12-19 | Enhancement | Peak rate tracking & --sort peak | Beta |
 | 0.7.6 | 2025-12-19 | Enhancement | Stats collection period & averages | Beta |

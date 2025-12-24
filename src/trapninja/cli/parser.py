@@ -100,20 +100,10 @@ Examples:
                       help='Show comprehensive HA help and usage examples')
     
     # HA config sync commands
+    group.add_argument('--ha-sync', action='store_true',
+                      help='Sync configs with peer (push if PRIMARY, pull if SECONDARY)')
     group.add_argument('--sync-status', action='store_true',
                       help='Show configuration synchronization status')
-    group.add_argument('--sync-diff', action='store_true',
-                      help='Show differences between local and peer configs')
-    group.add_argument('--sync-push', action='store_true',
-                      help='Push config(s) to peer (PRIMARY only)')
-    group.add_argument('--sync-pull', action='store_true',
-                      help='Pull config(s) from peer (SECONDARY)')
-    group.add_argument('--enable-sync', action='store_true',
-                      help='Enable configuration synchronization')
-    group.add_argument('--disable-sync', action='store_true',
-                      help='Disable configuration synchronization')
-    group.add_argument('--configure-sync', action='store_true',
-                      help='Configure sync settings')
     group.add_argument('--sync-help', action='store_true',
                       help='Show comprehensive config sync help')
 

@@ -2,15 +2,14 @@
 """
 TrapNinja HA Config Synchronization Manager
 
-Core implementation for synchronizing shared configurations between
-HA cluster nodes using the existing HA TCP socket mechanism.
+Simplified implementation for synchronizing shared configurations between
+HA cluster nodes. Integrates with HACluster for seamless config sync.
 
 Design Principles:
-    - Uses existing HA communication (no Redis dependency for sync)
-    - Non-blocking: Sync failures don't affect trap processing
-    - Eventually consistent: All nodes converge to same config
-    - Primary authority: Only PRIMARY pushes changes
-    - Version tracking: Checksums detect drift between nodes
+    - Primary pushes config changes to Secondary
+    - Secondary pulls configs from Primary on startup
+    - Checksums in heartbeats detect config drift
+    - Configs are written to local files on sync
 
 Shared Configurations (synced between nodes):
     - destinations.json: Forward destinations
@@ -21,16 +20,13 @@ Shared Configurations (synced between nodes):
     - redirected_destinations.json: Redirection target destinations
 
 Local Configurations (NOT synced):
-    - ha_config.json: Node-specific HA settings (mode, priority, peer)
+    - ha_config.json: Node-specific HA settings
     - cache_config.json: Node-specific cache settings
     - listen_ports.json: Node-specific listening ports
-    - capture_config.json: Node-specific capture settings
-    - shadow_config.json: Node-specific shadow mode settings
-    - stats_config.json: Node-specific stats settings
-    - sync_config.json: Node-specific sync settings
+    - capture_config.json, shadow_config.json, stats_config.json, sync_config.json
 
 Author: TrapNinja Team
-Version: 1.0.0
+Version: 2.0.0
 """
 
 import hashlib
@@ -40,53 +36,23 @@ import os
 import socket
 import threading
 import time
-from dataclasses import dataclass
-from datetime import datetime
-from enum import Enum
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("trapninja")
 
 
-class SyncedConfigType(Enum):
-    """
-    Configuration types that can be synchronized.
-    
-    Each type maps to a specific configuration file.
-    """
-    DESTINATIONS = "destinations"
-    BLOCKED_IPS = "blocked_ips"
-    BLOCKED_TRAPS = "blocked_traps"
-    REDIRECTED_IPS = "redirected_ips"
-    REDIRECTED_OIDS = "redirected_oids"
-    REDIRECTED_DESTINATIONS = "redirected_destinations"
-    
-    @property
-    def filename(self) -> str:
-        """Get the configuration filename for this type."""
-        return f"{self.value}.json"
-    
-    @classmethod
-    def all_types(cls) -> List['SyncedConfigType']:
-        """Get all syncable config types."""
-        return list(cls)
+# Shared config files that get synchronized
+SHARED_CONFIG_FILES = [
+    "destinations.json",
+    "blocked_ips.json",
+    "blocked_traps.json",
+    "redirected_ips.json",
+    "redirected_oids.json",
+    "redirected_destinations.json",
+]
 
-
-class ConfigSyncMessageType(Enum):
-    """
-    Message types for config synchronization.
-    
-    These extend the HA protocol for config sync operations.
-    """
-    CONFIG_REQUEST = "config_request"
-    CONFIG_RESPONSE = "config_response"
-    CONFIG_PUSH = "config_push"
-    CONFIG_ACK = "config_ack"
-    CONFIG_VERSION_REQUEST = "config_version_request"
-    CONFIG_VERSION_RESPONSE = "config_version_response"
-
-
-# Map of local-only configs that should NEVER be synced
+# Local-only configs that should NEVER be synced
 LOCAL_ONLY_CONFIGS = frozenset({
     "ha_config.json",
     "cache_config.json",
@@ -99,694 +65,188 @@ LOCAL_ONLY_CONFIGS = frozenset({
 
 
 @dataclass
-class ConfigSyncConfig:
-    """Configuration for the config sync system."""
-    enabled: bool = False
-    sync_on_startup: bool = True
-    sync_on_promotion: bool = True
-    push_on_file_change: bool = True
-    version_check_interval: int = 30
-    primary_authority: bool = True
-    sync_timeout: float = 10.0
+class ConfigBundle:
+    """Bundle of shared configuration files for sync."""
+    configs: Dict[str, Any] = field(default_factory=dict)
+    checksum: str = ""
+    timestamp: float = 0.0
+    source_instance: str = ""
     
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ConfigSyncConfig':
-        """Create config from dictionary."""
-        return cls(
-            enabled=data.get('enabled', False),
-            sync_on_startup=data.get('sync_on_startup', True),
-            sync_on_promotion=data.get('sync_on_promotion', True),
-            push_on_file_change=data.get('push_on_file_change', True),
-            version_check_interval=data.get('version_check_interval', 30),
-            primary_authority=data.get('primary_authority', True),
-            sync_timeout=data.get('sync_timeout', 10.0),
-        )
+    def __post_init__(self):
+        if not self.checksum and self.configs:
+            self.checksum = self._calculate_checksum()
+        if not self.timestamp:
+            self.timestamp = time.time()
     
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert config to dictionary."""
-        return {
-            'enabled': self.enabled,
-            'sync_on_startup': self.sync_on_startup,
-            'sync_on_promotion': self.sync_on_promotion,
-            'push_on_file_change': self.push_on_file_change,
-            'version_check_interval': self.version_check_interval,
-            'primary_authority': self.primary_authority,
-            'sync_timeout': self.sync_timeout,
-        }
-
-
-@dataclass
-class ConfigVersionInfo:
-    """Version information for a configuration."""
-    checksum: str
-    mtime: float
-    size: int
+    def _calculate_checksum(self) -> str:
+        """Calculate overall checksum of all configs."""
+        combined = json.dumps(self.configs, sort_keys=True)
+        return hashlib.md5(combined.encode()).hexdigest()
     
     def to_dict(self) -> Dict[str, Any]:
         return {
+            'configs': self.configs,
             'checksum': self.checksum,
-            'mtime': self.mtime,
-            'size': self.size,
+            'timestamp': self.timestamp,
+            'source_instance': self.source_instance,
         }
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ConfigVersionInfo':
+    def from_dict(cls, data: Dict[str, Any]) -> 'ConfigBundle':
         return cls(
+            configs=data.get('configs', {}),
             checksum=data.get('checksum', ''),
-            mtime=data.get('mtime', 0.0),
-            size=data.get('size', 0),
+            timestamp=data.get('timestamp', 0.0),
+            source_instance=data.get('source_instance', ''),
         )
-
-
-@dataclass
-class SyncStats:
-    """Statistics for config sync operations."""
-    pushes_sent: int = 0
-    pushes_received: int = 0
-    sync_requests: int = 0
-    sync_responses: int = 0
-    conflicts_detected: int = 0
-    errors: int = 0
-    last_sync_time: Optional[float] = None
-    last_error: Optional[str] = None
     
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'pushes_sent': self.pushes_sent,
-            'pushes_received': self.pushes_received,
-            'sync_requests': self.sync_requests,
-            'sync_responses': self.sync_responses,
-            'conflicts_detected': self.conflicts_detected,
-            'errors': self.errors,
-            'last_sync_time': self.last_sync_time,
-            'last_error': self.last_error,
-        }
+    def to_bytes(self) -> bytes:
+        return json.dumps(self.to_dict()).encode('utf-8')
+    
+    @classmethod
+    def from_bytes(cls, data: bytes) -> 'ConfigBundle':
+        return cls.from_dict(json.loads(data.decode('utf-8')))
 
 
 class ConfigSyncManager:
     """
     Manages configuration synchronization between HA cluster nodes.
     
-    Uses the existing HA TCP socket communication for sync operations.
-    Integrates with HACluster to send/receive config sync messages.
-    
-    Thread-safe for concurrent access.
+    Simplified interface that integrates directly with HACluster.
     """
     
     def __init__(
         self,
-        config: ConfigSyncConfig,
         config_dir: str,
         instance_id: str,
-        get_ha_state: Callable[[], str],
-        get_peer_info: Callable[[], Tuple[str, int]],
-        on_config_updated: Optional[Callable[[SyncedConfigType], None]] = None
+        peer_host: str,
+        peer_port: int,
+        on_config_changed: Optional[Callable[[], None]] = None
     ):
         """
         Initialize the config sync manager.
         
         Args:
-            config: Sync configuration
             config_dir: Path to local configuration directory
             instance_id: Unique identifier for this node
-            get_ha_state: Callback to get current HA state
-            get_peer_info: Callback to get peer host and port
-            on_config_updated: Callback when a config is updated from sync
+            peer_host: Peer's hostname or IP
+            peer_port: Peer's HA port
+            on_config_changed: Callback when configs are updated from sync
         """
-        self.config = config
         self.config_dir = config_dir
         self.instance_id = instance_id
-        self.get_ha_state = get_ha_state
-        self.get_peer_info = get_peer_info
-        self.on_config_updated = on_config_updated
+        self.peer_host = peer_host
+        self.peer_port = peer_port
+        self.on_config_changed = on_config_changed
         
         self._lock = threading.RLock()
-        self._stats = SyncStats()
-        
-        self._local_versions: Dict[SyncedConfigType, ConfigVersionInfo] = {}
-        self._peer_versions: Dict[SyncedConfigType, ConfigVersionInfo] = {}
-        self._file_mtimes: Dict[str, float] = {}
+        self._is_primary = False
+        self._local_checksum: Optional[str] = None
+        self._remote_checksum: Optional[str] = None
+        self._checksum_mismatch_count = 0
         
         self._stop_event = threading.Event()
         self._monitor_thread: Optional[threading.Thread] = None
         
-        logger.info(f"ConfigSyncManager initialized for instance {instance_id[:8]}...")
-    
-    def _compute_checksum(self, data: Any) -> str:
-        """Compute MD5 checksum of configuration data."""
-        content = json.dumps(data, sort_keys=True)
-        return hashlib.md5(content.encode()).hexdigest()
-    
-    def _get_config_path(self, config_type: SyncedConfigType) -> str:
-        """Get local file path for a config type."""
-        return os.path.join(self.config_dir, config_type.filename)
-    
-    def _get_local_version(self, config_type: SyncedConfigType) -> Optional[ConfigVersionInfo]:
-        """Get version info for a local config file."""
-        path = self._get_config_path(config_type)
-        try:
-            if not os.path.exists(path):
-                return None
-            
-            stat = os.stat(path)
-            with open(path, 'r') as f:
-                data = json.load(f)
-            
-            return ConfigVersionInfo(
-                checksum=self._compute_checksum(data),
-                mtime=stat.st_mtime,
-                size=stat.st_size,
-            )
-        except Exception as e:
-            logger.warning(f"Failed to get version for {config_type.value}: {e}")
-            return None
-    
-    def get_all_local_versions(self) -> Dict[str, Dict[str, Any]]:
-        """Get version info for all local synced configs."""
-        versions = {}
-        for config_type in SyncedConfigType.all_types():
-            version = self._get_local_version(config_type)
-            if version:
-                versions[config_type.value] = version.to_dict()
-                self._local_versions[config_type] = version
-        return versions
-    
-    def _check_version_mismatch(
-        self,
-        config_type: SyncedConfigType,
-        remote_version: ConfigVersionInfo
-    ) -> bool:
-        """Check if local and remote versions differ."""
-        local_version = self._local_versions.get(config_type)
-        if not local_version:
-            local_version = self._get_local_version(config_type)
-            if local_version:
-                self._local_versions[config_type] = local_version
-        
-        if not local_version:
-            return True
-        
-        return local_version.checksum != remote_version.checksum
-    
-    def _read_local_config(self, config_type: SyncedConfigType) -> Optional[Any]:
-        """Read configuration from local file."""
-        path = self._get_config_path(config_type)
-        try:
-            if os.path.exists(path):
-                with open(path, 'r') as f:
-                    return json.load(f)
-            return None
-        except Exception as e:
-            logger.warning(f"Failed to read local config {config_type.value}: {e}")
-            return None
-    
-    def _write_local_config(self, config_type: SyncedConfigType, data: Any) -> bool:
-        """Write configuration to local file atomically."""
-        path = self._get_config_path(config_type)
-        try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            
-            temp_path = path + '.tmp'
-            with open(temp_path, 'w') as f:
-                json.dump(data, f, indent=2)
-            os.rename(temp_path, path)
-            
-            self._local_versions[config_type] = ConfigVersionInfo(
-                checksum=self._compute_checksum(data),
-                mtime=os.path.getmtime(path),
-                size=os.path.getsize(path),
-            )
-            
-            logger.debug(f"Wrote local config: {config_type.value}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to write local config {config_type.value}: {e}")
-            return False
-    
-    def create_version_request_message(self) -> Dict[str, Any]:
-        """Create a message requesting peer's config versions."""
-        return {
-            'type': ConfigSyncMessageType.CONFIG_VERSION_REQUEST.value,
-            'sender': self.instance_id,
-            'timestamp': time.time(),
+        # Stats
+        self._stats = {
+            'pulls_completed': 0,
+            'pushes_completed': 0,
+            'pull_failures': 0,
+            'push_failures': 0,
+            'last_sync_time': None,
+            'last_error': None,
         }
+        
+        # Calculate initial checksum
+        self._local_checksum = self._calculate_local_checksum()
+        
+        logger.info(f"ConfigSyncManager initialized for {instance_id[:8]}...")
+        logger.info(f"Config dir: {config_dir}, Peer: {peer_host}:{peer_port}")
     
-    def create_version_response_message(self) -> Dict[str, Any]:
-        """Create a message with our config versions."""
-        return {
-            'type': ConfigSyncMessageType.CONFIG_VERSION_RESPONSE.value,
-            'sender': self.instance_id,
-            'timestamp': time.time(),
-            'versions': self.get_all_local_versions(),
-        }
-    
-    def create_config_request_message(
-        self,
-        config_types: Optional[List[SyncedConfigType]] = None
-    ) -> Dict[str, Any]:
-        """Create a message requesting full config data."""
-        if config_types is None:
-            config_types = SyncedConfigType.all_types()
-        
-        return {
-            'type': ConfigSyncMessageType.CONFIG_REQUEST.value,
-            'sender': self.instance_id,
-            'timestamp': time.time(),
-            'config_types': [ct.value for ct in config_types],
-        }
-    
-    def create_config_response_message(
-        self,
-        config_types: Optional[List[SyncedConfigType]] = None
-    ) -> Dict[str, Any]:
-        """Create a message with full config data."""
-        if config_types is None:
-            config_types = SyncedConfigType.all_types()
-        
-        configs = {}
-        versions = {}
-        
-        for config_type in config_types:
-            data = self._read_local_config(config_type)
-            if data is not None:
-                configs[config_type.value] = data
-                version = self._get_local_version(config_type)
-                if version:
-                    versions[config_type.value] = version.to_dict()
-        
-        return {
-            'type': ConfigSyncMessageType.CONFIG_RESPONSE.value,
-            'sender': self.instance_id,
-            'timestamp': time.time(),
-            'configs': configs,
-            'versions': versions,
-        }
-    
-    def create_config_push_message(
-        self,
-        config_type: SyncedConfigType,
-        data: Any
-    ) -> Dict[str, Any]:
-        """Create a message pushing a single config update."""
-        version = ConfigVersionInfo(
-            checksum=self._compute_checksum(data),
-            mtime=time.time(),
-            size=len(json.dumps(data)),
-        )
-        
-        return {
-            'type': ConfigSyncMessageType.CONFIG_PUSH.value,
-            'sender': self.instance_id,
-            'timestamp': time.time(),
-            'config_type': config_type.value,
-            'config_data': data,
-            'version': version.to_dict(),
-        }
-    
-    def create_config_ack_message(
-        self,
-        config_type: SyncedConfigType,
-        success: bool,
-        error: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Create acknowledgment for config received."""
-        return {
-            'type': ConfigSyncMessageType.CONFIG_ACK.value,
-            'sender': self.instance_id,
-            'timestamp': time.time(),
-            'config_type': config_type.value,
-            'success': success,
-            'error': error,
-        }
-    
-    def _send_sync_message(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Send a sync message to peer via TCP socket."""
-        try:
-            peer_host, peer_port = self.get_peer_info()
-            
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(self.config.sync_timeout)
-            
-            try:
-                sock.connect((peer_host, peer_port))
-                
-                msg_bytes = json.dumps(message).encode('utf-8')
-                sock.send(msg_bytes)
-                
-                msg_type = message.get('type', '')
-                if msg_type in (
-                    ConfigSyncMessageType.CONFIG_REQUEST.value,
-                    ConfigSyncMessageType.CONFIG_VERSION_REQUEST.value,
-                    ConfigSyncMessageType.CONFIG_PUSH.value,
-                ):
-                    response_data = sock.recv(65536)
-                    if response_data:
-                        return json.loads(response_data.decode('utf-8'))
-                
-                return None
-                
-            finally:
-                sock.close()
-                
-        except socket.timeout:
-            logger.warning("Config sync message timeout")
-            return None
-        except ConnectionRefusedError:
-            logger.debug("Peer not available for config sync")
-            return None
-        except Exception as e:
-            logger.warning(f"Failed to send config sync message: {e}")
-            self._stats.errors += 1
-            self._stats.last_error = str(e)
-            return None
-    
-    def handle_sync_message(
-        self,
-        message: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Handle incoming config sync message.
-        
-        Called by HACluster when a config sync message is received.
-        """
-        msg_type = message.get('type', '')
-        
-        try:
-            if msg_type == ConfigSyncMessageType.CONFIG_VERSION_REQUEST.value:
-                return self._handle_version_request(message)
-            elif msg_type == ConfigSyncMessageType.CONFIG_VERSION_RESPONSE.value:
-                return self._handle_version_response(message)
-            elif msg_type == ConfigSyncMessageType.CONFIG_REQUEST.value:
-                return self._handle_config_request(message)
-            elif msg_type == ConfigSyncMessageType.CONFIG_RESPONSE.value:
-                return self._handle_config_response(message)
-            elif msg_type == ConfigSyncMessageType.CONFIG_PUSH.value:
-                return self._handle_config_push(message)
-            elif msg_type == ConfigSyncMessageType.CONFIG_ACK.value:
-                return self._handle_config_ack(message)
-            else:
-                logger.warning(f"Unknown config sync message type: {msg_type}")
-                return None
-                
-        except Exception as e:
-            logger.error(f"Error handling config sync message: {e}")
-            self._stats.errors += 1
-            self._stats.last_error = str(e)
-            return None
-    
-    def _handle_version_request(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle request for our config versions."""
-        logger.debug(f"Received version request from {message.get('sender', 'unknown')[:8]}...")
-        return self.create_version_response_message()
-    
-    def _handle_version_response(self, message: Dict[str, Any]) -> None:
-        """Handle received config versions from peer."""
-        sender = message.get('sender', 'unknown')[:8]
-        versions = message.get('versions', {})
-        
-        logger.debug(f"Received version response from {sender}... with {len(versions)} configs")
-        
-        for config_type_str, version_data in versions.items():
-            try:
-                config_type = SyncedConfigType(config_type_str)
-                self._peer_versions[config_type] = ConfigVersionInfo.from_dict(version_data)
-            except ValueError:
-                continue
-        
-        ha_state = self.get_ha_state()
-        if ha_state == 'secondary':
-            mismatched = self._find_version_mismatches()
-            if mismatched:
-                logger.info(f"Config version mismatch detected: {[ct.value for ct in mismatched]}")
-                self.request_configs(mismatched)
-        
-        return None
-    
-    def _handle_config_request(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle request for full config data."""
-        sender = message.get('sender', 'unknown')[:8]
-        requested_types = message.get('config_types', [])
-        
-        logger.info(f"Received config request from {sender}... for {len(requested_types)} configs")
-        self._stats.sync_requests += 1
-        
-        config_types = []
-        for type_str in requested_types:
-            try:
-                config_types.append(SyncedConfigType(type_str))
-            except ValueError:
-                continue
-        
-        return self.create_config_response_message(config_types or None)
-    
-    def _handle_config_response(self, message: Dict[str, Any]) -> None:
-        """Handle received full config data from peer."""
-        sender = message.get('sender', 'unknown')[:8]
-        configs = message.get('configs', {})
-        versions = message.get('versions', {})
-        
-        logger.info(f"Received config response from {sender}... with {len(configs)} configs")
-        self._stats.sync_responses += 1
-        
-        for config_type_str, config_data in configs.items():
-            try:
-                config_type = SyncedConfigType(config_type_str)
-            except ValueError:
-                continue
-            
-            if self._write_local_config(config_type, config_data):
-                logger.info(f"Applied synced config: {config_type.value}")
-                
-                if config_type_str in versions:
-                    self._peer_versions[config_type] = ConfigVersionInfo.from_dict(
-                        versions[config_type_str]
-                    )
-                
-                if self.on_config_updated:
-                    try:
-                        self.on_config_updated(config_type)
-                    except Exception as e:
-                        logger.warning(f"Config update callback error: {e}")
-        
-        self._stats.last_sync_time = time.time()
-        return None
-    
-    def _handle_config_push(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle pushed config update from PRIMARY."""
-        sender = message.get('sender', 'unknown')[:8]
-        config_type_str = message.get('config_type', '')
-        config_data = message.get('config_data')
-        version_data = message.get('version', {})
-        
-        logger.info(f"Received config push from {sender}... for {config_type_str}")
-        self._stats.pushes_received += 1
-        
-        try:
-            config_type = SyncedConfigType(config_type_str)
-        except ValueError:
-            return self.create_config_ack_message(
-                SyncedConfigType.DESTINATIONS,
-                success=False,
-                error=f"Unknown config type: {config_type_str}"
-            )
-        
-        ha_state = self.get_ha_state()
-        if ha_state == 'primary' and self.config.primary_authority:
-            logger.warning("Rejecting config push - we are PRIMARY")
-            self._stats.conflicts_detected += 1
-            return self.create_config_ack_message(
-                config_type,
-                success=False,
-                error="Cannot push to PRIMARY node"
-            )
-        
-        if self._write_local_config(config_type, config_data):
-            self._peer_versions[config_type] = ConfigVersionInfo.from_dict(version_data)
-            
-            if self.on_config_updated:
+    def _calculate_local_checksum(self) -> str:
+        """Calculate checksum of all local shared configs."""
+        checksums = []
+        for filename in sorted(SHARED_CONFIG_FILES):
+            filepath = os.path.join(self.config_dir, filename)
+            if os.path.exists(filepath):
                 try:
-                    self.on_config_updated(config_type)
+                    with open(filepath, 'r') as f:
+                        content = json.load(f)
+                    file_checksum = hashlib.md5(
+                        json.dumps(content, sort_keys=True).encode()
+                    ).hexdigest()
+                    checksums.append(f"{filename}:{file_checksum}")
                 except Exception as e:
-                    logger.warning(f"Config update callback error: {e}")
-            
-            self._stats.last_sync_time = time.time()
-            return self.create_config_ack_message(config_type, success=True)
-        else:
-            return self.create_config_ack_message(
-                config_type,
-                success=False,
-                error="Failed to write config"
-            )
-    
-    def _handle_config_ack(self, message: Dict[str, Any]) -> None:
-        """Handle acknowledgment of pushed config."""
-        sender = message.get('sender', 'unknown')[:8]
-        config_type = message.get('config_type', '')
-        success = message.get('success', False)
-        error = message.get('error')
-        
-        if success:
-            logger.debug(f"Config push acknowledged by {sender}... for {config_type}")
-        else:
-            logger.warning(f"Config push rejected by {sender}... for {config_type}: {error}")
-            self._stats.conflicts_detected += 1
-        
-        return None
-    
-    def _find_version_mismatches(self) -> List[SyncedConfigType]:
-        """Find configs where local and peer versions differ."""
-        mismatched = []
-        
-        for config_type in SyncedConfigType.all_types():
-            peer_version = self._peer_versions.get(config_type)
-            if not peer_version:
-                continue
-            
-            if self._check_version_mismatch(config_type, peer_version):
-                mismatched.append(config_type)
-        
-        return mismatched
-    
-    def request_versions(self) -> bool:
-        """Request config versions from peer."""
-        message = self.create_version_request_message()
-        response = self._send_sync_message(message)
-        
-        if response:
-            self._handle_version_response(response)
-            return True
-        return False
-    
-    def request_configs(
-        self,
-        config_types: Optional[List[SyncedConfigType]] = None
-    ) -> bool:
-        """Request full config data from peer."""
-        message = self.create_config_request_message(config_types)
-        response = self._send_sync_message(message)
-        
-        if response:
-            self._handle_config_response(response)
-            return True
-        return False
-    
-    def push_config(self, config_type: SyncedConfigType) -> bool:
-        """Push a single config to peer."""
-        ha_state = self.get_ha_state()
-        if ha_state != 'primary' and self.config.primary_authority:
-            logger.warning(f"Cannot push config as {ha_state} - only PRIMARY can push")
-            return False
-        
-        data = self._read_local_config(config_type)
-        if data is None:
-            logger.warning(f"No local config to push: {config_type.value}")
-            return False
-        
-        message = self.create_config_push_message(config_type, data)
-        response = self._send_sync_message(message)
-        
-        self._stats.pushes_sent += 1
-        
-        if response:
-            self._handle_config_ack(response)
-            return response.get('success', False)
-        
-        return False
-    
-    def push_all_configs(self) -> Dict[str, bool]:
-        """Push all local shared configs to peer."""
-        results = {}
-        
-        for config_type in SyncedConfigType.all_types():
-            if self._read_local_config(config_type) is not None:
-                results[config_type.value] = self.push_config(config_type)
+                    logger.debug(f"Error reading {filename}: {e}")
+                    checksums.append(f"{filename}:error")
             else:
-                results[config_type.value] = True
+                checksums.append(f"{filename}:missing")
         
-        return results
+        combined = "|".join(checksums)
+        return hashlib.md5(combined.encode()).hexdigest()
     
-    def pull_all_configs(self) -> bool:
-        """Pull all configs from peer (for SECONDARY)."""
-        return self.request_configs(None)
+    def get_local_checksum(self) -> str:
+        """Get the current local config checksum."""
+        with self._lock:
+            if self._local_checksum is None:
+                self._local_checksum = self._calculate_local_checksum()
+            return self._local_checksum
     
-    def sync_all(self) -> bool:
-        """Synchronize all configs based on HA role."""
-        ha_state = self.get_ha_state()
-        
-        if ha_state == 'primary':
-            results = self.push_all_configs()
-            return all(results.values())
-        else:
-            return self.pull_all_configs()
-    
-    def _check_file_changes(self) -> List[SyncedConfigType]:
-        """Check which config files have changed since last check."""
-        changed = []
-        
-        for config_type in SyncedConfigType.all_types():
-            path = self._get_config_path(config_type)
+    def update_remote_checksum(self, checksum: str):
+        """Update the remote peer's config checksum (from heartbeat)."""
+        with self._lock:
+            old_checksum = self._remote_checksum
+            self._remote_checksum = checksum
             
-            try:
-                if not os.path.exists(path):
-                    continue
-                
-                current_mtime = os.path.getmtime(path)
-                last_mtime = self._file_mtimes.get(path, 0)
-                
-                if current_mtime > last_mtime:
-                    changed.append(config_type)
-                    self._file_mtimes[path] = current_mtime
-                    
-            except Exception as e:
-                logger.debug(f"Error checking file {path}: {e}")
-        
-        return changed
+            # Check for mismatch
+            if self._local_checksum and checksum != self._local_checksum:
+                self._checksum_mismatch_count += 1
+                if self._checksum_mismatch_count >= 3:
+                    logger.info(
+                        f"Config checksum mismatch detected "
+                        f"(local={self._local_checksum[:8]}..., "
+                        f"remote={checksum[:8]}...) - will sync"
+                    )
+                    # If we're secondary, pull from primary
+                    if not self._is_primary:
+                        threading.Thread(
+                            target=self._pull_configs_async,
+                            daemon=True
+                        ).start()
+                    self._checksum_mismatch_count = 0
+            else:
+                self._checksum_mismatch_count = 0
     
-    def _monitor_loop(self):
-        """Background loop for monitoring file changes and syncing."""
-        logger.info("Config sync monitor started")
-        
-        for config_type in SyncedConfigType.all_types():
-            path = self._get_config_path(config_type)
-            if os.path.exists(path):
-                self._file_mtimes[path] = os.path.getmtime(path)
-        
-        last_version_check = 0
-        
-        while not self._stop_event.is_set():
-            try:
-                if self._stop_event.wait(timeout=5.0):
-                    break
-                
-                ha_state = self.get_ha_state()
-                
-                if ha_state == 'primary' and self.config.push_on_file_change:
-                    changed = self._check_file_changes()
-                    for config_type in changed:
-                        logger.info(f"Local config changed: {config_type.value} - pushing to peer")
-                        self.push_config(config_type)
-                
-                elif ha_state == 'secondary':
-                    now = time.time()
-                    if now - last_version_check >= self.config.version_check_interval:
-                        last_version_check = now
-                        logger.debug("Checking config versions with PRIMARY...")
-                        self.request_versions()
-                        
-            except Exception as e:
-                logger.warning(f"Config sync monitor error: {e}")
-        
-        logger.info("Config sync monitor stopped")
+    def set_primary(self, is_primary: bool):
+        """Set whether this node is primary (called on state change)."""
+        with self._lock:
+            was_primary = self._is_primary
+            self._is_primary = is_primary
+            
+            if is_primary and not was_primary:
+                logger.info("Became PRIMARY - will push configs to peer on changes")
+            elif not is_primary and was_primary:
+                logger.info("Became SECONDARY - pulling configs from PRIMARY")
+                # Pull configs when becoming secondary
+                threading.Thread(
+                    target=self._pull_configs_async,
+                    daemon=True
+                ).start()
     
-    def start(self) -> bool:
-        """Start the config sync system."""
-        if not self.config.enabled:
-            logger.info("Config sync not enabled")
-            return False
+    def start(self, is_primary: bool = False):
+        """
+        Start the config sync system.
         
-        logger.info("Starting config sync system...")
+        Args:
+            is_primary: Whether this node is starting as primary
+        """
+        logger.info(f"Starting config sync (is_primary={is_primary})...")
         
+        self._is_primary = is_primary
         self._stop_event.clear()
+        
+        # Start file monitor thread
         self._monitor_thread = threading.Thread(
             target=self._monitor_loop,
             daemon=True,
@@ -794,18 +254,22 @@ class ConfigSyncManager:
         )
         self._monitor_thread.start()
         
-        if self.config.sync_on_startup:
-            logger.info("Performing initial config sync...")
+        # If starting as secondary, pull configs from primary
+        if not is_primary:
+            logger.info("Starting as SECONDARY - pulling configs from PRIMARY...")
+            # Give the primary a moment to be ready
             time.sleep(2.0)
-            self.sync_all()
+            success = self.pull_configs()
+            if success:
+                logger.info("Initial config sync from PRIMARY completed")
+            else:
+                logger.warning("Initial config sync from PRIMARY failed - will retry")
         
         logger.info("Config sync system started")
-        return True
     
     def stop(self):
         """Stop the config sync system."""
         logger.info("Stopping config sync system...")
-        
         self._stop_event.set()
         
         if self._monitor_thread and self._monitor_thread.is_alive():
@@ -813,75 +277,327 @@ class ConfigSyncManager:
         
         logger.info("Config sync system stopped")
     
-    def on_ha_state_change(self, old_state: str, new_state: str):
-        """Handle HA state change."""
-        logger.info(f"Config sync: HA state changed {old_state} -> {new_state}")
+    def _monitor_loop(self):
+        """Background loop for monitoring file changes (PRIMARY only)."""
+        logger.debug("Config sync monitor started")
         
-        if new_state == 'primary' and self.config.sync_on_promotion:
-            logger.info("Became PRIMARY - pushing configs to peer")
-            self.push_all_configs()
+        last_checksum = self._local_checksum
         
-        elif new_state == 'secondary':
-            logger.info("Became SECONDARY - pulling configs from PRIMARY")
-            self.pull_all_configs()
+        while not self._stop_event.is_set():
+            try:
+                if self._stop_event.wait(timeout=10.0):
+                    break
+                
+                # Only monitor for changes if we're primary
+                if self._is_primary:
+                    current_checksum = self._calculate_local_checksum()
+                    
+                    if current_checksum != last_checksum:
+                        logger.info("Local config changed - pushing to peer")
+                        with self._lock:
+                            self._local_checksum = current_checksum
+                        self.push_configs()
+                        last_checksum = current_checksum
+                else:
+                    # Update local checksum periodically
+                    with self._lock:
+                        self._local_checksum = self._calculate_local_checksum()
+                        
+            except Exception as e:
+                logger.warning(f"Config sync monitor error: {e}")
+        
+        logger.debug("Config sync monitor stopped")
+    
+    def _pull_configs_async(self):
+        """Pull configs in background thread."""
+        try:
+            time.sleep(1.0)  # Brief delay to avoid overwhelming peer
+            self.pull_configs()
+        except Exception as e:
+            logger.error(f"Async config pull failed: {e}")
+    
+    def pull_configs(self) -> bool:
+        """
+        Pull all shared configs from PRIMARY.
+        
+        Returns:
+            True if successful
+        """
+        logger.info(f"Pulling configs from {self.peer_host}:{self.peer_port}...")
+        
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(10.0)
+            
+            try:
+                sock.connect((self.peer_host, self.peer_port))
+                
+                # Send config request
+                request = {
+                    'type': 'config_request',
+                    'sender': self.instance_id,
+                    'timestamp': time.time(),
+                }
+                sock.send(json.dumps(request).encode('utf-8'))
+                
+                # Receive response
+                response_data = sock.recv(65536)
+                if not response_data:
+                    logger.warning("Empty response from peer")
+                    self._stats['pull_failures'] += 1
+                    return False
+                
+                response = json.loads(response_data.decode('utf-8'))
+                
+                if response.get('type') == 'config_response':
+                    bundle = ConfigBundle.from_dict(response.get('bundle', {}))
+                    return self._apply_bundle(bundle)
+                else:
+                    logger.warning(f"Unexpected response type: {response.get('type')}")
+                    self._stats['pull_failures'] += 1
+                    return False
+                    
+            finally:
+                sock.close()
+                
+        except socket.timeout:
+            logger.warning("Config pull timeout")
+            self._stats['pull_failures'] += 1
+            self._stats['last_error'] = "Pull timeout"
+            return False
+        except ConnectionRefusedError:
+            logger.warning("Peer not available for config pull")
+            self._stats['pull_failures'] += 1
+            self._stats['last_error'] = "Connection refused"
+            return False
+        except Exception as e:
+            logger.error(f"Config pull failed: {e}")
+            self._stats['pull_failures'] += 1
+            self._stats['last_error'] = str(e)
+            return False
+    
+    def push_configs(self) -> bool:
+        """
+        Push all shared configs to SECONDARY.
+        
+        Returns:
+            True if successful
+        """
+        if not self._is_primary:
+            logger.warning("Cannot push configs - not PRIMARY")
+            return False
+        
+        logger.info(f"Pushing configs to {self.peer_host}:{self.peer_port}...")
+        
+        try:
+            bundle = self._create_bundle()
+            
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(10.0)
+            
+            try:
+                sock.connect((self.peer_host, self.peer_port))
+                
+                # Send config push
+                message = {
+                    'type': 'config_push',
+                    'sender': self.instance_id,
+                    'timestamp': time.time(),
+                    'bundle': bundle.to_dict(),
+                }
+                sock.send(json.dumps(message).encode('utf-8'))
+                
+                # Wait for ack
+                response_data = sock.recv(4096)
+                if response_data:
+                    response = json.loads(response_data.decode('utf-8'))
+                    if response.get('success'):
+                        logger.info("Config push acknowledged by peer")
+                        self._stats['pushes_completed'] += 1
+                        self._stats['last_sync_time'] = time.time()
+                        return True
+                    else:
+                        logger.warning(f"Config push rejected: {response.get('error')}")
+                        self._stats['push_failures'] += 1
+                        return False
+                
+                # No response but no error - assume success
+                self._stats['pushes_completed'] += 1
+                self._stats['last_sync_time'] = time.time()
+                return True
+                
+            finally:
+                sock.close()
+                
+        except socket.timeout:
+            logger.warning("Config push timeout")
+            self._stats['push_failures'] += 1
+            return False
+        except ConnectionRefusedError:
+            logger.debug("Peer not available for config push")
+            self._stats['push_failures'] += 1
+            return False
+        except Exception as e:
+            logger.error(f"Config push failed: {e}")
+            self._stats['push_failures'] += 1
+            self._stats['last_error'] = str(e)
+            return False
+    
+    def _create_bundle(self) -> ConfigBundle:
+        """Create a bundle from local config files."""
+        configs = {}
+        
+        for filename in SHARED_CONFIG_FILES:
+            filepath = os.path.join(self.config_dir, filename)
+            if os.path.exists(filepath):
+                try:
+                    with open(filepath, 'r') as f:
+                        configs[filename] = json.load(f)
+                except Exception as e:
+                    logger.warning(f"Error reading {filename}: {e}")
+                    # Use empty default
+                    if 'destination' in filename.lower():
+                        configs[filename] = {}
+                    else:
+                        configs[filename] = []
+            else:
+                # File doesn't exist - use empty default
+                if 'destination' in filename.lower():
+                    configs[filename] = {}
+                else:
+                    configs[filename] = []
+        
+        return ConfigBundle(
+            configs=configs,
+            source_instance=self.instance_id,
+        )
+    
+    def _apply_bundle(self, bundle: ConfigBundle) -> bool:
+        """
+        Apply a received config bundle to local files.
+        
+        Args:
+            bundle: ConfigBundle to apply
+            
+        Returns:
+            True if successful
+        """
+        logger.info(f"Applying config bundle from {bundle.source_instance[:8]}...")
+        
+        success_count = 0
+        total_count = len(bundle.configs)
+        
+        for filename, content in bundle.configs.items():
+            # Safety check - never overwrite local-only configs
+            if filename in LOCAL_ONLY_CONFIGS:
+                logger.warning(f"Refusing to sync local-only config: {filename}")
+                continue
+            
+            filepath = os.path.join(self.config_dir, filename)
+            
+            try:
+                # Create backup
+                if os.path.exists(filepath):
+                    backup_path = filepath + '.bak'
+                    try:
+                        with open(filepath, 'r') as src:
+                            with open(backup_path, 'w') as dst:
+                                dst.write(src.read())
+                    except Exception as e:
+                        logger.debug(f"Backup failed for {filename}: {e}")
+                
+                # Write new config atomically
+                temp_path = filepath + '.tmp'
+                with open(temp_path, 'w') as f:
+                    json.dump(content, f, indent=2)
+                os.rename(temp_path, filepath)
+                
+                logger.debug(f"Applied synced config: {filename}")
+                success_count += 1
+                
+            except Exception as e:
+                logger.error(f"Failed to apply config {filename}: {e}")
+        
+        # Update local checksum
+        with self._lock:
+            self._local_checksum = self._calculate_local_checksum()
+        
+        # Notify callback
+        if self.on_config_changed and success_count > 0:
+            try:
+                self.on_config_changed()
+            except Exception as e:
+                logger.warning(f"Config changed callback error: {e}")
+        
+        if success_count == total_count:
+            logger.info(f"Applied {success_count} config files from PRIMARY")
+            self._stats['pulls_completed'] += 1
+            self._stats['last_sync_time'] = time.time()
+            return True
+        else:
+            logger.warning(f"Applied {success_count}/{total_count} config files")
+            self._stats['pull_failures'] += 1
+            return False
+    
+    def handle_config_push(self, bundle_bytes: bytes) -> Tuple[bool, str]:
+        """
+        Handle incoming config push from PRIMARY.
+        
+        Args:
+            bundle_bytes: Serialized ConfigBundle
+            
+        Returns:
+            Tuple of (success, message)
+        """
+        if self._is_primary:
+            return False, "Cannot accept push - we are PRIMARY"
+        
+        try:
+            bundle = ConfigBundle.from_bytes(bundle_bytes)
+            success = self._apply_bundle(bundle)
+            if success:
+                return True, f"Applied {len(bundle.configs)} configs"
+            else:
+                return False, "Failed to apply some configs"
+        except Exception as e:
+            logger.error(f"Error handling config push: {e}")
+            return False, str(e)
+    
+    def handle_config_request(self) -> Optional[ConfigBundle]:
+        """
+        Handle incoming config request from SECONDARY.
+        
+        Returns:
+            ConfigBundle if we're PRIMARY, None otherwise
+        """
+        if not self._is_primary:
+            logger.debug("Ignoring config request - we are not PRIMARY")
+            return None
+        
+        logger.info("Responding to config request from peer")
+        return self._create_bundle()
     
     def get_status(self) -> Dict[str, Any]:
         """Get comprehensive sync status."""
-        local_versions = {}
-        for config_type, version in self._local_versions.items():
-            local_versions[config_type.value] = version.to_dict()
-        
-        peer_versions = {}
-        for config_type, version in self._peer_versions.items():
-            peer_versions[config_type.value] = version.to_dict()
-        
-        return {
-            'enabled': self.config.enabled,
-            'ha_state': self.get_ha_state(),
-            'instance_id': self.instance_id[:8] + '...',
-            'stats': self._stats.to_dict(),
-            'local_versions': local_versions,
-            'peer_versions': peer_versions,
-            'synced_config_types': [ct.value for ct in SyncedConfigType.all_types()],
-            'local_only_configs': list(LOCAL_ONLY_CONFIGS),
-        }
+        with self._lock:
+            return {
+                'is_primary': self._is_primary,
+                'local_checksum': self._local_checksum[:8] + '...' if self._local_checksum else None,
+                'remote_checksum': self._remote_checksum[:8] + '...' if self._remote_checksum else None,
+                'checksums_match': self._local_checksum == self._remote_checksum if self._local_checksum and self._remote_checksum else None,
+                'config_dir': self.config_dir,
+                'peer': f"{self.peer_host}:{self.peer_port}",
+                'shared_configs': SHARED_CONFIG_FILES,
+                'stats': self._stats.copy(),
+            }
 
 
-def load_sync_config(config_path: Optional[str] = None) -> ConfigSyncConfig:
-    """Load sync configuration from file."""
-    if not config_path:
-        try:
-            from ...config import CONFIG_DIR
-            config_path = os.path.join(CONFIG_DIR, "sync_config.json")
-        except ImportError:
-            config_path = "/opt/trapninja/config/sync_config.json"
-    
-    try:
-        if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                data = json.load(f)
-            return ConfigSyncConfig.from_dict(data)
-    except Exception as e:
-        logger.warning(f"Failed to load sync config: {e}")
-    
-    return ConfigSyncConfig()
-
-
-def save_sync_config(config: ConfigSyncConfig, config_path: Optional[str] = None) -> bool:
-    """Save sync configuration to file."""
-    if not config_path:
-        try:
-            from ...config import CONFIG_DIR
-            config_path = os.path.join(CONFIG_DIR, "sync_config.json")
-        except ImportError:
-            config_path = "/opt/trapninja/config/sync_config.json"
-    
-    try:
-        os.makedirs(os.path.dirname(config_path), exist_ok=True)
-        with open(config_path, 'w') as f:
-            json.dump(config.to_dict(), f, indent=2)
-        logger.info(f"Saved sync config to {config_path}")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to save sync config: {e}")
-        return False
+# Re-export for backward compatibility
+SyncedConfigType = type('SyncedConfigType', (), {
+    'DESTINATIONS': 'destinations',
+    'BLOCKED_IPS': 'blocked_ips',
+    'BLOCKED_TRAPS': 'blocked_traps',
+    'REDIRECTED_IPS': 'redirected_ips',
+    'REDIRECTED_OIDS': 'redirected_oids',
+    'REDIRECTED_DESTINATIONS': 'redirected_destinations',
+})
