@@ -74,7 +74,10 @@ def run_command_safe(command, timeout=30):
 
 def start_daemon():
     """
-    Start the daemon process - Python 3.6 compatible version
+    Start the daemon process with startup verification.
+    
+    After spawning the daemon, waits briefly and verifies it started
+    successfully by checking the control socket.
 
     Returns:
         int: 0 on success, non-zero on failure
@@ -174,8 +177,16 @@ def start_daemon():
         with open(PID_FILE, 'w') as f:
             f.write(str(daemon_pid))
 
-        print(f"TrapNinja daemon started successfully with PID {daemon_pid}")
-        return 0
+        print(f"Daemon process spawned with PID {daemon_pid}")
+        
+        # Verify daemon started successfully
+        print("Verifying daemon startup...")
+        if _verify_daemon_started(daemon_pid, timeout=10):
+            print(f"✓ TrapNinja daemon started successfully with PID {daemon_pid}")
+            return 0
+        else:
+            print(f"✗ Daemon may not have started correctly. Check logs at {LOG_FILE}")
+            return 1
 
     except Exception as e:
         print(f"Error starting daemon: {e}")
@@ -186,6 +197,63 @@ def start_daemon():
             except:
                 pass
         return 1
+
+
+def _verify_daemon_started(pid: int, timeout: int = 10) -> bool:
+    """
+    Verify the daemon started successfully.
+    
+    Checks:
+    1. Process is still running
+    2. Control socket responds to ping
+    
+    Args:
+        pid: Daemon process ID
+        timeout: Maximum seconds to wait
+        
+    Returns:
+        True if daemon started successfully
+    """
+    import time
+    from .control import ControlSocket
+    
+    start_time = time.time()
+    
+    # Give daemon a moment to initialize
+    time.sleep(1)
+    
+    while time.time() - start_time < timeout:
+        # Check process is still running
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            # Process died
+            print(f"  Daemon process {pid} exited unexpectedly")
+            return False
+        
+        # Try to ping control socket
+        try:
+            response = ControlSocket.send_command('ping', timeout=2.0)
+            if response.get('status') == ControlSocket.SUCCESS:
+                return True
+        except ConnectionRefusedError:
+            # Control socket not ready yet
+            pass
+        except Exception:
+            # Other error, keep trying
+            pass
+        
+        time.sleep(0.5)
+    
+    # Timeout reached - check if process at least exists
+    try:
+        os.kill(pid, 0)
+        # Process exists but control socket not responding
+        print(f"  Warning: Control socket not responding, but process {pid} is running")
+        print(f"  Daemon may still be initializing. Check status in a few seconds.")
+        return True  # Give benefit of the doubt
+    except OSError:
+        return False
 
 
 def stop_daemon():

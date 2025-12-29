@@ -80,6 +80,12 @@ Examples:
                       help='Check daemon status')
     group.add_argument('--foreground', action='store_true', 
                       help='Run in foreground (not as daemon)')
+    
+    # Configuration commands (new)
+    group.add_argument('--show-config', action='store_true',
+                      help='Show current effective configuration')
+    group.add_argument('--validate-config', action='store_true',
+                      help='Validate configuration without starting daemon')
 
     # HA configuration commands
     group.add_argument('--configure-ha', action='store_true', 

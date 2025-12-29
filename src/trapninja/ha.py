@@ -17,6 +17,7 @@ import socket
 import threading
 import logging
 import hashlib
+import hmac
 import uuid
 from enum import Enum
 from dataclasses import dataclass, asdict
@@ -49,9 +50,18 @@ class HAMessageType(Enum):
     SHUTDOWN = "shutdown"
 
 
+# Maximum message size for HA communication (64KB)
+HA_MAX_MESSAGE_SIZE = 65536
+
+
 @dataclass
 class HAMessage:
-    """HA communication message"""
+    """
+    HA communication message with secure authentication.
+    
+    Uses HMAC-SHA256 for message authentication when shared_secret is configured.
+    Falls back to SHA256 hash when no shared secret is available.
+    """
     msg_type: HAMessageType
     sender_id: str
     timestamp: float
@@ -63,6 +73,7 @@ class HAMessage:
     checksum: Optional[str] = None
 
     def to_dict(self) -> dict:
+        """Convert message to dictionary for serialization."""
         data = asdict(self)
         data['msg_type'] = self.msg_type.value
         data['state'] = self.state.value
@@ -70,20 +81,63 @@ class HAMessage:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'HAMessage':
+        """Create message from dictionary."""
+        # Handle missing optional fields for backward compatibility
+        data = data.copy()
         data['msg_type'] = HAMessageType(data['msg_type'])
         data['state'] = HAState(data['state'])
+        # Ensure optional fields have defaults
+        if 'last_trap_time' not in data:
+            data['last_trap_time'] = None
+        if 'checksum' not in data:
+            data['checksum'] = None
         return cls(**data)
 
-    def calculate_checksum(self) -> str:
+    def calculate_checksum(self, shared_secret: str = "") -> str:
+        """
+        Calculate message checksum using HMAC-SHA256 (or SHA256 without secret).
+        
+        Uses HMAC-SHA256 for secure message authentication when a shared secret
+        is configured. Falls back to plain SHA256 for backward compatibility.
+        
+        Args:
+            shared_secret: Optional shared secret for HMAC authentication
+            
+        Returns:
+            Hex-encoded checksum string
+        """
         data = self.to_dict()
         data.pop('checksum', None)
-        content = json.dumps(data, sort_keys=True)
-        return hashlib.md5(content.encode()).hexdigest()
+        content = json.dumps(data, sort_keys=True).encode('utf-8')
+        
+        if shared_secret:
+            # Use HMAC-SHA256 for authenticated messages
+            return hmac.new(
+                shared_secret.encode('utf-8'),
+                content,
+                hashlib.sha256
+            ).hexdigest()
+        else:
+            # Fall back to SHA256 (still better than MD5)
+            return hashlib.sha256(content).hexdigest()
 
-    def verify_checksum(self) -> bool:
+    def verify_checksum(self, shared_secret: str = "") -> bool:
+        """
+        Verify message checksum.
+        
+        Args:
+            shared_secret: Optional shared secret for HMAC verification
+            
+        Returns:
+            True if checksum is valid
+        """
         if not self.checksum:
             return False
-        return self.calculate_checksum() == self.checksum
+        
+        expected = self.calculate_checksum(shared_secret)
+        
+        # Use constant-time comparison to prevent timing attacks
+        return hmac.compare_digest(self.checksum, expected)
 
 
 @dataclass
@@ -493,10 +547,12 @@ class HACluster:
                     time.sleep(1)
 
     def _handle_peer_connection(self, conn: socket.socket, addr: tuple):
-        """Handle incoming peer connection"""
+        """Handle incoming peer connection with security checks."""
         try:
             conn.settimeout(5.0)
-            data = conn.recv(4096)
+            
+            # Receive data with size limit to prevent memory exhaustion
+            data = self._receive_with_limit(conn, HA_MAX_MESSAGE_SIZE)
             if not data:
                 return
 
@@ -507,7 +563,8 @@ class HACluster:
                 logger.warning(f"Invalid HA message from {addr}: {e}")
                 return
 
-            if not message.verify_checksum():
+            # Verify checksum with shared secret for HMAC-SHA256 authentication
+            if not message.verify_checksum(self.config.shared_secret):
                 logger.warning(f"HA message checksum verification failed from {addr}")
                 return
 
@@ -556,8 +613,49 @@ class HACluster:
         message = self._create_message(msg_type)
         self._send_message_to_peer(message)
 
+    def _receive_with_limit(self, conn: socket.socket, max_size: int) -> bytes:
+        """
+        Receive data from socket with size limit.
+        
+        Prevents memory exhaustion from oversized messages.
+        
+        Args:
+            conn: Socket connection
+            max_size: Maximum allowed message size in bytes
+            
+        Returns:
+            Received data bytes
+            
+        Raises:
+            ValueError: If message exceeds size limit
+        """
+        data = b''
+        while True:
+            try:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    break
+                    
+                data += chunk
+                
+                # Check size limit
+                if len(data) > max_size:
+                    raise ValueError(
+                        f"HA message size ({len(data)} bytes) exceeds limit "
+                        f"({max_size} bytes)"
+                    )
+                
+                # If we got less than buffer size, we're probably done
+                if len(chunk) < 4096:
+                    break
+                    
+            except socket.timeout:
+                break
+                
+        return data
+
     def _create_message(self, msg_type: HAMessageType) -> HAMessage:
-        """Create HA message"""
+        """Create HA message with HMAC-SHA256 authentication."""
         self.sequence_counter += 1
 
         message = HAMessage(
@@ -571,7 +669,8 @@ class HACluster:
             last_trap_time=self.last_trap_time
         )
 
-        message.checksum = message.calculate_checksum()
+        # Calculate checksum with shared secret for HMAC-SHA256
+        message.checksum = message.calculate_checksum(self.config.shared_secret)
         return message
 
     def _send_message_to_peer(self, message: HAMessage):
