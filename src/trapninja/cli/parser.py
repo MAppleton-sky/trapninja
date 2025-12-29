@@ -80,6 +80,12 @@ Examples:
                       help='Check daemon status')
     group.add_argument('--foreground', action='store_true', 
                       help='Run in foreground (not as daemon)')
+    
+    # Configuration commands (new)
+    group.add_argument('--show-config', action='store_true',
+                      help='Show current effective configuration')
+    group.add_argument('--validate-config', action='store_true',
+                      help='Validate configuration without starting daemon')
 
     # HA configuration commands
     group.add_argument('--configure-ha', action='store_true', 
@@ -207,8 +213,8 @@ Examples:
     group.add_argument('--shadow-export', action='store_true',
                       help='Export shadow mode statistics to JSON')
 
-    # Hidden option for internal daemon use
-    parser.add_argument('--foreground-daemon', action='store_true',
+    # Hidden option for internal daemon use (must be in the group to satisfy required=True)
+    group.add_argument('--foreground-daemon', action='store_true',
                        help=argparse.SUPPRESS)
 
     # Runtime configuration parameters

@@ -16,6 +16,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.12] - 2025-12-29
+
+### Fixed
+
+#### Critical: Daemon Restart Crash (Issue with --restart)
+- **Fixed daemon crashing immediately after restart**. When using `--restart`, the
+  daemon would start but crash within seconds, leaving a stale PID file.
+- **Root cause #1**: The `start_daemon()` function in `daemon.py` was passing
+  `--restart` to the subprocess along with `--foreground`. Since these are in a
+  mutually exclusive argument group, the subprocess would crash on argument parsing.
+- **Root cause #2**: The hidden `--foreground-daemon` argument was added to `parser`
+  instead of `group`, so it didn't satisfy the `required=True` constraint on the
+  mutually exclusive group - causing argparse to fail even after the first fix.
+- **Solution**: 
+  - Changed to use hidden `--foreground-daemon` argument instead of `--foreground`
+  - Added `--foreground-daemon` to the mutually exclusive group (not just parser)
+  - Added comprehensive filtering of ALL daemon control arguments:
+    `--start`, `--stop`, `--restart`, `--status`, `--foreground`, `--foreground-daemon`
+  - Only runtime configuration arguments are now passed to the subprocess
+
+#### Daemon File Handle Leak
+- Fixed file handle leak where `/dev/null` was opened but never closed when
+  spawning the daemon subprocess.
+- Now uses `subprocess.DEVNULL` which properly manages the file descriptor.
+
+#### Missing Runtime Mode Support in Daemon Mode
+- Fixed `--foreground-daemon` handler not passing shadow/mirror mode arguments
+  to `run_service()`.
+- Now properly passes: `--shadow-mode`, `--mirror-mode`, `--parallel`,
+  `--capture-mode`, `--log-traps`, and `--debug`.
+
+### Improved
+
+#### Better Daemon Startup Verification
+- Increased verification timeout from 10s to 15s for complex HA/cache setups
+- Added progress feedback during control socket connection attempts
+- When daemon crashes during startup, now shows last 10 lines from log file
+- Better error messages with specific guidance for troubleshooting
+
+#### Cleaner Subprocess Spawning
+- Added `close_fds=True` to close inherited file descriptors in child process
+- Logging console output disabled in daemon mode (stdout goes to /dev/null anyway)
+
+---
+
 ## [0.7.11] - 2025-12-24
 
 ### Fixed

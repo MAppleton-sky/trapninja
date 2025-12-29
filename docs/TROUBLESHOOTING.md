@@ -22,6 +22,95 @@ curl http://localhost:8080/metrics | grep trapninja
 
 ---
 
+## Daemon Startup Issues
+
+### Symptom: Daemon Crashes Immediately After Restart (Fixed in v0.7.12)
+
+**Example Output**:
+```
+python3.9 -O trapninja.py --restart
+...
+Starting TrapNinja daemon...
+Daemon process spawned with PID 3543057
+Verifying daemon startup...
+  Warning: Control socket not responding, but process 3543057 is running
+✓ TrapNinja daemon started successfully with PID 3543057
+
+# Then immediately:
+python3.9 -O trapninja.py --status
+TrapNinja is not running (stale PID file)
+```
+
+**Root Cause**: The `--restart` argument was being passed to the daemon subprocess
+along with `--foreground`. Since these are in a mutually exclusive argument group,
+the subprocess crashed during argument parsing, but error output was hidden (sent
+to /dev/null).
+
+**Solution**: Fixed in v0.7.12:
+- Changed to use hidden `--foreground-daemon` argument for daemon spawning
+- Added comprehensive filtering of ALL daemon control arguments
+- Better startup verification with crash diagnostics
+
+**Workaround for older versions**:
+```bash
+# Instead of --restart, do stop then start separately:
+python trapninja.py --stop
+sleep 2
+python trapninja.py --start
+```
+
+### Symptom: Daemon Starts But Control Socket Doesn't Respond
+
+**Causes**:
+
+1. **Complex initialization still in progress**:
+   - HA cluster initialization
+   - Redis cache connection
+   - SNMPv3 credential loading
+   
+   The default timeout was increased to 15 seconds in v0.7.12.
+
+2. **Permission issues on socket file**:
+   ```bash
+   ls -la /tmp/trapninja_control.sock
+   # Should show owner as the user running the daemon
+   ```
+
+3. **Old socket file lingering**:
+   ```bash
+   # Remove stale socket
+   rm -f /tmp/trapninja_control.sock
+   python trapninja.py --start
+   ```
+
+**Diagnostics**:
+```bash
+# Check log file for startup errors
+tail -50 /var/log/trapninja.log
+
+# Run in foreground to see all output
+python trapninja.py --foreground --debug
+```
+
+### Symptom: "stale PID file" on Status Check
+
+**The daemon stopped unexpectedly and left behind a PID file.**
+
+**Solutions**:
+
+1. TrapNinja automatically removes stale PID files
+2. Check logs for crash reason:
+   ```bash
+   tail -100 /var/log/trapninja.log | grep -i "error\|exception\|crash"
+   ```
+
+3. Common causes:
+   - Out of memory
+   - Unhandled exception during packet processing
+   - Signal from external source (OOM killer, user, etc.)
+
+---
+
 ## Packet Duplication Issues
 
 ### Symptom: More Packets Forwarded Than Received

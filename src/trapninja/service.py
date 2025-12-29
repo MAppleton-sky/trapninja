@@ -116,6 +116,149 @@ except ImportError:
 # Get logger instance
 logger = logging.getLogger("trapninja")
 
+
+class ConfigurationError(Exception):
+    """Raised when configuration validation fails."""
+    pass
+
+
+def validate_configuration() -> tuple:
+    """
+    Validate all configuration before starting the service.
+    
+    Performs comprehensive checks on:
+    - Network interface existence
+    - Listen port validity
+    - Destination configuration
+    - HA configuration (if enabled)
+    
+    Returns:
+        Tuple of (is_valid: bool, errors: list, warnings: list)
+    """
+    from .config import (
+        INTERFACE, LISTEN_PORTS, destinations,
+        blocked_ips, blocked_traps, redirected_ips, redirected_oids
+    )
+    
+    errors = []
+    warnings = []
+    
+    # =======================================================================
+    # Validate Network Interface
+    # =======================================================================
+    try:
+        available_interfaces = get_if_list()
+        if INTERFACE not in available_interfaces:
+            errors.append(
+                f"Interface '{INTERFACE}' not found. "
+                f"Available interfaces: {', '.join(available_interfaces)}"
+            )
+    except Exception as e:
+        warnings.append(f"Could not verify interface: {e}")
+    
+    # =======================================================================
+    # Validate Listen Ports
+    # =======================================================================
+    if not LISTEN_PORTS:
+        errors.append("No listen ports configured")
+    else:
+        for port in LISTEN_PORTS:
+            if not isinstance(port, int):
+                errors.append(f"Invalid port type: {port} (must be integer)")
+            elif port < 1 or port > 65535:
+                errors.append(f"Port {port} out of valid range (1-65535)")
+            elif port < 1024:
+                warnings.append(f"Port {port} is privileged (requires root)")
+    
+    # =======================================================================
+    # Validate Destinations
+    # =======================================================================
+    if not destinations:
+        warnings.append(
+            "No forwarding destinations configured. "
+            "Traps will be received but not forwarded."
+        )
+    else:
+        for dest in destinations:
+            # Check destination format
+            if isinstance(dest, dict):
+                if 'host' not in dest:
+                    errors.append(f"Destination missing 'host': {dest}")
+                if 'port' not in dest:
+                    warnings.append(f"Destination missing 'port', will use 162: {dest}")
+            elif isinstance(dest, str):
+                # String format "host:port"
+                if ':' not in dest:
+                    warnings.append(f"Destination '{dest}' has no port, will use 162")
+            else:
+                errors.append(f"Invalid destination format: {dest}")
+    
+    # =======================================================================
+    # Validate HA Configuration (if enabled)
+    # =======================================================================
+    try:
+        ha_config = load_ha_config()
+        if ha_config.enabled:
+            # Check peer host
+            if not ha_config.peer_host:
+                errors.append("HA enabled but peer_host not configured")
+            
+            # Check peer port
+            if ha_config.peer_port < 1 or ha_config.peer_port > 65535:
+                errors.append(f"HA peer_port {ha_config.peer_port} out of valid range")
+            
+            # Check listen port
+            if ha_config.listen_port < 1 or ha_config.listen_port > 65535:
+                errors.append(f"HA listen_port {ha_config.listen_port} out of valid range")
+            
+            # Check heartbeat settings
+            if ha_config.heartbeat_interval <= 0:
+                errors.append("HA heartbeat_interval must be positive")
+            
+            if ha_config.heartbeat_timeout <= ha_config.heartbeat_interval:
+                warnings.append(
+                    "HA heartbeat_timeout should be greater than heartbeat_interval"
+                )
+            
+            # Warn if no shared secret (weaker authentication)
+            if not ha_config.shared_secret:
+                warnings.append(
+                    "HA shared_secret not configured - using weaker authentication. "
+                    "Consider adding a shared_secret for HMAC-SHA256 authentication."
+                )
+    except Exception as e:
+        warnings.append(f"Could not validate HA configuration: {e}")
+    
+    # =======================================================================
+    # Validate Cache Configuration (if enabled)
+    # =======================================================================
+    if CACHE_MODULE_AVAILABLE:
+        try:
+            cache_config = load_cache_config()
+            if cache_config and cache_config.enabled:
+                if not cache_config.host:
+                    errors.append("Cache enabled but Redis host not configured")
+                if cache_config.port < 1 or cache_config.port > 65535:
+                    errors.append(f"Cache port {cache_config.port} out of valid range")
+        except Exception as e:
+            warnings.append(f"Could not validate cache configuration: {e}")
+    
+    # =======================================================================
+    # Check for blocking/redirection rules
+    # =======================================================================
+    if blocked_ips:
+        logger.debug(f"Loaded {len(blocked_ips)} blocked IP rules")
+    if blocked_traps:
+        logger.debug(f"Loaded {len(blocked_traps)} blocked OID rules")
+    if redirected_ips:
+        logger.debug(f"Loaded {len(redirected_ips)} IP redirection rules")
+    if redirected_oids:
+        logger.debug(f"Loaded {len(redirected_oids)} OID redirection rules")
+    
+    is_valid = len(errors) == 0
+    return is_valid, errors, warnings
+
+
 # Global variables
 capture_instance = None
 use_ebpf = False
@@ -211,6 +354,25 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
     
     # Record service start time
     start_time = time.time()
+    
+    # =======================================================================
+    # Validate Configuration Before Starting
+    # =======================================================================
+    logger.info("Validating configuration...")
+    is_valid, errors, warnings = validate_configuration()
+    
+    # Log warnings
+    for warning in warnings:
+        logger.warning(f"Configuration warning: {warning}")
+    
+    # If there are errors, fail fast
+    if not is_valid:
+        for error in errors:
+            logger.error(f"Configuration error: {error}")
+        logger.error("Configuration validation failed. Please fix the errors above.")
+        return 1
+    
+    logger.info("Configuration validation passed")
     
     # =======================================================================
     # Initialize Shadow/Parallel Mode
