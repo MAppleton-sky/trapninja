@@ -142,26 +142,33 @@ def start_daemon():
 
     # Create a subprocess that will run independently
     try:
-        # Build the command without the --start argument
+        # Build the command using --foreground-daemon (hidden arg for daemon mode)
         script_path = os.path.abspath(sys.argv[0])
-        args = [sys.executable, script_path, "--foreground"]
+        args = [sys.executable, script_path, "--foreground-daemon"]
 
-        # Copy any other arguments except --start
+        # Daemon control arguments that should NOT be passed to the subprocess
+        # These are mutually exclusive with --foreground-daemon and would cause crashes
+        DAEMON_CONTROL_ARGS = {
+            '--start', '--stop', '--restart', '--status', '--foreground',
+            '--foreground-daemon'
+        }
+
+        # Copy runtime configuration arguments, filtering out daemon control commands
         for arg in sys.argv[1:]:
-            if arg != "--start" and arg != "--foreground":
+            if arg not in DAEMON_CONTROL_ARGS:
                 args.append(arg)
 
         # Python 3.6 compatible way to start detached process
         if os.name == 'posix':  # Unix/Linux/MacOS
-            # Create null file objects for stdin/stdout/stderr
-            devnull = open(os.devnull, 'w')
-
+            # Use DEVNULL for clean file handle management
+            # Note: subprocess.DEVNULL properly handles the file descriptor
             daemon_process = subprocess.Popen(
                 args,
-                stdout=devnull,
-                stderr=devnull,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
-                preexec_fn=os.setsid  # Create new session (detach from parent)
+                preexec_fn=os.setsid,  # Create new session (detach from parent)
+                close_fds=True  # Close inherited file descriptors
             )
         else:  # Windows
             daemon_process = subprocess.Popen(
@@ -181,7 +188,7 @@ def start_daemon():
         
         # Verify daemon started successfully
         print("Verifying daemon startup...")
-        if _verify_daemon_started(daemon_pid, timeout=10):
+        if _verify_daemon_started(daemon_pid, timeout=15):
             print(f"✓ TrapNinja daemon started successfully with PID {daemon_pid}")
             return 0
         else:
@@ -199,17 +206,18 @@ def start_daemon():
         return 1
 
 
-def _verify_daemon_started(pid: int, timeout: int = 10) -> bool:
+def _verify_daemon_started(pid: int, timeout: int = 15) -> bool:
     """
     Verify the daemon started successfully.
     
     Checks:
     1. Process is still running
     2. Control socket responds to ping
+    3. Logs file shows successful initialization
     
     Args:
         pid: Daemon process ID
-        timeout: Maximum seconds to wait
+        timeout: Maximum seconds to wait (default 15 for complex setups)
         
     Returns:
         True if daemon started successfully
@@ -218,30 +226,47 @@ def _verify_daemon_started(pid: int, timeout: int = 10) -> bool:
     from .control import ControlSocket
     
     start_time = time.time()
+    last_status = ""
+    socket_attempts = 0
     
     # Give daemon a moment to initialize
-    time.sleep(1)
+    time.sleep(1.5)
     
     while time.time() - start_time < timeout:
         # Check process is still running
         try:
             os.kill(pid, 0)
         except OSError:
-            # Process died
+            # Process died - try to get info from log file
             print(f"  Daemon process {pid} exited unexpectedly")
+            _show_daemon_crash_info()
             return False
         
         # Try to ping control socket
         try:
+            socket_attempts += 1
             response = ControlSocket.send_command('ping', timeout=2.0)
             if response.get('status') == ControlSocket.SUCCESS:
                 return True
+            # Got response but not success - log it
+            new_status = f"Got response: {response.get('status')}"
+            if new_status != last_status:
+                print(f"  {new_status}")
+                last_status = new_status
         except ConnectionRefusedError:
-            # Control socket not ready yet
+            # Control socket not ready yet - this is normal during startup
+            if socket_attempts == 5:  # Only show once
+                print(f"  Waiting for control socket...")
+        except FileNotFoundError:
+            # Socket file doesn't exist yet
             pass
-        except Exception:
-            # Other error, keep trying
-            pass
+        except Exception as e:
+            # Log unexpected errors after a few attempts
+            if socket_attempts > 3:
+                new_status = f"Socket error: {type(e).__name__}"
+                if new_status != last_status:
+                    print(f"  {new_status}")
+                    last_status = new_status
         
         time.sleep(0.5)
     
@@ -249,11 +274,39 @@ def _verify_daemon_started(pid: int, timeout: int = 10) -> bool:
     try:
         os.kill(pid, 0)
         # Process exists but control socket not responding
-        print(f"  Warning: Control socket not responding, but process {pid} is running")
-        print(f"  Daemon may still be initializing. Check status in a few seconds.")
+        print(f"  Warning: Control socket not responding after {timeout}s, but process {pid} is running")
+        print(f"  Daemon may still be initializing (complex HA/cache setup).")
+        print(f"  Check status with: --status")
+        print(f"  Check logs at: {LOG_FILE}")
         return True  # Give benefit of the doubt
     except OSError:
+        print(f"  Daemon process {pid} died during startup")
+        _show_daemon_crash_info()
         return False
+
+
+def _show_daemon_crash_info():
+    """
+    Show relevant information when daemon crashes during startup.
+    Reads the last few lines of the log file for context.
+    """
+    if os.path.exists(LOG_FILE):
+        try:
+            print(f"\n  Recent log entries from {LOG_FILE}:")
+            with open(LOG_FILE, 'r') as f:
+                # Read last 1KB of file
+                f.seek(0, 2)  # Go to end
+                size = f.tell()
+                f.seek(max(0, size - 2048))  # Go back up to 2KB
+                lines = f.read().splitlines()
+                # Show last 10 lines
+                for line in lines[-10:]:
+                    print(f"    {line}")
+        except Exception as e:
+            print(f"  Could not read log file: {e}")
+    else:
+        print(f"  Log file not found: {LOG_FILE}")
+        print(f"  Check if daemon has write access to log directory")
 
 
 def stop_daemon():

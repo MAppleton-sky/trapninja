@@ -364,15 +364,21 @@ def execute_command(args: Namespace) -> int:
         from ..service import run_service
         from ..config import PID_FILE
 
-        # Check if debug mode is enabled
-        debug_mode = '--debug' in sys.argv
+        # Extract runtime options from args
+        debug_mode = getattr(args, 'debug', False)
+        shadow_mode = getattr(args, 'shadow_mode', False)
+        mirror_mode = getattr(args, 'mirror_mode', False)
+        parallel = getattr(args, 'parallel', False)
+        capture_mode = getattr(args, 'capture_mode', None)
+        log_traps = getattr(args, 'log_traps', None)
 
         # Set log level if specified
-        log_level = args.log_level if args.log_level else None
+        log_level = getattr(args, 'log_level', None)
 
         # Set up logging with rotation settings
+        # Note: console=False since we're running as daemon (stdout goes to /dev/null)
         setup_logging(
-            console=debug_mode,
+            console=False,
             log_level=log_level,
             max_size=LOG_MAX_SIZE,
             backup_count=LOG_BACKUP_COUNT,
@@ -397,7 +403,22 @@ def execute_command(args: Namespace) -> int:
             f"compression={'enabled' if LOG_COMPRESS else 'disabled'}"
         )
 
-        # Run the service with debug flag if needed
-        return run_service(debug=debug_mode)
+        # Log runtime mode if any special modes are enabled
+        if shadow_mode:
+            logger.info("Running in SHADOW MODE (observe only, no forwarding)")
+        elif mirror_mode:
+            logger.info("Running in MIRROR MODE (parallel capture and forward)")
+        elif parallel:
+            logger.info("Running in PARALLEL MODE (sniff capture for coexistence)")
+
+        # Run the service with all runtime options
+        return run_service(
+            debug=debug_mode,
+            shadow_mode=shadow_mode,
+            mirror_mode=mirror_mode,
+            parallel=parallel,
+            capture_mode=capture_mode,
+            log_traps=log_traps
+        )
 
     return 0
