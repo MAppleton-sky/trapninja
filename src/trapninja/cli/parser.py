@@ -213,8 +213,8 @@ Examples:
     group.add_argument('--shadow-export', action='store_true',
                       help='Export shadow mode statistics to JSON')
 
-    # Hidden option for internal daemon use
-    parser.add_argument('--foreground-daemon', action='store_true',
+    # Hidden option for internal daemon use (must be in the group to satisfy required=True)
+    group.add_argument('--foreground-daemon', action='store_true',
                        help=argparse.SUPPRESS)
 
     # Runtime configuration parameters

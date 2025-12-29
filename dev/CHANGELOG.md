@@ -23,11 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Critical: Daemon Restart Crash (Issue with --restart)
 - **Fixed daemon crashing immediately after restart**. When using `--restart`, the
   daemon would start but crash within seconds, leaving a stale PID file.
-- **Root cause**: The `start_daemon()` function in `daemon.py` was passing
+- **Root cause #1**: The `start_daemon()` function in `daemon.py` was passing
   `--restart` to the subprocess along with `--foreground`. Since these are in a
   mutually exclusive argument group, the subprocess would crash on argument parsing.
+- **Root cause #2**: The hidden `--foreground-daemon` argument was added to `parser`
+  instead of `group`, so it didn't satisfy the `required=True` constraint on the
+  mutually exclusive group - causing argparse to fail even after the first fix.
 - **Solution**: 
   - Changed to use hidden `--foreground-daemon` argument instead of `--foreground`
+  - Added `--foreground-daemon` to the mutually exclusive group (not just parser)
   - Added comprehensive filtering of ALL daemon control arguments:
     `--start`, `--stop`, `--restart`, `--status`, `--foreground`, `--foreground-daemon`
   - Only runtime configuration arguments are now passed to the subprocess
