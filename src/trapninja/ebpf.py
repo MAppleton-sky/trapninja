@@ -22,11 +22,26 @@ logger = logging.getLogger("trapninja")
 BPF = None
 EBPF_IMPORT_ERROR = None
 
-try:
-    # Add BCC installation paths
-    # RHEL 8 installs python3-bcc to Python 3.6 site-packages regardless of runtime Python
-    # We prioritize package manager paths over /usr/local to avoid
-    # importing the wrong 'bcc' package (Will Sheffler's pip package)
+def _import_bcc():
+    """
+    Import BCC with isolated path handling.
+    
+    RHEL 8 installs python3-bcc to Python 3.6 site-packages regardless of
+    runtime Python version. We need to temporarily add this path for the BCC
+    import, but then carefully manage sys.path to avoid polluting it with
+    Python 3.6 packages that conflict with Python 3.9 (e.g., cffi).
+    
+    Returns:
+        tuple: (BPF class or None, error message or None)
+    """
+    # First try importing without modifying sys.path
+    try:
+        from bcc import BPF as _BPF
+        return _BPF, None
+    except ImportError:
+        pass  # Need to search for BCC
+    
+    # BCC installation paths to check
     BCC_PATHS = [
         # RHEL 8 default location (python3-bcc RPM) - CHECK FIRST
         '/usr/lib/python3.6/site-packages',
@@ -47,42 +62,68 @@ try:
             sys.version_info.major, sys.version_info.minor
         ),
     ]
-
-    # Verify paths contain real BCC before adding
-    for path in BCC_PATHS:
+    
+    def _is_real_bcc(path):
+        """Check if path contains real BCC (not Will Sheffler's pip package)"""
         bcc_path = os.path.join(path, 'bcc')
-        if os.path.exists(bcc_path):
-            # Quick check: Real BCC has larger __init__.py or .so files
-            try:
-                init_file = os.path.join(bcc_path, '__init__.py')
-                if os.path.exists(init_file):
-                    # Skip if it's the wrong 'bcc' package (Will Sheffler's)
-                    if os.path.getsize(init_file) < 300:
-                        with open(init_file, 'r') as f:
-                            if 'willsheffler' in f.read().lower():
-                                continue  # Skip this path
-                
-                # Check for compiled extensions or other real BCC indicators
-                contents = os.listdir(bcc_path)
-                has_real_bcc = any(f.endswith('.so') for f in contents) or 'libbcc.py' in contents
-                
-                if has_real_bcc or os.path.getsize(init_file) > 500:
-                    if path not in sys.path:
-                        sys.path.insert(0, path)
-            except:
-                pass
+        if not os.path.exists(bcc_path):
+            return False
+        try:
+            init_file = os.path.join(bcc_path, '__init__.py')
+            if os.path.exists(init_file):
+                # Skip if it's the wrong 'bcc' package (Will Sheffler's)
+                if os.path.getsize(init_file) < 300:
+                    with open(init_file, 'r') as f:
+                        if 'willsheffler' in f.read().lower():
+                            return False
+            
+            # Check for compiled extensions or other real BCC indicators
+            contents = os.listdir(bcc_path)
+            has_real_bcc = any(f.endswith('.so') for f in contents) or 'libbcc.py' in contents
+            return has_real_bcc or (os.path.exists(init_file) and os.path.getsize(init_file) > 500)
+        except:
+            return False
+    
+    # Try each path, but only keep the one that works in sys.path
+    # This avoids polluting sys.path with Python 3.6 packages that
+    # conflict with Python 3.9 modules (e.g., cffi version mismatch)
+    for path in BCC_PATHS:
+        if not os.path.exists(path) or path in sys.path:
+            continue
+        
+        if not _is_real_bcc(path):
+            continue
+        
+        # Temporarily add path and try import
+        sys.path.insert(0, path)
+        try:
+            from bcc import BPF as _BPF
+            # Success! Remove path immediately to prevent cffi version conflicts
+            # BCC is already imported into memory, so we don't need the path anymore
+            sys.path.remove(path)
+            return _BPF, None
+        except ImportError:
+            # Failed, remove path and try next
+            sys.path.remove(path)
+            continue
+    
+    return None, "BCC not installed"
 
-    # Now import BCC
-    from bcc import BPF as _BPF
-    BPF = _BPF
-    logger.debug("BCC imported successfully")
-except ImportError as e:
-    EBPF_IMPORT_ERROR = f"BCC not installed: {e}"
-    logger.debug(f"BCC import failed: {e}")
+
+# Perform the isolated BCC import
+try:
+    BPF, _bcc_error = _import_bcc()
+    if BPF is not None:
+        logger.debug("BCC imported successfully")
+    else:
+        EBPF_IMPORT_ERROR = f"BCC not installed: {_bcc_error}"
+        logger.debug(f"BCC import failed: {_bcc_error}")
 except AttributeError as e:
+    BPF = None
     EBPF_IMPORT_ERROR = f"BCC version mismatch with system libraries: {e}"
     logger.warning(f"BCC import failed due to version mismatch: {e}")
 except Exception as e:
+    BPF = None
     EBPF_IMPORT_ERROR = f"BCC import error: {e}"
     logger.warning(f"Unexpected BCC import error: {e}")
 
