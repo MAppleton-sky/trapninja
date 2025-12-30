@@ -172,6 +172,16 @@ Examples:
                       help='Manually trigger retention trim')
     group.add_argument('--cache-help', action='store_true',
                       help='Show comprehensive cache help')
+    
+    # Failover replay commands (ensures zero trap loss during HA failover)
+    group.add_argument('--failover-status', action='store_true',
+                      help='Show failover replay status and tracking info')
+    group.add_argument('--failover-detect', action='store_true',
+                      help='Detect forwarding gaps without replaying')
+    group.add_argument('--failover-replay', action='store_true',
+                      help='Manually trigger failover gap replay')
+    group.add_argument('--failover-help', action='store_true',
+                      help='Show comprehensive failover replay help')
 
     # Queue statistics (for diagnosing drops)
     group.add_argument('--queue-stats', action='store_true',

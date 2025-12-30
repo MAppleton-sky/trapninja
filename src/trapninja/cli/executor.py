@@ -288,6 +288,40 @@ def execute_command(args: Namespace) -> int:
     elif args.cache_help:
         return 0 if cache_commands.show_cache_help() else 1
 
+    # Handle failover replay commands
+    elif args.failover_status:
+        from . import failover_commands
+        return 0 if failover_commands.show_failover_status(verbose=args.verbose) else 1
+    
+    elif args.failover_detect:
+        from . import failover_commands
+        return 0 if failover_commands.detect_gaps(verbose=args.verbose) else 1
+    
+    elif args.failover_replay:
+        from . import failover_commands
+        # Auto-detect mode if no times specified
+        if not args.from_time or not args.to_time:
+            destination = args.destination or 'detect'
+        else:
+            if not args.destination:
+                print("Error: --destination is required for manual replay")
+                print("Example: --failover-replay --destination default --from \"-5m\" --to \"now\"")
+                print("Use 'detect' as destination to auto-detect gaps: --failover-replay --destination detect")
+                return 1
+            destination = args.destination
+        return 0 if failover_commands.trigger_manual_replay(
+            destination=destination,
+            start_time=args.from_time or '-5m',
+            end_time=args.to_time or 'now',
+            rate_limit=args.rate_limit if args.rate_limit != 500 else None,
+            dry_run=args.dry_run,
+            yes=args.yes
+        ) else 1
+    
+    elif args.failover_help:
+        from . import failover_commands
+        return 0 if failover_commands.show_failover_help() else 1
+
     # Handle queue statistics
     elif args.queue_stats:
         return daemon_commands.queue_stats(json_output=getattr(args, 'json', False))

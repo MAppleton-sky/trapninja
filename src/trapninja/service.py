@@ -184,18 +184,38 @@ def validate_configuration() -> tuple:
         )
     else:
         for dest in cfg.destinations:
-            # Check destination format
-            if isinstance(dest, dict):
+            # Check destination format - supports multiple formats:
+            # 1. List/tuple: ["host", port] or ("host", port)
+            # 2. Dict: {"host": "...", "port": 162}
+            # 3. String: "host:port" or "host"
+            if isinstance(dest, (list, tuple)):
+                # Array format: ["host", port]
+                if len(dest) < 1:
+                    errors.append(f"Destination array is empty: {dest}")
+                elif len(dest) == 1:
+                    warnings.append(f"Destination {dest} has no port, will use 162")
+                elif len(dest) >= 2:
+                    host, port = dest[0], dest[1]
+                    if not isinstance(host, str) or not host:
+                        errors.append(f"Destination host must be a non-empty string: {dest}")
+                    try:
+                        port_num = int(port)
+                        if port_num < 1 or port_num > 65535:
+                            errors.append(f"Destination port {port_num} out of valid range (1-65535): {dest}")
+                    except (ValueError, TypeError):
+                        errors.append(f"Destination port must be an integer: {dest}")
+            elif isinstance(dest, dict):
+                # Dict format: {"host": "...", "port": 162}
                 if 'host' not in dest:
                     errors.append(f"Destination missing 'host': {dest}")
                 if 'port' not in dest:
                     warnings.append(f"Destination missing 'port', will use 162: {dest}")
             elif isinstance(dest, str):
-                # String format "host:port"
+                # String format "host:port" or "host"
                 if ':' not in dest:
                     warnings.append(f"Destination '{dest}' has no port, will use 162")
             else:
-                errors.append(f"Invalid destination format: {dest}")
+                errors.append(f"Invalid destination format (expected list, dict, or string): {dest}")
     
     # =======================================================================
     # Validate HA Configuration (if enabled)
