@@ -642,6 +642,7 @@ class ControlSocket:
             config = {
                 'config_directory': cfg.CONFIG_DIR,
                 'interface': cfg.INTERFACE,
+                'capture_mode': cfg.CAPTURE_MODE,
                 'listen_ports': list(cfg.LISTEN_PORTS),
                 'forwarding': {
                     'destinations': cfg.destinations,

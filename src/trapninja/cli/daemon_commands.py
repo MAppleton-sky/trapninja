@@ -167,6 +167,7 @@ def _read_config_files() -> dict:
         'source': 'files',
         'config_directory': cfg.CONFIG_DIR,
         'interface': cfg.INTERFACE,
+        'capture_mode': cfg.CAPTURE_MODE,
         'listen_ports': list(cfg.LISTEN_PORTS) if cfg.LISTEN_PORTS else [],
         'forwarding': {
             'destinations': cfg.destinations if cfg.destinations else [],
@@ -222,6 +223,7 @@ def _print_config(config: dict, from_daemon: bool):
     # Basic settings
     print(f"\nConfig Directory: {config.get('config_directory', 'N/A')}")
     print(f"Interface: {config.get('interface', 'N/A')}")
+    print(f"Capture Mode: {config.get('capture_mode', 'auto')}")
     
     ports = config.get('listen_ports', [])
     print(f"Listen Ports: {', '.join(map(str, ports)) if ports else 'None'}")

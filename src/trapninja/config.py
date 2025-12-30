@@ -13,19 +13,6 @@ import time
 from threading import Timer, Event
 from collections import defaultdict
 
-# Configuration defaults
-INTERFACE = "ens192"  # Change to your interface name
-LISTEN_PORTS = [162]  # Default listening port for SNMP traps
-CONFIG_CHECK_INTERVAL = 60  # Check config files every 60 seconds
-
-# Packet capture mode configuration
-# Options:
-#   "auto"   - Use eBPF if available, fall back to sniff (recommended)
-#   "sniff"  - Use Scapy sniff() with libpcap (reliable, cross-platform)
-#   "socket" - Use UDP socket listeners (lower overhead, but may conflict with other services)
-# WARNING: Never use both socket and sniff simultaneously - it will duplicate packets!
-CAPTURE_MODE = "auto"
-
 # Paths to config files
 # Priority: TRAPNINJA_CONFIG env var > /etc/trapninja > ./config > /opt/trapninja/config
 def _get_config_dir():
@@ -49,6 +36,108 @@ def _get_config_dir():
     return '/opt/trapninja/config'
 
 CONFIG_DIR = _get_config_dir()
+
+# Main configuration file
+MAIN_CONFIG_FILE = os.path.join(CONFIG_DIR, "trapninja.json")
+
+
+def _auto_detect_interface():
+    """
+    Auto-detect the best network interface for capturing SNMP traps.
+    
+    Priority:
+    1. First non-loopback interface with an IP address
+    2. Common interface names (eth0, ens192, ens160, enp0s3)
+    3. Fall back to 'eth0' as last resort
+    
+    Returns:
+        str: Interface name
+    """
+    log = logging.getLogger("trapninja")
+    
+    try:
+        from scapy.all import get_if_list, get_if_addr, conf
+        
+        available = get_if_list()
+        log.debug(f"Available interfaces: {available}")
+        
+        # Filter out loopback
+        candidates = [iface for iface in available if iface != 'lo' and not iface.startswith('lo')]
+        
+        # Prefer interfaces with IP addresses
+        for iface in candidates:
+            try:
+                addr = get_if_addr(iface)
+                if addr and addr != '0.0.0.0' and not addr.startswith('127.'):
+                    log.info(f"Auto-detected interface: {iface} (IP: {addr})")
+                    return iface
+            except Exception:
+                continue
+        
+        # Check common interface names
+        common_names = ['eth0', 'ens192', 'ens160', 'ens33', 'enp0s3', 'enp0s8', 'eno1']
+        for name in common_names:
+            if name in candidates:
+                log.info(f"Using common interface name: {name}")
+                return name
+        
+        # Use first available non-loopback interface
+        if candidates:
+            log.info(f"Using first available interface: {candidates[0]}")
+            return candidates[0]
+        
+    except ImportError:
+        log.warning("Scapy not available for interface detection")
+    except Exception as e:
+        log.warning(f"Interface auto-detection failed: {e}")
+    
+    # Last resort fallback
+    log.warning("Could not auto-detect interface, falling back to 'eth0'")
+    return 'eth0'
+
+
+def _load_main_config():
+    """
+    Load main configuration from trapninja.json.
+    
+    Returns:
+        dict: Configuration dictionary
+    """
+    log = logging.getLogger("trapninja")
+    
+    if os.path.exists(MAIN_CONFIG_FILE):
+        try:
+            with open(MAIN_CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+                log.debug(f"Loaded main config from {MAIN_CONFIG_FILE}")
+                return config
+        except Exception as e:
+            log.warning(f"Failed to load {MAIN_CONFIG_FILE}: {e}")
+    
+    return {}
+
+
+# Load main config
+_main_config = _load_main_config()
+
+# Configuration defaults with config file override
+# Interface: config file > environment variable > auto-detect
+INTERFACE = (
+    _main_config.get('interface') or
+    os.environ.get('TRAPNINJA_INTERFACE') or
+    _auto_detect_interface()
+)
+
+LISTEN_PORTS = [162]  # Default listening port for SNMP traps
+CONFIG_CHECK_INTERVAL = _main_config.get('config_check_interval', 60)
+
+# Packet capture mode configuration
+# Options:
+#   "auto"   - Use eBPF if available, fall back to sniff (recommended)
+#   "sniff"  - Use Scapy sniff() with libpcap (reliable, cross-platform)
+#   "socket" - Use UDP socket listeners (lower overhead, but may conflict with other services)
+# WARNING: Never use both socket and sniff simultaneously - it will duplicate packets!
+CAPTURE_MODE = _main_config.get('capture_mode', 'auto')
 DESTINATIONS_FILE = os.path.join(CONFIG_DIR, "destinations.json")
 BLOCKED_TRAPS_FILE = os.path.join(CONFIG_DIR, "blocked_traps.json")
 LISTEN_PORTS_FILE = os.path.join(CONFIG_DIR, "listen_ports.json")
@@ -114,49 +203,64 @@ def ensure_config_dir():
         try:
             os.makedirs(CONFIG_DIR)
             log.info(f"Created configuration directory: {CONFIG_DIR}")
-
-            # Create example config files if they don't exist
-            if not os.path.exists(DESTINATIONS_FILE):
-                with open(DESTINATIONS_FILE, 'w') as f:
-                    json.dump([["192.168.1.100", 162]], f, indent=2)
-                log.info(f"Created example destinations file: {DESTINATIONS_FILE}")
-
-            if not os.path.exists(BLOCKED_TRAPS_FILE):
-                with open(BLOCKED_TRAPS_FILE, 'w') as f:
-                    json.dump([], f, indent=2)
-                log.info(f"Created example blocked traps file: {BLOCKED_TRAPS_FILE}")
-
-            if not os.path.exists(LISTEN_PORTS_FILE):
-                with open(LISTEN_PORTS_FILE, 'w') as f:
-                    json.dump([162], f, indent=2)
-                log.info(f"Created example listen ports file: {LISTEN_PORTS_FILE}")
-
-            if not os.path.exists(BLOCKED_IPS_FILE):
-                with open(BLOCKED_IPS_FILE, 'w') as f:
-                    json.dump([], f, indent=2)
-                log.info(f"Created example blocked IPs file: {BLOCKED_IPS_FILE}")
-
-            if not os.path.exists(REDIRECTED_IPS_FILE):
-                with open(REDIRECTED_IPS_FILE, 'w') as f:
-                    json.dump([["192.168.10.50", "security"]], f, indent=2)
-                log.info(f"Created example redirected IPs file: {REDIRECTED_IPS_FILE}")
-
-            if not os.path.exists(REDIRECTED_OIDS_FILE):
-                with open(REDIRECTED_OIDS_FILE, 'w') as f:
-                    json.dump([["1.3.6.1.4.1.8072.2.3.0.1", "security"]], f, indent=2)
-                log.info(f"Created example redirected OIDs file: {REDIRECTED_OIDS_FILE}")
-
-            if not os.path.exists(REDIRECTED_DESTINATIONS_FILE):
-                with open(REDIRECTED_DESTINATIONS_FILE, 'w') as f:
-                    example_destinations = {
-                        "security": [["127.0.0.1", 1362]],
-                        "config": [["127.0.0.1", 1462]]
-                    }
-                    json.dump(example_destinations, f, indent=2)
-                log.info(f"Created example redirected destinations file: {REDIRECTED_DESTINATIONS_FILE}")
         except Exception as e:
             log.error(f"Failed to create config directory: {e}")
             sys.exit(1)
+    
+    # Create example config files if they don't exist
+    try:
+        # Main configuration file
+        if not os.path.exists(MAIN_CONFIG_FILE):
+            example_main_config = {
+                "_comment": "TrapNinja main configuration. Remove or set 'interface' to auto-detect.",
+                "interface": None,
+                "capture_mode": "auto",
+                "config_check_interval": 60
+            }
+            with open(MAIN_CONFIG_FILE, 'w') as f:
+                json.dump(example_main_config, f, indent=2)
+            log.info(f"Created example main config file: {MAIN_CONFIG_FILE}")
+
+        if not os.path.exists(DESTINATIONS_FILE):
+            with open(DESTINATIONS_FILE, 'w') as f:
+                json.dump([["192.168.1.100", 162]], f, indent=2)
+            log.info(f"Created example destinations file: {DESTINATIONS_FILE}")
+
+        if not os.path.exists(BLOCKED_TRAPS_FILE):
+            with open(BLOCKED_TRAPS_FILE, 'w') as f:
+                json.dump([], f, indent=2)
+            log.info(f"Created example blocked traps file: {BLOCKED_TRAPS_FILE}")
+
+        if not os.path.exists(LISTEN_PORTS_FILE):
+            with open(LISTEN_PORTS_FILE, 'w') as f:
+                json.dump([162], f, indent=2)
+            log.info(f"Created example listen ports file: {LISTEN_PORTS_FILE}")
+
+        if not os.path.exists(BLOCKED_IPS_FILE):
+            with open(BLOCKED_IPS_FILE, 'w') as f:
+                json.dump([], f, indent=2)
+            log.info(f"Created example blocked IPs file: {BLOCKED_IPS_FILE}")
+
+        if not os.path.exists(REDIRECTED_IPS_FILE):
+            with open(REDIRECTED_IPS_FILE, 'w') as f:
+                json.dump([["192.168.10.50", "security"]], f, indent=2)
+            log.info(f"Created example redirected IPs file: {REDIRECTED_IPS_FILE}")
+
+        if not os.path.exists(REDIRECTED_OIDS_FILE):
+            with open(REDIRECTED_OIDS_FILE, 'w') as f:
+                json.dump([["1.3.6.1.4.1.8072.2.3.0.1", "security"]], f, indent=2)
+            log.info(f"Created example redirected OIDs file: {REDIRECTED_OIDS_FILE}")
+
+        if not os.path.exists(REDIRECTED_DESTINATIONS_FILE):
+            with open(REDIRECTED_DESTINATIONS_FILE, 'w') as f:
+                example_destinations = {
+                    "security": [["127.0.0.1", 1362]],
+                    "config": [["127.0.0.1", 1462]]
+                }
+                json.dump(example_destinations, f, indent=2)
+            log.info(f"Created example redirected destinations file: {REDIRECTED_DESTINATIONS_FILE}")
+    except Exception as e:
+        log.error(f"Failed to create example config files: {e}")
 
 
 def safe_load_json(file_path, fallback):
