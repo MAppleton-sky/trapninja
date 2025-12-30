@@ -692,6 +692,13 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
     workers = start_packet_processors(num_workers=worker_count)
     logger.info(f"Started {len(workers)} packet processing workers (optimized)")
     logger.info(f"Queue capacity: {packet_queue.maxsize} packets")
+    
+    # CRITICAL: Allow workers to fully initialize before starting capture
+    # Without this delay, packets arrive before workers are ready to process them,
+    # causing drops during the first few seconds of startup
+    worker_warmup_delay = 0.5  # 500ms for thread initialization
+    logger.info(f"Waiting {worker_warmup_delay}s for workers to initialize...")
+    time.sleep(worker_warmup_delay)
 
     # =======================================================================
     # Initialize packet capture (either eBPF or traditional)
@@ -720,6 +727,7 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
                     use_ebpf = True
                     capture_started = True
                     logger.info("Packet capture started successfully with eBPF acceleration")
+                    logger.info(">>> CAPTURE ACTIVE - Now receiving packets <<<")
                 else:
                     logger.warning("Failed to start eBPF capture, will try standard capture")
             except Exception as e:

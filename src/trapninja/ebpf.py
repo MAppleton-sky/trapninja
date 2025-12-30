@@ -251,6 +251,14 @@ class MinimalTrapCapture:
         # Import required modules for packet parsing
         import select
         import struct
+        
+        # Import queue stats from network module for consistent drop tracking
+        try:
+            from .network import _queue_stats
+            use_network_stats = True
+        except ImportError:
+            use_network_stats = False
+            logger.warning("Could not import network stats - drops may not be recorded")
 
         try:
             while not stop_event.is_set():
@@ -298,16 +306,19 @@ class MinimalTrapCapture:
                     'payload': payload
                 }
 
-                # Queue packet for processing
+                # Queue packet for processing - use put_nowait and handle Full exception
+                # This properly tracks drops like sniff mode does
                 try:
-                    if packet_queue and not packet_queue.full():
-                        packet_queue.put(packet_data, block=False)
-                        logger.debug(
-                            f"Raw capture: queued packet from {src_ip} to port {dst_port}, {len(payload)} bytes")
+                    packet_queue.put_nowait(packet_data)
+                    if use_network_stats:
+                        _queue_stats.record_queued()
+                    logger.debug(
+                        f"Raw capture: queued packet from {src_ip} to port {dst_port}, {len(payload)} bytes")
+                except queue.Full:
+                    if use_network_stats:
+                        _queue_stats.record_dropped()
                     else:
-                        logger.warning("Packet queue full or not available, dropping packet")
-                except Exception as e:
-                    logger.error(f"Error queuing raw captured packet: {e}")
+                        logger.warning("Packet queue full, dropping packet")
 
         except Exception as e:
             if not stop_event.is_set():
