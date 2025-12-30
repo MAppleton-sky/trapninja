@@ -173,6 +173,10 @@ Examples:
     group.add_argument('--cache-help', action='store_true',
                       help='Show comprehensive cache help')
 
+    # Queue statistics (for diagnosing drops)
+    group.add_argument('--queue-stats', action='store_true',
+                      help='Show packet queue statistics and drop analysis')
+
     # Granular statistics commands
     group.add_argument('--stats-summary', action='store_true',
                       help='Show granular statistics summary')

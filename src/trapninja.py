@@ -45,14 +45,24 @@ def check_ebpf_support():
         if os.geteuid() != 0:
             return False, "eBPF acceleration requires root privileges"
         
-        # Add BCC installation paths for cmake-built installations
+        # Add BCC installation paths
+        # RHEL 8 installs python3-bcc to Python 3.6 site-packages regardless of runtime Python
         BCC_PATHS = [
-            '/usr/lib/python3.9/site-packages',
-            '/usr/lib64/python3.9/site-packages',
-            '/usr/local/lib/python{}.{}/site-packages'.format(
+            # RHEL 8 default location (python3-bcc RPM)
+            '/usr/lib/python3.6/site-packages',
+            '/usr/lib64/python3.6/site-packages',
+            # Current Python version paths
+            '/usr/lib/python{}.{}/site-packages'.format(
                 sys.version_info.major, sys.version_info.minor
             ),
             '/usr/lib64/python{}.{}/site-packages'.format(
+                sys.version_info.major, sys.version_info.minor
+            ),
+            # CMake/source build locations
+            '/usr/local/lib/python{}.{}/site-packages'.format(
+                sys.version_info.major, sys.version_info.minor
+            ),
+            '/usr/local/lib64/python{}.{}/site-packages'.format(
                 sys.version_info.major, sys.version_info.minor
             ),
         ]

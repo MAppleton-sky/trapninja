@@ -268,6 +268,121 @@ def _print_config(config: dict, from_daemon: bool):
     print()
 
 
+def queue_stats(json_output: bool = False) -> int:
+    """
+    Show packet queue statistics.
+    
+    Displays current queue depth, maximum depth, drop count, and utilization.
+    Useful for diagnosing packet drops during burst traffic.
+
+    Args:
+        json_output: If True, output as JSON
+
+    Returns:
+        Exit code (0 for success, non-zero for failure)
+    """
+    from ..control import ControlSocket
+    import os
+    
+    queue_data = None
+    from_daemon = False
+    
+    # Try to get stats from running daemon first
+    try:
+        response = ControlSocket.send_command('queue_stats', timeout=5.0)
+        if response.get('status') == ControlSocket.SUCCESS:
+            queue_data = response.get('data', {})
+            from_daemon = True
+    except ConnectionRefusedError:
+        pass
+    except Exception as e:
+        print(f"Warning: Could not connect to daemon: {e}", file=sys.stderr)
+    
+    # If daemon not running, try to read from network module globals or metrics file
+    if queue_data is None:
+        try:
+            # Try to read from metrics file
+            metrics_path = "/var/log/trapninja/metrics/trapninja_granular.json"
+            if os.path.exists(metrics_path):
+                with open(metrics_path) as f:
+                    import json as json_mod
+                    data = json_mod.load(f)
+                    queue_data = data.get('queue', {})
+        except Exception:
+            pass
+    
+    if queue_data is None:
+        # Return default/empty stats
+        queue_data = {
+            'current_depth': 0,
+            'max_depth': 0,
+            'total_queued': 0,
+            'total_dropped': 0,
+            'full_events': 0,
+            'queue_capacity': 200000,
+            'utilization': 0.0
+        }
+        from_daemon = False
+    
+    if json_output:
+        print(json.dumps(queue_data, indent=2))
+    else:
+        _print_queue_stats(queue_data, from_daemon)
+    
+    return 0
+
+
+def _print_queue_stats(stats: dict, from_daemon: bool):
+    """Pretty print queue statistics."""
+    source = "running daemon" if from_daemon else "last known stats"
+    
+    print(f"\nTrapNinja Queue Statistics (from {source})")
+    print("=" * 50)
+    
+    current = stats.get('current_depth', 0)
+    capacity = stats.get('queue_capacity', 200000)
+    utilization = (current / capacity * 100) if capacity > 0 else 0
+    
+    print(f"\nCurrent Queue Depth:  {current:>12,}")
+    print(f"Queue Capacity:       {capacity:>12,}")
+    print(f"Utilization:          {utilization:>11.1f}%")
+    
+    print(f"\nMaximum Depth Seen:   {stats.get('max_depth', 0):>12,}")
+    print(f"Total Packets Queued: {stats.get('total_queued', 0):>12,}")
+    print(f"Total Packets Dropped:{stats.get('total_dropped', 0):>12,}")
+    print(f"Queue Full Events:    {stats.get('full_events', 0):>12,}")
+    
+    # Calculate drop rate
+    total_queued = stats.get('total_queued', 0)
+    total_dropped = stats.get('total_dropped', 0)
+    total_received = total_queued + total_dropped
+    
+    if total_received > 0:
+        drop_rate = (total_dropped / total_received) * 100
+        print(f"\nDrop Rate:            {drop_rate:>11.4f}%")
+        
+        # Assessment
+        if drop_rate < 0.01:
+            assessment = "Excellent - no action needed"
+        elif drop_rate < 0.1:
+            assessment = "Good - acceptable for most environments"
+        elif drop_rate < 1.0:
+            assessment = "Monitor - may indicate capacity issues"
+        else:
+            assessment = "Investigate - likely needs optimization"
+        print(f"Assessment:           {assessment}")
+    
+    print()
+    
+    # Tips if drops detected
+    if total_dropped > 0:
+        print("TIP: To investigate drops, check:")
+        print("  1. grep 'Queue full' /var/log/trapninja.log")
+        print("  2. python trapninja.py --stats-top-ips --sort peak")
+        print("  3. python trapninja.py --stats-top-oids --sort peak")
+        print()
+
+
 def validate_config() -> int:
     """
     Validate configuration without starting the daemon.

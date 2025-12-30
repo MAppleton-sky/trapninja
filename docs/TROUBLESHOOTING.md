@@ -575,6 +575,136 @@ If issues persist:
 
 ---
 
+## Packet Drops
+
+### Symptom: Non-Zero "Dropped" Count in Stats Summary
+
+**Understanding Drops**:
+
+The "Dropped" counter in TrapNinja indicates **queue overflow events** - packets that arrived when the processing queue was full. This typically occurs during burst traffic scenarios (e.g., fiber cuts, device reboots causing alarm floods).
+
+**Example**:
+```
+Dropped:                    629
+```
+
+With 629 drops out of 2.8M traps, the drop rate is ~0.02% which is excellent for telco-scale traffic.
+
+### Diagnosing Drops
+
+**1. Check Queue Statistics**:
+```bash
+# View queue metrics in real-time
+watch -n 5 'cat /var/log/trapninja/metrics/trapninja_granular.prom | grep -E "queue|dropped"'
+
+# Or check the JSON stats
+cat /var/log/trapninja/metrics/trapninja_granular.json | python -m json.tool | grep -A5 queue
+```
+
+**2. Check Processing Logs for Queue Full Warnings**:
+```bash
+# Look for queue full events (logged with rate limiting)
+grep -i "queue full" /var/log/trapninja.log
+
+# Example output:
+# WARNING - Queue full: 15 packets dropped
+```
+
+**3. Identify Burst Traffic Periods**:
+```bash
+# Check peak rates - high peaks indicate burst traffic
+python trapninja.py --stats-top-ips --sort peak -n 20
+python trapninja.py --stats-top-oids --sort peak -n 20
+
+# Look for IPs with very high peak vs current rate
+# Peak/min >> Current/min indicates burst traffic occurred
+```
+
+**4. Correlate Drops with Traffic Patterns**:
+```bash
+# Check when drops occurred by looking at log timestamps
+grep "Queue full" /var/log/trapninja.log | head -20
+
+# Cross-reference with network events (fiber cuts, maintenance, etc.)
+```
+
+### Understanding Queue Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `current_depth` | Current packets waiting in queue |
+| `max_depth` | Highest queue depth observed |
+| `total_queued` | Total packets successfully queued |
+| `total_dropped` | Packets dropped due to full queue |
+| `full_events` | Number of times queue was full |
+| `queue_capacity` | Maximum queue size (default: 200,000) |
+| `utilization` | current_depth / queue_capacity |
+
+### Solutions for Reducing Drops
+
+**1. Enable eBPF Acceleration** (Recommended):
+```bash
+# eBPF filtering happens in kernel, reducing queue pressure
+sudo yum install bcc bcc-tools python3-bcc  # RHEL
+sudo python trapninja.py --start
+```
+
+**2. Block High-Volume Noise Sources**:
+```bash
+# Identify sources generating excessive traps
+python trapninja.py --stats-top-ips --sort peak -n 10
+
+# Block noisy sources if appropriate
+python trapninja.py --add-blocked-ip 10.x.x.x
+```
+
+**3. Block Noisy OIDs**:
+```bash
+# Identify OIDs causing floods
+python trapninja.py --stats-top-oids --sort peak -n 10
+
+# Block non-critical OIDs
+python trapninja.py --add-blocked-oid 1.3.6.1.4.1.xxxx
+```
+
+**4. Increase Processing Capacity**:
+
+Edit `packet_processor.py` to increase workers:
+```python
+# In start_workers(), change:
+num_workers = min(cpu_count * 2, 32)  # Default
+num_workers = min(cpu_count * 4, 64)  # More aggressive
+```
+
+**5. Increase Queue Capacity** (Last Resort):
+
+Edit `network.py`:
+```python
+QUEUE_MAX_SIZE = 200000  # Default
+QUEUE_MAX_SIZE = 500000  # Increase for extreme scenarios
+```
+
+**Note**: Increasing queue size uses more memory (~500 bytes per slot).
+
+### Acceptable Drop Rates
+
+| Drop Rate | Assessment |
+|-----------|------------|
+| < 0.01% | Excellent - no action needed |
+| 0.01-0.1% | Good - acceptable for most environments |
+| 0.1-1% | Monitor - may indicate capacity issues |
+| > 1% | Investigate - likely needs optimization |
+
+### Drop Rate Calculation
+
+```
+Drop Rate = (Dropped / Total Traps) × 100
+
+Example: 629 / 2,845,859 × 100 = 0.022%
+```
+
+---
+
 ## Metrics Issues
 
 ### Symptom: All Metrics Show Zero

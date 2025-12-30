@@ -23,20 +23,27 @@ BPF = None
 EBPF_IMPORT_ERROR = None
 
 try:
-    # Add BCC installation path for cmake-built installations
-    # Note: We prioritize package manager paths over /usr/local to avoid
-    # importing the wrong 'bcc' package (Will Sheffler's package)
+    # Add BCC installation paths
+    # RHEL 8 installs python3-bcc to Python 3.6 site-packages regardless of runtime Python
+    # We prioritize package manager paths over /usr/local to avoid
+    # importing the wrong 'bcc' package (Will Sheffler's pip package)
     BCC_PATHS = [
-        '/usr/lib/python3.9/site-packages',        # Package manager (preferred)
-        '/usr/lib64/python3.9/site-packages',      # Package manager 64-bit
+        # RHEL 8 default location (python3-bcc RPM) - CHECK FIRST
+        '/usr/lib/python3.6/site-packages',
+        '/usr/lib64/python3.6/site-packages',
+        # Current Python version paths
         '/usr/lib/python{}.{}/site-packages'.format(
             sys.version_info.major, sys.version_info.minor
         ),
         '/usr/lib64/python{}.{}/site-packages'.format(
             sys.version_info.major, sys.version_info.minor
         ),
-        '/usr/local/lib/python3.9/site-packages',  # CMake/source build (last)
+        # CMake/source build locations (last)
+        '/usr/local/lib/python3.9/site-packages',
         '/usr/local/lib/python{}.{}/site-packages'.format(
+            sys.version_info.major, sys.version_info.minor
+        ),
+        '/usr/local/lib64/python{}.{}/site-packages'.format(
             sys.version_info.major, sys.version_info.minor
         ),
     ]

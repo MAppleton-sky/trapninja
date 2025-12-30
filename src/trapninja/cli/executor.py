@@ -288,6 +288,10 @@ def execute_command(args: Namespace) -> int:
     elif args.cache_help:
         return 0 if cache_commands.show_cache_help() else 1
 
+    # Handle queue statistics
+    elif args.queue_stats:
+        return daemon_commands.queue_stats(json_output=getattr(args, 'json', False))
+
     # Handle granular statistics commands
     elif args.stats_summary:
         return stats_commands.handle_stats_summary(args)
