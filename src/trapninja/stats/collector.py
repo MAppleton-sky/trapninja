@@ -352,7 +352,12 @@ class GranularStatsCollector:
         Returns:
             StatsSnapshot with summary and top entities
         """
-        snapshot = StatsSnapshot(timestamp=time.time())
+        now = time.time()
+        snapshot = StatsSnapshot(timestamp=now)
+        
+        # Collection period info
+        snapshot.collection_started = self._start_time
+        snapshot.uptime_seconds = now - self._start_time
         
         # Summary
         snapshot.total_traps = self._total_traps

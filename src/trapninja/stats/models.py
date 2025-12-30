@@ -505,6 +505,10 @@ class StatsSnapshot:
     """
     timestamp: float = field(default_factory=time.time)
     
+    # Collection period tracking
+    collection_started: float = 0.0
+    uptime_seconds: float = 0.0
+    
     # Summary counters
     total_traps: int = 0
     total_forwarded: int = 0
@@ -533,6 +537,8 @@ class StatsSnapshot:
         """Convert to dictionary."""
         return {
             'timestamp': datetime.fromtimestamp(self.timestamp).isoformat(),
+            'collection_started': self.collection_started,
+            'uptime_seconds': self.uptime_seconds,
             'summary': {
                 'total_traps': self.total_traps,
                 'total_forwarded': self.total_forwarded,
