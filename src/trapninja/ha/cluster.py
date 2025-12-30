@@ -563,8 +563,8 @@ class HACluster:
             return
         
         if self.current_state != HAState.PRIMARY:
-            logger.debug("Config request received but we are not PRIMARY")
-            response = {'type': 'error', 'error': 'Not PRIMARY'}
+            logger.warning(f"Config request received but we are {self.current_state.name}, not PRIMARY")
+            response = {'type': 'error', 'error': f'Not PRIMARY (currently {self.current_state.name})'}
             conn.send(json.dumps(response).encode('utf-8'))
             return
         
@@ -829,6 +829,8 @@ class HACluster:
         # This runs AFTER we become PRIMARY to ensure zero trap loss
         if self._failover_gap_start:
             self._trigger_failover_replay()
+        else:
+            logger.info("No failover gap recorded - replay not needed (clean failover)")
     
     def _trigger_failover_replay(self):
         """
@@ -853,11 +855,16 @@ class HACluster:
         gap_end = time.time()
         gap_seconds = gap_end - gap_start
         
+        # Convert to human-readable timestamps
+        from datetime import datetime
+        start_str = datetime.fromtimestamp(gap_start).strftime('%H:%M:%S.%f')[:-3]
+        end_str = datetime.fromtimestamp(gap_end).strftime('%H:%M:%S.%f')[:-3]
+        
         logger.info(f"========================================")
         logger.info(f"FAILOVER REPLAY: Gap detected")
-        logger.info(f"  Gap start (last heartbeat): {gap_start:.3f}")
-        logger.info(f"  Gap end (now): {gap_end:.3f}")
-        logger.info(f"  Gap duration: {gap_seconds:.1f} seconds")
+        logger.info(f"  Gap start: {start_str}")
+        logger.info(f"  Gap end:   {end_str}")
+        logger.info(f"  Duration:  {gap_seconds:.1f} seconds")
         logger.info(f"========================================")
         
         # Clear the gap start now that we've captured it
@@ -910,7 +917,7 @@ class HACluster:
                 try:
                     count = cache.count_range(dest, start_dt, end_dt)
                     if count == 0:
-                        logger.debug(f"No traps to replay for destination '{dest}'")
+                        logger.info(f"No traps to replay for destination '{dest}' (0 in cache)")
                         continue
                     
                     logger.info(f"Replaying {count} traps for destination '{dest}'")
@@ -942,6 +949,8 @@ class HACluster:
             logger.info(f"  Total sent: {total_sent}")
             logger.info(f"  Total failed: {total_failed}")
             logger.info(f"  Gap duration: {gap_seconds:.1f}s")
+            if total_sent == 0 and total_failed == 0:
+                logger.info(f"  Note: No traps needed replay (cache was empty for gap window)")
             logger.info(f"========================================")
             
         except ImportError as e:
@@ -967,7 +976,9 @@ class HACluster:
                 # CRITICAL: Save the last known good heartbeat time BEFORE clearing
                 # This is used for failover replay to determine the gap window
                 self._failover_gap_start = self.peer_last_seen
-                logger.info(f"Failover gap start recorded: {self._failover_gap_start}")
+                from datetime import datetime
+                gap_start_str = datetime.fromtimestamp(self._failover_gap_start).strftime('%H:%M:%S.%f')[:-3]
+                logger.info(f"Failover gap start recorded: {gap_start_str} (will replay from this time)")
                 self._claim_primary()
             
             self.peer_last_seen = None

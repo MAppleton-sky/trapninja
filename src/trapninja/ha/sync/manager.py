@@ -254,16 +254,28 @@ class ConfigSyncManager:
         )
         self._monitor_thread.start()
         
-        # If starting as secondary, pull configs from primary
+        # If starting as secondary, pull configs from primary with retry
         if not is_primary:
             logger.info("Starting as SECONDARY - pulling configs from PRIMARY...")
-            # Give the primary a moment to be ready
-            time.sleep(2.0)
-            success = self.pull_configs()
-            if success:
-                logger.info("Initial config sync from PRIMARY completed")
-            else:
-                logger.warning("Initial config sync from PRIMARY failed - will retry")
+            # Retry logic with backoff for initial sync
+            max_retries = 5
+            retry_delays = [2.0, 3.0, 5.0, 8.0, 10.0]  # Progressive backoff
+            
+            for attempt in range(max_retries):
+                delay = retry_delays[min(attempt, len(retry_delays) - 1)]
+                logger.info(f"Waiting {delay}s before config pull (attempt {attempt + 1}/{max_retries})...")
+                time.sleep(delay)
+                
+                success = self.pull_configs()
+                if success:
+                    logger.info("Initial config sync from PRIMARY completed")
+                    break
+                else:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Config sync attempt {attempt + 1} failed - will retry")
+                    else:
+                        logger.warning("Initial config sync from PRIMARY failed after all retries")
+                        logger.warning("Config will be synced when PRIMARY pushes changes or on next heartbeat mismatch")
         
         logger.info("Config sync system started")
     
@@ -352,6 +364,12 @@ class ConfigSyncManager:
                 if response.get('type') == 'config_response':
                     bundle = ConfigBundle.from_dict(response.get('bundle', {}))
                     return self._apply_bundle(bundle)
+                elif response.get('type') == 'error':
+                    error_msg = response.get('error', 'Unknown error')
+                    logger.warning(f"Config pull failed - PRIMARY returned error: {error_msg}")
+                    self._stats['pull_failures'] += 1
+                    self._stats['last_error'] = error_msg
+                    return False
                 else:
                     logger.warning(f"Unexpected response type: {response.get('type')}")
                     self._stats['pull_failures'] += 1
