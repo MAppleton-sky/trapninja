@@ -338,6 +338,13 @@ def execute_command(args: Namespace) -> int:
     elif args.shadow_export:
         return shadow_commands.handle_shadow_export(args)
 
+    # Handle configuration commands
+    elif args.show_config:
+        return daemon_commands.show_config(json_output=getattr(args, 'json', False))
+    
+    elif args.validate_config:
+        return daemon_commands.validate_config()
+
     # Handle daemon control commands
     elif args.start:
         return daemon_commands.start()
