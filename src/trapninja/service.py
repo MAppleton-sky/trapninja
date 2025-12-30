@@ -135,10 +135,14 @@ def validate_configuration() -> tuple:
     Returns:
         Tuple of (is_valid: bool, errors: list, warnings: list)
     """
-    from .config import (
-        INTERFACE, LISTEN_PORTS, destinations,
-        blocked_ips, blocked_traps, redirected_ips, redirected_oids
-    )
+    # IMPORTANT: Import the module, not the variables directly!
+    # We need to load config first, then access via module reference.
+    from . import config as cfg
+    
+    # Temporarily set stop_event to prevent load_config from starting timer
+    cfg.stop_event.set()
+    cfg.load_config(None)  # Load configuration from files
+    cfg.stop_event.clear()
     
     errors = []
     warnings = []
@@ -148,9 +152,9 @@ def validate_configuration() -> tuple:
     # =======================================================================
     try:
         available_interfaces = get_if_list()
-        if INTERFACE not in available_interfaces:
+        if cfg.INTERFACE not in available_interfaces:
             errors.append(
-                f"Interface '{INTERFACE}' not found. "
+                f"Interface '{cfg.INTERFACE}' not found. "
                 f"Available interfaces: {', '.join(available_interfaces)}"
             )
     except Exception as e:
@@ -159,10 +163,10 @@ def validate_configuration() -> tuple:
     # =======================================================================
     # Validate Listen Ports
     # =======================================================================
-    if not LISTEN_PORTS:
+    if not cfg.LISTEN_PORTS:
         errors.append("No listen ports configured")
     else:
-        for port in LISTEN_PORTS:
+        for port in cfg.LISTEN_PORTS:
             if not isinstance(port, int):
                 errors.append(f"Invalid port type: {port} (must be integer)")
             elif port < 1 or port > 65535:
@@ -173,13 +177,13 @@ def validate_configuration() -> tuple:
     # =======================================================================
     # Validate Destinations
     # =======================================================================
-    if not destinations:
+    if not cfg.destinations:
         warnings.append(
             "No forwarding destinations configured. "
             "Traps will be received but not forwarded."
         )
     else:
-        for dest in destinations:
+        for dest in cfg.destinations:
             # Check destination format
             if isinstance(dest, dict):
                 if 'host' not in dest:
@@ -246,14 +250,14 @@ def validate_configuration() -> tuple:
     # =======================================================================
     # Check for blocking/redirection rules
     # =======================================================================
-    if blocked_ips:
-        logger.debug(f"Loaded {len(blocked_ips)} blocked IP rules")
-    if blocked_traps:
-        logger.debug(f"Loaded {len(blocked_traps)} blocked OID rules")
-    if redirected_ips:
-        logger.debug(f"Loaded {len(redirected_ips)} IP redirection rules")
-    if redirected_oids:
-        logger.debug(f"Loaded {len(redirected_oids)} OID redirection rules")
+    if cfg.blocked_ips:
+        logger.debug(f"Loaded {len(cfg.blocked_ips)} blocked IP rules")
+    if cfg.blocked_traps:
+        logger.debug(f"Loaded {len(cfg.blocked_traps)} blocked OID rules")
+    if cfg.redirected_ips:
+        logger.debug(f"Loaded {len(cfg.redirected_ips)} IP redirection rules")
+    if cfg.redirected_oids:
+        logger.debug(f"Loaded {len(cfg.redirected_oids)} OID redirection rules")
     
     is_valid = len(errors) == 0
     return is_valid, errors, warnings

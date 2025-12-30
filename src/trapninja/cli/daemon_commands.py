@@ -147,28 +147,37 @@ def show_config(json_output: bool = False) -> int:
 
 def _read_config_files() -> dict:
     """Read configuration from files when daemon is not running."""
-    from ..config import (
-        CONFIG_DIR, INTERFACE, LISTEN_PORTS, destinations,
-        blocked_ips, blocked_traps, redirected_ips, redirected_oids,
-        redirected_destinations
-    )
+    # IMPORTANT: Import the module, not the variables directly!
+    # We need to call load_config() first to populate the variables,
+    # then access them via the module reference to get current values.
+    from .. import config as cfg
     from ..ha import load_ha_config
+    
+    # Set stop_event to prevent load_config() from scheduling periodic timer
+    # (we only want a one-time load for CLI display)
+    cfg.stop_event.set()
+    
+    # Load configuration from files to populate module variables
+    cfg.load_config(None)
+    
+    # Clear stop_event in case other code checks it
+    cfg.stop_event.clear()
     
     config = {
         'source': 'files',
-        'config_directory': CONFIG_DIR,
-        'interface': INTERFACE,
-        'listen_ports': list(LISTEN_PORTS) if LISTEN_PORTS else [],
+        'config_directory': cfg.CONFIG_DIR,
+        'interface': cfg.INTERFACE,
+        'listen_ports': list(cfg.LISTEN_PORTS) if cfg.LISTEN_PORTS else [],
         'forwarding': {
-            'destinations': destinations if destinations else [],
-            'destination_count': len(destinations) if destinations else 0
+            'destinations': cfg.destinations if cfg.destinations else [],
+            'destination_count': len(cfg.destinations) if cfg.destinations else 0
         },
         'filtering': {
-            'blocked_ips_count': len(blocked_ips) if blocked_ips else 0,
-            'blocked_oids_count': len(blocked_traps) if blocked_traps else 0,
-            'ip_redirections_count': len(redirected_ips) if redirected_ips else 0,
-            'oid_redirections_count': len(redirected_oids) if redirected_oids else 0,
-            'redirect_destinations_count': len(redirected_destinations) if redirected_destinations else 0
+            'blocked_ips_count': len(cfg.blocked_ips) if cfg.blocked_ips else 0,
+            'blocked_oids_count': len(cfg.blocked_traps) if cfg.blocked_traps else 0,
+            'ip_redirections_count': len(cfg.redirected_ips) if cfg.redirected_ips else 0,
+            'oid_redirections_count': len(cfg.redirected_oids) if cfg.redirected_oids else 0,
+            'redirect_destinations_count': len(cfg.redirected_destinations) if cfg.redirected_destinations else 0
         }
     }
     
