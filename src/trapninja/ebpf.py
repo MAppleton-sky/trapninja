@@ -128,6 +128,7 @@ except Exception as e:
     logger.warning(f"Unexpected BCC import error: {e}")
 
 # Define extremely minimal BPF program - avoiding all complex features
+# This version uses perf_submit which requires specific program types
 MINIMAL_BPF_PROGRAM = """
 #include <uapi/linux/bpf.h>
 #include <uapi/linux/if_ether.h>
@@ -177,6 +178,50 @@ int packet_filter(struct __sk_buff *skb) {
     events.perf_submit(skb, &event, sizeof(event));
 
     return 0;
+}
+"""
+
+# Simpler socket filter that just filters packets (no perf events)
+# Uses classic BPF load functions compatible with SOCKET_FILTER type
+SIMPLE_SOCKET_FILTER = """
+#include <uapi/linux/bpf.h>
+#include <uapi/linux/if_ether.h>
+#include <uapi/linux/ip.h>
+#include <uapi/linux/udp.h>
+#include <uapi/linux/in.h>
+
+// Port table for filtering
+BPF_HASH(ports, u16, u8, 16);
+
+int packet_filter(struct __sk_buff *skb) {
+    // Use load_half/load_byte for SOCKET_FILTER compatibility
+    // These work on all kernel versions unlike direct packet access
+    
+    // Check EtherType at offset 12 (2 bytes)
+    u16 eth_proto = load_half(skb, offsetof(struct ethhdr, h_proto));
+    if (eth_proto != htons(ETH_P_IP))
+        return 0;
+    
+    // Check IP protocol at offset 14 (ethernet) + 9 (protocol field in IP header)
+    u8 ip_proto = load_byte(skb, ETH_HLEN + offsetof(struct iphdr, protocol));
+    if (ip_proto != IPPROTO_UDP)
+        return 0;
+    
+    // Get IP header length (IHL is lower 4 bits of first byte)
+    u8 ip_verihl = load_byte(skb, ETH_HLEN);
+    u8 ip_hlen = (ip_verihl & 0x0F) * 4;
+    
+    // Get UDP destination port at offset: ethernet + IP header + 2 (dest port offset in UDP)
+    u16 dport = load_half(skb, ETH_HLEN + ip_hlen + offsetof(struct udphdr, dest));
+    dport = ntohs(dport);
+    
+    // Check if destination port matches our filter
+    u8 *found = ports.lookup(&dport);
+    if (!found)
+        return 0;
+    
+    // Return full packet length to accept
+    return skb->len;
 }
 """
 
@@ -359,12 +404,41 @@ class MinimalTrapCapture:
                 logger.debug(f"BPF import error: {EBPF_IMPORT_ERROR}")
             return False
         
+        # Try programs in order: complex (with perf) then simple (filter only)
+        programs_to_try = [
+            ("complex (perf_submit)", MINIMAL_BPF_PROGRAM, True),
+            ("simple (filter only)", SIMPLE_SOCKET_FILTER, False),
+        ]
+        
+        for prog_name, prog_text, uses_perf in programs_to_try:
+            logger.info(f"Trying {prog_name} BPF program...")
+            
+            result = self._try_load_bpf_program(prog_text, uses_perf)
+            if result:
+                return True
+            
+            logger.info(f"{prog_name} BPF program failed, trying next...")
+        
+        logger.warning("All BPF programs failed to load")
+        return False
+    
+    def _try_load_bpf_program(self, program_text, uses_perf):
+        """
+        Try to load a specific BPF program.
+        
+        Args:
+            program_text: BPF C program source
+            uses_perf: Whether program uses perf events
+            
+        Returns:
+            bool: True if successful
+        """
         try:
-            logger.debug("Attempting to load minimal eBPF program...")
+            logger.debug("Attempting to load eBPF program...")
 
             # Load BPF program
-            self.bpf = BPF(text=MINIMAL_BPF_PROGRAM)
-            logger.debug("Successfully loaded minimal eBPF program")
+            self.bpf = BPF(text=program_text)
+            logger.info("BPF program compiled successfully")
 
             # Set up ports table
             ports_table = self.bpf.get_table("ports")
@@ -376,6 +450,9 @@ class MinimalTrapCapture:
                     ports_table[ct.c_uint16(port)] = ct.c_uint8(1)
 
             logger.info(f"Monitoring ports added to eBPF hash table: {self.listen_ports}")
+            
+            # Store whether this program uses perf
+            self._uses_perf = uses_perf
 
             # Attach to interface - use packet filter function
             function_name = "packet_filter"
@@ -389,31 +466,64 @@ class MinimalTrapCapture:
                     logger.info(f"Attaching eBPF filter to interface: {self.interface}")
                     iface = self.interface
                 
+                # Log available BPF program types for diagnostics
+                prog_types = [attr for attr in dir(BPF) if attr.isupper() and not attr.startswith('_')]
+                logger.info(f"Available BPF constants: {prog_types[:10]}...")  # First 10
+                
                 # Get the function object (required for newer BCC versions)
                 # Try multiple methods for compatibility across BCC versions
                 fn = None
                 
-                # Method 1: Try load_func (newer BCC API)
-                # Need to check if SOCKET_FILTER constant exists
+                # Method 1: Try load_func with SOCKET_FILTER
                 socket_filter_type = getattr(BPF, 'SOCKET_FILTER', None)
                 if socket_filter_type is not None:
                     try:
                         fn = self.bpf.load_func(function_name, socket_filter_type)
-                        logger.info("Loaded BPF function using load_func()")
+                        logger.info(f"Loaded BPF function using load_func(SOCKET_FILTER={socket_filter_type})")
                     except Exception as e:
-                        logger.info(f"load_func() method failed: {e}")
+                        logger.info(f"load_func(SOCKET_FILTER) failed: {e}")
                         fn = None
-                else:
-                    logger.info("BPF.SOCKET_FILTER not available, skipping load_func method")
+                
+                # Method 1b: Try load_func with SCHED_CLS (might work better with perf_submit)
+                if fn is None:
+                    sched_cls_type = getattr(BPF, 'SCHED_CLS', None)
+                    if sched_cls_type is not None:
+                        try:
+                            fn = self.bpf.load_func(function_name, sched_cls_type)
+                            logger.info(f"Loaded BPF function using load_func(SCHED_CLS={sched_cls_type})")
+                        except Exception as e:
+                            logger.info(f"load_func(SCHED_CLS) failed: {e}")
+                            fn = None
                 
                 # Method 2: Try accessing function directly from bpf object
                 if fn is None:
                     try:
                         fn = self.bpf[function_name]
-                        logger.info("Loaded BPF function using bpf[name] accessor")
+                        if fn is not None:
+                            logger.info(f"Loaded BPF function using bpf[name] accessor, type={type(fn)}")
+                        else:
+                            logger.info("bpf[name] accessor returned None")
+                            fn = None
                     except (KeyError, TypeError) as e:
                         logger.info(f"bpf[name] accessor failed: {e}")
                         fn = None
+                
+                # Method 2b: Try function attribute access
+                if fn is None:
+                    try:
+                        if hasattr(self.bpf, 'funcs'):
+                            logger.info(f"Available funcs: {list(self.bpf.funcs.keys()) if hasattr(self.bpf.funcs, 'keys') else self.bpf.funcs}")
+                            if function_name in self.bpf.funcs:
+                                fn = self.bpf.funcs[function_name]
+                                logger.info(f"Got function from bpf.funcs, type={type(fn)}")
+                    except Exception as e:
+                        logger.info(f"bpf.funcs access failed: {e}")
+                
+                # Log what we got
+                if fn is not None:
+                    logger.info(f"BPF function obtained: type={type(fn).__name__}, has fd={hasattr(fn, 'fd')}")
+                else:
+                    logger.warning("Could not obtain BPF function object")
                 
                 # Try different attachment methods based on what we have
                 attached = False
@@ -424,7 +534,7 @@ class MinimalTrapCapture:
                         sock_fd = BPF.attach_raw_socket(fn, iface)
                         if sock_fd is not None:
                             attached = True
-                            logger.info("Attached using BPF.attach_raw_socket(fn, iface) class method")
+                            logger.info(f"Attached using BPF.attach_raw_socket(fn, iface), sock_fd={sock_fd}")
                     except Exception as e:
                         logger.info(f"BPF.attach_raw_socket class method failed: {e}")
                 
@@ -434,7 +544,7 @@ class MinimalTrapCapture:
                         sock_fd = self.bpf.attach_raw_socket(fn, iface)
                         if sock_fd is not None:
                             attached = True
-                            logger.info("Attached using self.bpf.attach_raw_socket(fn, iface)")
+                            logger.info(f"Attached using self.bpf.attach_raw_socket(fn, iface), sock_fd={sock_fd}")
                     except Exception as e:
                         logger.info(f"Instance attach_raw_socket with fn failed: {e}")
                 
@@ -444,28 +554,23 @@ class MinimalTrapCapture:
                         sock_fd = self.bpf.attach_raw_socket(function_name, iface)
                         if sock_fd is not None:
                             attached = True
-                            logger.info("Attached using string function name (older API)")
+                            logger.info(f"Attached using string function name, sock_fd={sock_fd}")
                     except Exception as e:
                         logger.info(f"String-based attach_raw_socket failed: {e}")
                 
-                # Method D: Try creating socket and using attach_xdp or other methods
-                if not attached:
+                # Method D: Try creating socket and using setsockopt
+                if not attached and fn is not None and hasattr(fn, 'fd'):
                     try:
-                        # Create raw socket manually
                         import socket as sock_module
                         raw_sock = sock_module.socket(sock_module.AF_PACKET, sock_module.SOCK_RAW, sock_module.htons(0x0003))
                         if iface:
                             raw_sock.bind((iface, 0))
-                        sock_fd = raw_sock.fileno()
                         
-                        # Try to attach BPF to socket using setsockopt
-                        if fn is not None:
-                            import ctypes
-                            SO_ATTACH_BPF = 50
-                            raw_sock.setsockopt(sock_module.SOL_SOCKET, SO_ATTACH_BPF, fn.fd)
-                            attached = True
-                            self._ebpf_socket = raw_sock  # Keep reference to prevent GC
-                            logger.info("Attached using SO_ATTACH_BPF setsockopt")
+                        SO_ATTACH_BPF = 50
+                        raw_sock.setsockopt(sock_module.SOL_SOCKET, SO_ATTACH_BPF, fn.fd)
+                        attached = True
+                        self._ebpf_socket = raw_sock
+                        logger.info(f"Attached using SO_ATTACH_BPF setsockopt, fn.fd={fn.fd}")
                     except Exception as e:
                         logger.info(f"Manual socket attachment failed: {e}")
                 
