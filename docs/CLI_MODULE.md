@@ -1,5 +1,8 @@
 # TrapNinja CLI Module
 
+**Version:** 2.1.0  
+**Last Updated:** December 31, 2025
+
 ## Overview
 
 The CLI module provides a clean, modular command-line interface for TrapNinja. The code is organized by functional concern for better maintainability, testability, and extensibility.
@@ -13,10 +16,18 @@ trapninja/cli/
 ├── __init__.py              # Public API exports
 ├── parser.py                # Argument parsing configuration
 ├── validation.py            # Input validation and sanitization
+├── executor.py              # Command orchestration and execution
+├── output.py                # Output formatting utilities
 ├── daemon_commands.py       # Daemon control commands
 ├── filtering_commands.py    # IP/OID filtering commands
-├── ha_commands.py          # High Availability commands
-└── executor.py             # Command orchestration and execution
+├── ha_commands.py           # High Availability commands
+├── cache_commands.py        # Redis cache commands
+├── stats_commands.py        # Statistics display commands
+├── stats.py                 # Statistics CLI helpers
+├── shadow_commands.py       # Shadow/mirror mode commands
+├── snmpv3_commands.py       # SNMPv3 credential management
+├── sync_commands.py         # Config sync commands
+└── failover_commands.py     # Failover replay commands
 ```
 
 ### Design Principles
@@ -89,6 +100,28 @@ if valid_oid:
     pass
 ```
 
+### `executor.py`
+**Purpose**: Orchestrate command execution based on parsed arguments
+
+**Key Functions**:
+- `execute_command()`: Main dispatcher that routes to appropriate handler
+- `update_global_config()`: Apply command-line config overrides
+
+**Features**:
+- Centralized command routing
+- Global configuration updates
+- Error handling and exit code management
+- Support for foreground daemon mode
+
+### `output.py`
+**Purpose**: Consistent output formatting across CLI commands
+
+**Key Functions**:
+- `format_table()`: Generate formatted ASCII tables
+- `format_json()`: JSON output with optional pretty printing
+- `print_error()`: Standardized error output
+- `print_success()`: Standardized success messages
+
 ### `daemon_commands.py`
 **Purpose**: Handle daemon lifecycle operations
 
@@ -99,16 +132,13 @@ if valid_oid:
 - `status()`: Check daemon status
 - `run_foreground()`: Run in foreground with optional debug mode
 
-**Example**:
-```python
-from trapninja.cli import daemon_commands
-
-# Start the daemon
-exit_code = daemon_commands.start()
-
-# Check status
-exit_code = daemon_commands.status()
-```
+**CLI Options**:
+- `--start`: Start as daemon
+- `--stop`: Stop daemon
+- `--restart`: Restart daemon
+- `--status`: Show status
+- `--foreground`: Run in foreground
+- `--debug`: Enable debug logging
 
 ### `filtering_commands.py`
 **Purpose**: Manage IP and OID filtering rules
@@ -124,22 +154,19 @@ exit_code = daemon_commands.status()
 - `unblock_oid()`: Remove OID from blocked list
 - `list_blocked_oids()`: Display all blocked OIDs
 
+**CLI Options**:
+- `--block-ip IP`: Block an IP address
+- `--unblock-ip IP`: Unblock an IP address
+- `--list-blocked-ips`: List all blocked IPs
+- `--block-oid OID`: Block a trap OID
+- `--unblock-oid OID`: Unblock a trap OID
+- `--list-blocked-oids`: List all blocked OIDs
+
 **Features**:
 - Atomic file operations (write to temp, then rename)
 - Thread-safe with per-file locking
 - Configuration caching for performance
 - Automatic validation of all inputs
-
-**Example**:
-```python
-from trapninja.cli import filtering_commands
-
-# Block an IP address
-success = filtering_commands.block_ip("10.0.1.50")
-
-# List blocked OIDs
-filtering_commands.list_blocked_oids()
-```
 
 ### `ha_commands.py`
 **Purpose**: Configure and manage High Availability
@@ -149,43 +176,133 @@ filtering_commands.list_blocked_oids()
 - `disable_ha()`: Disable HA functionality
 - `show_ha_status()`: Display detailed HA status
 - `force_failover()`: Manually trigger failover (maintenance)
+- `promote()`: Promote to PRIMARY
+- `demote()`: Demote to SECONDARY
 
-**Example**:
-```python
-from trapninja.cli import ha_commands
+**CLI Options**:
+- `--ha-status`: Show HA status
+- `--ha-help`: Show HA help
+- `--promote`: Promote to PRIMARY
+- `--demote`: Demote to SECONDARY
+- `--force-failover`: Force immediate failover
+- `--configure-ha`: Configure HA settings
+- `--ha-mode MODE`: Set HA mode (primary/secondary)
+- `--ha-peer-host HOST`: Set peer hostname/IP
+- `--ha-priority N`: Set election priority
 
-# Configure as primary
-success = ha_commands.configure_ha(
-    mode="primary",
-    peer_host="192.168.1.102",
-    priority=150
-)
-
-# Check HA status
-ha_commands.show_ha_status()
-```
-
-### `executor.py`
-**Purpose**: Orchestrate command execution based on parsed arguments
+### `cache_commands.py`
+**Purpose**: Redis cache operations
 
 **Key Functions**:
-- `execute_command()`: Main dispatcher that routes to appropriate handler
-- `update_global_config()`: Apply command-line config overrides
+- `cache_status()`: Show cache connection and statistics
+- `cache_query()`: Preview cached traps for time window
+- `cache_replay()`: Replay cached traps with rate limiting
+- `cache_clear()`: Clear cached entries
 
-**Features**:
-- Centralized command routing
-- Global configuration updates
-- Error handling and exit code management
-- Support for foreground daemon mode
+**CLI Options**:
+- `--cache-status`: Show cache status
+- `--cache-help`: Show cache help
+- `--cache-query`: Query cached traps
+- `--cache-replay`: Replay cached traps
+- `--cache-clear`: Clear cache
+- `--destination DEST`: Target destination for cache operations
+- `--from TIME`: Start time for query/replay
+- `--to TIME`: End time for query/replay
+- `--rate-limit N`: Rate limit for replay (traps/sec)
+- `--dry-run`: Preview without executing
 
-**Example**:
-```python
-from trapninja.cli import create_argument_parser, execute_command
+### `stats_commands.py`
+**Purpose**: Display granular statistics
 
-parser = create_argument_parser()
-args = parser.parse_args()
-exit_code = execute_command(args)
-```
+**Key Functions**:
+- `stats_summary()`: Overall statistics summary
+- `stats_top_ips()`: Top source IPs by volume/rate
+- `stats_top_oids()`: Top OIDs by volume/rate
+- `stats_ip()`: Detailed stats for specific IP
+- `stats_oid()`: Detailed stats for specific OID
+- `stats_destinations()`: Per-destination statistics
+- `stats_export()`: Export statistics to file
+
+**CLI Options**:
+- `--stats-summary`: Show statistics summary
+- `--stats-help`: Show statistics help
+- `--stats-top-ips`: Show top source IPs
+- `--stats-top-oids`: Show top OIDs
+- `--stats-ip`: Show stats for specific IP
+- `--stats-oid`: Show stats for specific OID
+- `--stats-destinations`: Show destination stats
+- `--stats-export`: Export statistics
+- `-n, --count N`: Number of items to show
+- `-s, --sort FIELD`: Sort by field (total, rate, blocked, peak)
+- `-f, --format FMT`: Export format (json, prometheus)
+
+### `stats.py`
+**Purpose**: Statistics CLI helper functions
+
+**Key Functions**:
+- `format_rate()`: Format rate values with units
+- `format_duration()`: Human-readable duration strings
+- `format_timestamp()`: Format timestamps consistently
+- `calculate_percentages()`: Calculate percentage values
+
+### `shadow_commands.py`
+**Purpose**: Shadow and mirror mode operations
+
+**Key Functions**:
+- `enable_shadow_mode()`: Enable shadow mode (receive only, no forward)
+- `enable_mirror_mode()`: Enable mirror mode (copy to secondary destination)
+- `disable_shadow_mode()`: Disable shadow/mirror modes
+- `show_shadow_status()`: Display current mode status
+
+**CLI Options**:
+- `--shadow-mode`: Enable shadow mode
+- `--mirror-mode`: Enable mirror mode
+- `--parallel`: Run shadow in parallel
+
+### `snmpv3_commands.py`
+**Purpose**: SNMPv3 credential management
+
+**Key Functions**:
+- `add_user()`: Add SNMPv3 user credentials
+- `remove_user()`: Remove SNMPv3 user
+- `list_users()`: List configured users
+- `show_status()`: Show SNMPv3 decryption status
+
+**CLI Options**:
+- `--snmpv3-status`: Show SNMPv3 status
+- `--snmpv3-add-user`: Add SNMPv3 user
+- `--snmpv3-remove-user`: Remove SNMPv3 user
+- `--snmpv3-list-users`: List configured users
+- `--username USER`: Username for operations
+- `--engine-id ID`: SNMPv3 engine ID
+- `--auth-protocol PROTO`: Authentication protocol
+- `--auth-passphrase PASS`: Auth passphrase
+- `--priv-protocol PROTO`: Privacy protocol
+- `--priv-passphrase PASS`: Privacy passphrase
+
+### `sync_commands.py`
+**Purpose**: Configuration synchronization between HA nodes
+
+**Key Functions**:
+- `sync_configs()`: Manually trigger config sync
+- `sync_status()`: Show sync status
+
+**CLI Options**:
+- `--ha-sync`: Trigger config synchronization
+- `--sync-status`: Show synchronization status
+
+### `failover_commands.py`
+**Purpose**: Failover replay operations
+
+**Key Functions**:
+- `failover_status()`: Show failover replay status
+- `failover_replay()`: Manually trigger failover replay
+- `failover_gaps()`: Show detected gaps
+
+**CLI Options**:
+- `--failover-status`: Show failover replay status
+- `--failover-replay`: Trigger failover replay
+- `--failover-gaps`: Show detected outage gaps
 
 ## Usage Examples
 
@@ -204,6 +321,14 @@ python -m trapninja.main --configure-ha \
 # Block an IP
 python -m trapninja.main --block-ip 10.0.1.50
 
+# View statistics
+python -m trapninja.main --stats-summary
+python -m trapninja.main --stats-top-ips -n 20 -s rate
+
+# Cache operations
+python -m trapninja.main --cache-status
+python -m trapninja.main --cache-replay --destination default --from "-2h" --to "-1h"
+
 # Run in foreground with debug
 python -m trapninja.main --foreground --debug
 ```
@@ -215,6 +340,8 @@ from trapninja.cli import (
     daemon_commands,
     filtering_commands,
     ha_commands,
+    cache_commands,
+    stats_commands,
     InputValidator
 )
 
@@ -230,6 +357,12 @@ ha_commands.configure_ha(
     peer_host="192.168.1.101",
     priority=100
 )
+
+# Check cache status
+cache_commands.cache_status()
+
+# Get statistics
+stats_commands.stats_summary()
 
 # Start daemon
 daemon_commands.start()
@@ -266,20 +399,6 @@ The CLI module uses `ConfigManager` for thread-safe configuration file operation
 - **Thread-safe**: Per-file locking prevents race conditions
 - **Cache invalidation**: Automatic when files are updated
 
-**Example**:
-```python
-from trapninja.cli.filtering_commands import config_manager
-
-# Load configuration with caching
-config = config_manager.load_json("/path/to/config.json", default=[])
-
-# Save with atomic write
-success = config_manager.save_json("/path/to/config.json", data)
-
-# Invalidate cache when external changes occur
-config_manager.invalidate_cache("/path/to/config.json")
-```
-
 ## Security Considerations
 
 ### Input Validation
@@ -306,26 +425,6 @@ if validated_ip:
 # Never use raw user input
 block_ip(user_input)  # UNSAFE!
 ```
-
-## Migration from Old main.py
-
-The new structure is backward compatible. To migrate:
-
-1. **Backup old main.py**:
-   ```bash
-   cp trapninja/main.py trapninja/main_backup.py
-   ```
-
-2. **Replace with new version**:
-   ```bash
-   cp trapninja/main_refactored.py trapninja/main.py
-   ```
-
-3. **Test all commands**:
-   ```bash
-   python -m trapninja.main --status
-   python -m trapninja.main --list-blocked-ips
-   ```
 
 ## Extension Guidelines
 
@@ -370,52 +469,19 @@ For entirely new command categories:
 3. Add commands to parser
 4. Route in executor
 
-## Benefits of This Structure
+## Command Reference Summary
 
-1. **Maintainability**: Clear organization makes code easy to find and modify
-2. **Testability**: Each module can be unit tested independently
-3. **Extensibility**: Adding new commands is straightforward
-4. **Security**: Centralized validation prevents injection attacks
-5. **Performance**: Caching and LRU decorators optimize repeated operations
-6. **Professionalism**: Industry-standard modular architecture
-
-## Troubleshooting
-
-### Import Errors
-
-If you get import errors, ensure you're running from the correct directory:
-
-```bash
-# Run from project root
-python -m trapninja.main --status
-
-# Or with full path
-python /opt/trapninja/trapninja/main.py --status
-```
-
-### Validation Failures
-
-If validation consistently fails for valid input:
-
-```python
-# Check validation logic
-from trapninja.cli.validation import InputValidator
-
-# Test specific validator
-result = InputValidator.validate_ip("192.168.1.1")
-print(f"Validation result: {result}")
-```
-
-### Cache Issues
-
-If configuration changes aren't being picked up:
-
-```python
-from trapninja.cli.filtering_commands import config_manager
-
-# Force cache invalidation
-config_manager.invalidate_cache()
-```
+| Category | Commands |
+|----------|----------|
+| **Daemon** | `--start`, `--stop`, `--restart`, `--status`, `--foreground` |
+| **Filtering** | `--block-ip`, `--unblock-ip`, `--block-oid`, `--unblock-oid`, `--list-blocked-*` |
+| **HA** | `--ha-status`, `--promote`, `--demote`, `--force-failover`, `--ha-sync` |
+| **Cache** | `--cache-status`, `--cache-query`, `--cache-replay`, `--cache-clear` |
+| **Statistics** | `--stats-summary`, `--stats-top-ips`, `--stats-top-oids`, `--stats-ip`, `--stats-oid` |
+| **SNMPv3** | `--snmpv3-status`, `--snmpv3-add-user`, `--snmpv3-remove-user`, `--snmpv3-list-users` |
+| **Shadow** | `--shadow-mode`, `--mirror-mode` |
+| **Failover** | `--failover-status`, `--failover-replay`, `--failover-gaps` |
+| **Help** | `--help`, `--ha-help`, `--cache-help`, `--stats-help` |
 
 ## Performance Considerations
 
@@ -424,19 +490,10 @@ config_manager.invalidate_cache()
 - **Configuration Caching**: Reduces file I/O for frequently accessed configs
 - **Atomic Operations**: Write operations are fast due to temp file strategy
 
-## Future Enhancements
+## Related Documentation
 
-Potential improvements to consider:
-
-1. **Async Operations**: Support async/await for concurrent operations
-2. **Plugin System**: Allow third-party command extensions
-3. **Shell Completion**: Add bash/zsh completion support
-4. **Interactive Mode**: REPL-style interface for multiple commands
-5. **Configuration Validation**: Schema validation with Pydantic
-6. **Audit Logging**: Track all configuration changes
-
----
-
-**Last Updated**: 2025-01-15  
-**Module Version**: 2.0.0  
-**Python Compatibility**: 3.6+
+| Document | Contents |
+|----------|----------|
+| [CLI.md](CLI.md) | Full CLI reference with all options |
+| [USER_GUIDE.md](USER_GUIDE.md) | User-friendly operations guide |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture overview |

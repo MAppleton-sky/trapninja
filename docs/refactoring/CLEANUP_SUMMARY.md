@@ -56,6 +56,10 @@ processing/
 | `README.md` | Version updated to 0.7.13 |
 | `dev/CHANGELOG.md` | Added 0.7.13 release notes |
 | `docs/refactoring/REFACTORING_PLAN.md` | Status updated, checklist completed |
+| `docs/ARCHITECTURE.md` | Complete rewrite with all packages |
+| `docs/CLI_MODULE.md` | Added all 15 CLI modules |
+| `docs/DIRECTORY_STRUCTURE.md` | Comprehensive package listing |
+| `docs/USER_GUIDE.md` | Version updated |
 
 ## Code Reduction
 
