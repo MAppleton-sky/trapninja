@@ -654,18 +654,22 @@ class MinimalTrapCapture:
 
         if ebpf_success:
             try:
-                # Open the perf buffer for events from kernel
-                self.bpf["events"].open_perf_buffer(self._process_event)
-                logger.info("eBPF perf buffer opened successfully")
+                # Only set up perf buffer if program uses perf events
+                if getattr(self, '_uses_perf', False):
+                    # Open the perf buffer for events from kernel
+                    self.bpf["events"].open_perf_buffer(self._process_event)
+                    logger.info("eBPF perf buffer opened successfully")
 
-                # Start the polling thread
-                self.poller_thread = threading.Thread(target=self._poll_events, daemon=True)
-                self.poller_thread.start()
+                    # Start the polling thread
+                    self.poller_thread = threading.Thread(target=self._poll_events, daemon=True)
+                    self.poller_thread.start()
+                else:
+                    logger.info("Simple eBPF filter active (no perf events)")
 
-                # Also start raw capture as we need to actually get the packets
+                # Start raw capture - eBPF filter will pre-filter packets
                 self._init_raw_capture()
 
-                logger.info(f"eBPF-based packet capture started on interface {self.interface}")
+                logger.info(f"eBPF-accelerated packet capture started on interface {self.interface}")
                 return True
             except Exception as e:
                 logger.error(f"Failed to start eBPF capture: {e}")
