@@ -381,26 +381,7 @@ class MinimalTrapCapture:
             function_name = "packet_filter"
 
             try:
-                # Get the function object (required for newer BCC versions)
-                # Try multiple methods for compatibility across BCC versions
-                fn = None
-                
-                # Method 1: Try load_func (newer BCC API)
-                try:
-                    fn = self.bpf.load_func(function_name, BPF.SOCKET_FILTER)
-                    logger.debug("Loaded BPF function using load_func()")
-                except (AttributeError, Exception) as e:
-                    logger.debug(f"load_func not available or failed: {e}")
-                
-                # Method 2: Try accessing function directly from bpf object
-                if fn is None:
-                    try:
-                        fn = self.bpf[function_name]
-                        logger.debug("Loaded BPF function using bpf[name] accessor")
-                    except (KeyError, TypeError) as e:
-                        logger.debug(f"Direct accessor not available: {e}")
-                
-                # Attach the filter
+                # Determine interface
                 if self.interface == "any" or self.interface == "all":
                     logger.info("Attaching eBPF filter to all interfaces")
                     iface = ""
@@ -408,54 +389,97 @@ class MinimalTrapCapture:
                     logger.info(f"Attaching eBPF filter to interface: {self.interface}")
                     iface = self.interface
                 
+                # Get the function object (required for newer BCC versions)
+                # Try multiple methods for compatibility across BCC versions
+                fn = None
+                
+                # Method 1: Try load_func (newer BCC API)
+                # Need to check if SOCKET_FILTER constant exists
+                socket_filter_type = getattr(BPF, 'SOCKET_FILTER', None)
+                if socket_filter_type is not None:
+                    try:
+                        fn = self.bpf.load_func(function_name, socket_filter_type)
+                        logger.info("Loaded BPF function using load_func()")
+                    except Exception as e:
+                        logger.info(f"load_func() method failed: {e}")
+                        fn = None
+                else:
+                    logger.info("BPF.SOCKET_FILTER not available, skipping load_func method")
+                
+                # Method 2: Try accessing function directly from bpf object
+                if fn is None:
+                    try:
+                        fn = self.bpf[function_name]
+                        logger.info("Loaded BPF function using bpf[name] accessor")
+                    except (KeyError, TypeError) as e:
+                        logger.info(f"bpf[name] accessor failed: {e}")
+                        fn = None
+                
                 # Try different attachment methods based on what we have
                 attached = False
                 
-                # Method 1: Use function object with attach_raw_socket (newer API)
-                if fn is not None:
+                # Method A: Use function object with BPF.attach_raw_socket as class method
+                if fn is not None and not attached:
                     try:
-                        BPF.attach_raw_socket(fn, iface)
-                        attached = True
-                        logger.debug("Attached using BPF.attach_raw_socket(fn, iface)")
-                    except TypeError:
-                        # Try as instance method
-                        try:
-                            self.bpf.attach_raw_socket(fn, iface)
+                        sock_fd = BPF.attach_raw_socket(fn, iface)
+                        if sock_fd is not None:
                             attached = True
-                            logger.debug("Attached using self.bpf.attach_raw_socket(fn, iface)")
-                        except Exception as e:
-                            logger.debug(f"Instance method attach failed: {e}")
-                
-                # Method 2: Try string-based attach (older API)
-                if not attached:
-                    try:
-                        self.bpf.attach_raw_socket(function_name, iface)
-                        attached = True
-                        logger.debug("Attached using string function name (older API)")
-                    except TypeError as e:
-                        logger.debug(f"String-based attach failed: {e}")
-                
-                # Method 3: Try attach_socket_filter if available
-                if not attached:
-                    try:
-                        if hasattr(self.bpf, 'attach_socket_filter'):
-                            sock_fd = self._create_raw_socket(iface)
-                            if sock_fd:
-                                self.bpf.attach_socket_filter(sock_fd, function_name)
-                                attached = True
-                                logger.debug("Attached using attach_socket_filter")
+                            logger.info("Attached using BPF.attach_raw_socket(fn, iface) class method")
                     except Exception as e:
-                        logger.debug(f"attach_socket_filter failed: {e}")
+                        logger.info(f"BPF.attach_raw_socket class method failed: {e}")
+                
+                # Method B: Use function object with instance method
+                if fn is not None and not attached:
+                    try:
+                        sock_fd = self.bpf.attach_raw_socket(fn, iface)
+                        if sock_fd is not None:
+                            attached = True
+                            logger.info("Attached using self.bpf.attach_raw_socket(fn, iface)")
+                    except Exception as e:
+                        logger.info(f"Instance attach_raw_socket with fn failed: {e}")
+                
+                # Method C: Try string-based attach (older API)
+                if not attached:
+                    try:
+                        sock_fd = self.bpf.attach_raw_socket(function_name, iface)
+                        if sock_fd is not None:
+                            attached = True
+                            logger.info("Attached using string function name (older API)")
+                    except Exception as e:
+                        logger.info(f"String-based attach_raw_socket failed: {e}")
+                
+                # Method D: Try creating socket and using attach_xdp or other methods
+                if not attached:
+                    try:
+                        # Create raw socket manually
+                        import socket as sock_module
+                        raw_sock = sock_module.socket(sock_module.AF_PACKET, sock_module.SOCK_RAW, sock_module.htons(0x0003))
+                        if iface:
+                            raw_sock.bind((iface, 0))
+                        sock_fd = raw_sock.fileno()
+                        
+                        # Try to attach BPF to socket using setsockopt
+                        if fn is not None:
+                            import ctypes
+                            SO_ATTACH_BPF = 50
+                            raw_sock.setsockopt(sock_module.SOL_SOCKET, SO_ATTACH_BPF, fn.fd)
+                            attached = True
+                            self._ebpf_socket = raw_sock  # Keep reference to prevent GC
+                            logger.info("Attached using SO_ATTACH_BPF setsockopt")
+                    except Exception as e:
+                        logger.info(f"Manual socket attachment failed: {e}")
                 
                 if attached:
                     logger.info("eBPF filter attached successfully")
                     return True
                 else:
-                    logger.error("All eBPF attachment methods failed")
+                    logger.warning("All eBPF attachment methods failed - will use raw capture fallback")
                     return False
                     
             except Exception as e:
-                logger.error(f"Failed to attach eBPF filter: {e}")
+                logger.error(f"Unexpected error during eBPF attachment: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
                 return False
 
         except Exception as e:
