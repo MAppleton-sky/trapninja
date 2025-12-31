@@ -29,6 +29,7 @@ from .parser import (
 from .forwarder import (
     forward_packet,
     get_socket_pool,
+    shutdown_forwarder,
     SocketPool,
 )
 
@@ -55,6 +56,7 @@ __all__ = [
     # Forwarder
     'forward_packet',
     'get_socket_pool',
+    'shutdown_forwarder',
     'SocketPool',
     # Worker
     'PacketWorker',

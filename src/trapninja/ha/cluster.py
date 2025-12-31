@@ -100,6 +100,9 @@ class HACluster:
         self.peer_priority: int = 0
         self.peer_uptime: float = 0
         
+        # Failover replay tracking
+        self._failover_gap_start: Optional[float] = None
+        
         # Flags
         self.split_brain_detected = False
         self.manual_override = False
@@ -265,7 +268,8 @@ class HACluster:
                 "last_trap_time": self.last_trap_time,
                 "manual_override": self.manual_override,
                 "auto_failback": self.config.auto_failback,
-                "enabled": self.config.enabled
+                "enabled": self.config.enabled,
+                "failover_gap_pending": self._failover_gap_start is not None
             }
             
             # Add config sync status if available
@@ -559,8 +563,8 @@ class HACluster:
             return
         
         if self.current_state != HAState.PRIMARY:
-            logger.debug("Config request received but we are not PRIMARY")
-            response = {'type': 'error', 'error': 'Not PRIMARY'}
+            logger.warning(f"Config request received but we are {self.current_state.name}, not PRIMARY")
+            response = {'type': 'error', 'error': f'Not PRIMARY (currently {self.current_state.name})'}
             conn.send(json.dumps(response).encode('utf-8'))
             return
         
@@ -820,6 +824,142 @@ class HACluster:
         logger.info("Completing failover to PRIMARY")
         self._set_state(HAState.PRIMARY)
         self.split_brain_detected = False
+        
+        # CRITICAL: Replay missed traps from the failover gap
+        # This runs AFTER we become PRIMARY to ensure zero trap loss
+        if self._failover_gap_start:
+            self._trigger_failover_replay()
+        else:
+            logger.info("No failover gap recorded - replay not needed (clean failover)")
+    
+    def _trigger_failover_replay(self):
+        """
+        Trigger replay of traps from the failover gap window.
+        
+        This method queries the LOCAL cache for traps received during
+        the time window between the last known good heartbeat from the
+        peer (when we know PRIMARY was alive) and now.
+        
+        Both PRIMARY and SECONDARY receive and cache traps, but only
+        PRIMARY forwards them. After failover, SECONDARY (now PRIMARY)
+        replays traps from its own cache to fill the gap.
+        
+        Timeline:
+            T=0:00:00  Last heartbeat from PRIMARY (peer_last_seen)
+            T=0:00:03  PRIMARY fails (unknown to us yet)
+            T=0:00:06  Heartbeat timeout detected
+            T=0:00:08  We become PRIMARY
+            T=0:00:08  Replay traps from T=0:00:00 to T=0:00:08
+        """
+        gap_start = self._failover_gap_start
+        gap_end = time.time()
+        gap_seconds = gap_end - gap_start
+        
+        # Convert to human-readable timestamps
+        from datetime import datetime
+        start_str = datetime.fromtimestamp(gap_start).strftime('%H:%M:%S.%f')[:-3]
+        end_str = datetime.fromtimestamp(gap_end).strftime('%H:%M:%S.%f')[:-3]
+        
+        logger.info(f"========================================")
+        logger.info(f"FAILOVER REPLAY: Gap detected")
+        logger.info(f"  Gap start: {start_str}")
+        logger.info(f"  Gap end:   {end_str}")
+        logger.info(f"  Duration:  {gap_seconds:.1f} seconds")
+        logger.info(f"========================================")
+        
+        # Clear the gap start now that we've captured it
+        self._failover_gap_start = None
+        
+        # Don't replay if gap is too small (less than 1 second)
+        if gap_seconds < 1.0:
+            logger.info(f"Gap too small ({gap_seconds:.1f}s < 1.0s) - skipping replay")
+            return
+        
+        # Don't replay if gap is too large (more than 5 minutes - something is wrong)
+        if gap_seconds > 300:
+            logger.warning(f"Gap too large ({gap_seconds:.1f}s > 300s) - limiting to 5 minutes")
+            gap_start = gap_end - 300
+            gap_seconds = 300
+        
+        # Try to get cache and replay engine
+        try:
+            from ..cache import get_cache
+            from ..cache.replay import ReplayEngine
+            from datetime import datetime
+            
+            cache = get_cache()
+            if not cache or not cache.available:
+                logger.warning("Cache not available - cannot replay failover gap")
+                logger.warning("Traps during failover window may have been lost")
+                return
+            
+            # Create replay engine
+            replay_engine = ReplayEngine(cache)
+            
+            # Convert timestamps to datetime
+            start_dt = datetime.fromtimestamp(gap_start)
+            end_dt = datetime.fromtimestamp(gap_end)
+            
+            # Get list of destinations to replay
+            destinations = cache.get_destinations()
+            if not destinations:
+                logger.info("No destinations found in cache - nothing to replay")
+                return
+            
+            logger.info(f"Found {len(destinations)} destination(s) in cache: {destinations}")
+            
+            # Replay each destination
+            total_sent = 0
+            total_failed = 0
+            
+            for dest in destinations:
+                # Count entries first
+                try:
+                    count = cache.count_range(dest, start_dt, end_dt)
+                    if count == 0:
+                        logger.info(f"No traps to replay for destination '{dest}' (0 in cache)")
+                        continue
+                    
+                    logger.info(f"Replaying {count} traps for destination '{dest}'")
+                    
+                    # Replay with rate limiting (2000/sec default for failover)
+                    result = replay_engine.replay(
+                        destination=dest,
+                        start=start_dt,
+                        end=end_dt,
+                        rate_limit=2000,  # High rate for failover recovery
+                        dry_run=False,
+                        mark_as_replay=True
+                    )
+                    
+                    total_sent += result.sent
+                    total_failed += result.failed
+                    
+                    logger.info(
+                        f"  Destination '{dest}': sent={result.sent}, "
+                        f"failed={result.failed}, rate={result.rate_achieved:.0f}/s"
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"Error replaying destination '{dest}': {e}")
+                    continue
+            
+            logger.info(f"========================================")
+            logger.info(f"FAILOVER REPLAY COMPLETE")
+            logger.info(f"  Total sent: {total_sent}")
+            logger.info(f"  Total failed: {total_failed}")
+            logger.info(f"  Gap duration: {gap_seconds:.1f}s")
+            if total_sent == 0 and total_failed == 0:
+                logger.info(f"  Note: No traps needed replay (cache was empty for gap window)")
+            logger.info(f"========================================")
+            
+        except ImportError as e:
+            logger.error(f"Failed to import cache/replay modules: {e}")
+            logger.error("Failover replay not available - traps may have been lost")
+        except Exception as e:
+            logger.error(f"Error during failover replay: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
     
     def _check_peer_timeout(self):
         """Check if peer has timed out."""
@@ -833,6 +973,12 @@ class HACluster:
             
             if self.current_state == HAState.SECONDARY:
                 logger.info("Peer timeout - claiming PRIMARY")
+                # CRITICAL: Save the last known good heartbeat time BEFORE clearing
+                # This is used for failover replay to determine the gap window
+                self._failover_gap_start = self.peer_last_seen
+                from datetime import datetime
+                gap_start_str = datetime.fromtimestamp(self._failover_gap_start).strftime('%H:%M:%S.%f')[:-3]
+                logger.info(f"Failover gap start recorded: {gap_start_str} (will replay from this time)")
                 self._claim_primary()
             
             self.peer_last_seen = None

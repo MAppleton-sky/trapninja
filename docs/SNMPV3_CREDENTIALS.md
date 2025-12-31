@@ -1,6 +1,6 @@
 # TrapNinja SNMPv3 Credentials Guide
 
-**Version 0.7.0 (Beta)**
+**Version 0.7.12 (Beta)**
 
 Complete guide to managing SNMPv3 user credentials for trap decryption.
 
@@ -548,4 +548,4 @@ SNMPv3 passphrases must be at least 8 characters. If your network element requir
 
 ---
 
-*TrapNinja v0.7.0 (Beta)*
+*TrapNinja v0.7.12 (Beta)*

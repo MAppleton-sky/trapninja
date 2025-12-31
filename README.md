@@ -227,7 +227,7 @@ Configuration files are stored in `/etc/trapninja/` (production) or `./config/` 
 
 ## Version
 
-TrapNinja 0.7.0 (Beta)
+TrapNinja 0.7.13 (Beta)
 
 See [dev/CHANGELOG.md](dev/CHANGELOG.md) for version history.
 

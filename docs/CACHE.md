@@ -284,6 +284,23 @@ The cache system works seamlessly with TrapNinja's HA configuration:
 - **Replay from either**: Replay can be triggered from either node
 - **Shared Redis**: Both nodes can share a single Redis instance
 - **Independent Redis**: Each node can have its own Redis (no cross-node replay)
+- **Automatic Failover Replay**: Gaps during failover are automatically detected and replayed
+
+### Automatic Failover Replay
+
+With shared Redis, TrapNinja can automatically detect and replay traps that may have been missed during failover:
+
+```
+Failover Timeline (with automatic replay):
+  T=0:00:00  Primary forwarding, updating last_forwarded timestamp
+  T=0:00:05  Primary fails (last trap forwarded at T=0:00:05)
+  T=0:00:08  Secondary becomes PRIMARY
+  T=0:00:08  Gap detected: 3 seconds
+  T=0:00:09  Auto-replay starts from cache
+  T=0:00:10  All missed traps replayed - zero loss!
+```
+
+See [FAILOVER_REPLAY.md](FAILOVER_REPLAY.md) for detailed configuration.
 
 Recommended HA setup with shared Redis:
 

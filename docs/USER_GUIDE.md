@@ -1,6 +1,6 @@
  # TrapNinja User Guide
 
-**Version 0.7.4 (Beta)**
+**Version 0.7.12 (Beta)**
 
 A high-performance SNMP trap forwarder for telecommunications environments.
 
@@ -759,4 +759,4 @@ python3.9 -O trapninja.py --stats-help
 
 ---
 
-*TrapNinja v0.7.4 (Beta) - Target production release: Q2 2025*
+*TrapNinja v0.7.12 (Beta) - Target production release: Q2 2025*

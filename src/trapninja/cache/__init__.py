@@ -9,6 +9,7 @@ Components:
 - TrapCache: Redis Streams-based cache with automatic retention
 - ReplayEngine: Time-window based trap replay with rate limiting
 - RetentionManager: Background trimmer for rolling retention window
+- FailoverReplayManager: Automatic gap detection and replay during failover
 
 Usage:
     from trapninja.cache import TrapCache, ReplayEngine, get_cache
@@ -27,9 +28,15 @@ Usage:
     # Replay traps for a time window
     engine = ReplayEngine(cache)
     engine.replay("voice_noc", start_dt, end_dt, rate_limit=500)
+    
+    # Automatic failover replay
+    from trapninja.cache.failover import FailoverReplayManager
+    failover_manager = FailoverReplayManager(cache)
+    failover_manager.on_become_primary()  # Triggers gap detection & replay
 """
 
 __all__ = [
+    # Core cache
     'TrapCache',
     'ReplayEngine',
     'RetentionManager',
@@ -37,6 +44,12 @@ __all__ = [
     'initialize_cache',
     'shutdown_cache',
     'CacheConfig',
+    # Failover replay
+    'FailoverReplayManager',
+    'FailoverReplayConfig',
+    'FailoverTracker',
+    'GapDetector',
+    'GapInfo',
 ]
 
 from .redis_backend import (
@@ -49,3 +62,20 @@ from .redis_backend import (
 )
 
 from .replay import ReplayEngine
+
+# Failover replay components (may not be available if dependencies missing)
+try:
+    from .failover import (
+        FailoverReplayManager,
+        FailoverReplayConfig,
+        FailoverTracker,
+        GapDetector,
+        GapInfo,
+    )
+except ImportError:
+    # Failover replay not available
+    FailoverReplayManager = None
+    FailoverReplayConfig = None
+    FailoverTracker = None
+    GapDetector = None
+    GapInfo = None

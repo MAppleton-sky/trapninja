@@ -286,5 +286,5 @@ WORKER_COUNT = cpu_count() * 2
 
 ---
 
-**Version**: 0.5.2 (Beta)  
-**Last Updated**: 2025-01-10
+**Version**: 0.7.12 (Beta)  
+**Last Updated**: 2025-12-31

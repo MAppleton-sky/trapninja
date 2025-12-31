@@ -783,4 +783,4 @@ See `documentation/METRICS.md` for full metrics reference.
 
 ---
 
-**Last Updated**: 2025-06-15
+**Last Updated**: 2025-12-31

@@ -138,7 +138,28 @@ When the PRIMARY node fails:
 2. SECONDARY waits `failover_delay` (2 seconds)
 3. SECONDARY promotes itself to PRIMARY
 4. SECONDARY begins forwarding traps
-5. Total failover time: <5 seconds (typically 3-4 seconds)
+5. **Gap detection**: Check for missed traps during failover
+6. **Auto-replay**: Replay any missed traps from cache
+7. Total failover time: <5 seconds (typically 3-4 seconds)
+
+#### Zero Trap Loss with Failover Replay
+
+With caching enabled, TrapNinja automatically detects and replays traps that arrived during the failover window:
+
+```
+Timeline with Failover Replay:
+  T=0:00:00  Primary forwarding (last trap at T=0:00:00)
+  T=0:00:03  Primary fails
+  T=0:00:06  Secondary detects failure
+  T=0:00:08  Secondary becomes PRIMARY
+  T=0:00:08  Gap detected: ~5 seconds
+  T=0:00:09  Auto-replay: 100-500 traps from cache
+  T=0:00:10  Normal operation resumes
+  
+  Result: ZERO TRAP LOSS
+```
+
+See [FAILOVER_REPLAY.md](FAILOVER_REPLAY.md) for detailed configuration.
 
 ### Manual Failover (Maintenance)
 
