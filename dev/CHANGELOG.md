@@ -16,6 +16,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.13] - 2025-12-31
+
+### Changed
+
+#### Code Cleanup: Removed Legacy Redundant Modules (~76KB Reduction)
+- **Removed `ha.py` (36KB)** - Legacy monolithic HA implementation that was completely
+  replaced by the modular `ha/` package. All imports resolve to `ha/__init__.py`.
+  The package provides better organization:
+  - `ha/state.py` - HA state machine
+  - `ha/messages.py` - HA message types
+  - `ha/config.py` - Configuration management
+  - `ha/cluster.py` - Main HACluster implementation
+  - `ha/api.py` - Public API functions
+  - `ha/sync/` - Configuration synchronization
+- **Removed `packet_processor.py` (40KB)** - Duplicated functionality from the
+  `processing/` package. Updated `network.py` to use `processing.start_workers`
+  and `processing.forward_packet` instead.
+- **Updated `processing/__init__.py`** to export all necessary functions:
+  `forward_packet`, `start_workers`, `shutdown_forwarder`, `SocketPool`
+
+### Documentation
+- Added `docs/refactoring/REFACTORING_PLAN.md` documenting the cleanup process
+- Backups retained as `*.bak` files for safety during verification period
+
+### Technical Notes
+- All public APIs preserved through re-exports - no breaking changes
+- Import statements simplified: `from .ha import ...` resolves to package
+- Network module now uses processing package for all forwarding operations
+
+---
+
 ## [0.7.12] - 2025-12-29
 
 ### Fixed
@@ -921,7 +952,9 @@ Before releasing 1.0.0, we need:
 
 | Version | Date | Type | Key Features | Status |
 |---------|------|------|--------------|--------|
-| **0.7.11** | 2025-12-24 | Fix | Config sync init fix, pass config_dir to HACluster | **Current** |
+| **0.7.13** | 2025-12-31 | Cleanup | Code cleanup, removed ~76KB redundant code | **Current** |
+| 0.7.12 | 2025-12-29 | Fix | Daemon restart crash fix, startup verification improvements | Beta |
+| 0.7.11 | 2025-12-24 | Fix | Config sync init fix, pass config_dir to HACluster | Beta |
 | 0.7.10 | 2025-12-24 | Fix | HA config sync working, Secondary pulls on startup | Beta |
 | 0.7.8 | 2025-12-19 | Enhancement | Enhanced Prometheus export with peak rates | Beta |
 | 0.7.7 | 2025-12-19 | Enhancement | Peak rate tracking & --sort peak | Beta |

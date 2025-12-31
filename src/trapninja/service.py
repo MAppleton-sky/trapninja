@@ -886,10 +886,11 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
         except Exception as e:
             logger.error(f"Error shutting down shadow mode: {e}")
 
-    # Shutdown packet processor (socket pool, stats)
+    # Shutdown packet processor (socket pool)
     try:
-        from .packet_processor import shutdown as shutdown_processor
-        shutdown_processor()
+        from .processing import shutdown_forwarder
+        shutdown_forwarder()
+        logger.info("Packet processing resources released")
     except ImportError:
         pass
 

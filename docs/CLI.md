@@ -40,6 +40,13 @@ python trapninja.py --foreground
 
 # Run with debug logging
 python trapninja.py --foreground --debug
+
+# Show current configuration
+python trapninja.py --show-config
+python trapninja.py --show-config --json
+
+# Validate configuration
+python trapninja.py --validate-config
 ```
 
 ### IP Filtering
@@ -159,7 +166,141 @@ python trapninja.py --log-level DEBUG
 
 # Override metrics port
 python trapninja.py --metrics-port 9090
+
+# Log rotation options
+python trapninja.py --log-max-size 10M --log-backup-count 5
+python trapninja.py --log-compress  # Compress rotated logs
 ```
+
+### Queue Statistics
+
+```bash
+# Show packet queue statistics and drop analysis
+python trapninja.py --queue-stats
+```
+
+### Failover Replay
+
+```bash
+# Show failover replay status and tracking info
+python trapninja.py --failover-status
+
+# Detect forwarding gaps without replaying
+python trapninja.py --failover-detect
+
+# Manually trigger failover gap replay
+python trapninja.py --failover-replay
+
+# Show comprehensive failover replay help
+python trapninja.py --failover-help
+```
+
+### Shadow/Mirror Mode
+
+```bash
+# Run in shadow mode (observe only, no forwarding)
+python trapninja.py --foreground --shadow-mode
+
+# Run in mirror mode (parallel capture and forward)
+python trapninja.py --foreground --mirror-mode
+
+# Enable parallel capture (use sniff, no port binding)
+python trapninja.py --foreground --parallel
+
+# Log all observed traps to file
+python trapninja.py --foreground --shadow-mode --log-traps /tmp/traps.log
+
+# Force specific capture mode
+python trapninja.py --foreground --capture-mode sniff
+
+# Show shadow mode statistics
+python trapninja.py --shadow-status
+
+# Export shadow mode statistics to JSON
+python trapninja.py --shadow-export
+```
+
+See [SHADOW_MODE.md](SHADOW_MODE.md) for complete shadow/parallel mode documentation.
+
+### Config Sync (HA)
+
+```bash
+# Sync configs with peer based on HA role
+python trapninja.py --ha-sync
+
+# Show configuration synchronization status
+python trapninja.py --sync-status
+
+# Show comprehensive config sync help
+python trapninja.py --sync-help
+```
+
+See [CONFIG_SYNC.md](CONFIG_SYNC.md) for complete config sync documentation.
+
+### Cache Commands
+
+```bash
+# Show cache status and statistics
+python trapninja.py --cache-status
+
+# Query cached traps for a time window
+python trapninja.py --cache-query --destination default --from "-2h" --to "now"
+
+# Replay cached traps
+python trapninja.py --cache-replay --destination default --from "14:30" --to "15:45"
+
+# Clear cached entries
+python trapninja.py --cache-clear --destination default
+
+# Manually trigger retention trim
+python trapninja.py --cache-trim
+
+# Show comprehensive cache help
+python trapninja.py --cache-help
+```
+
+See [CACHE.md](CACHE.md) for complete cache documentation.
+
+### Granular Statistics
+
+```bash
+# Show statistics summary
+python trapninja.py --stats-summary
+
+# Show top source IPs
+python trapninja.py --stats-top-ips
+python trapninja.py --stats-top-ips -n 20 -s rate  # Top 20 by rate
+python trapninja.py --stats-top-ips -s peak  # By peak rate
+python trapninja.py --stats-top-ips -s blocked  # By blocked count
+
+# Show top OIDs
+python trapninja.py --stats-top-oids
+python trapninja.py --stats-top-oids -n 20 -s rate
+
+# Show details for specific IP
+python trapninja.py --stats-ip --ip 10.0.0.1
+
+# Show details for specific OID
+python trapninja.py --stats-oid --oid 1.3.6.1.4.1.9.9.41.2.0.1
+
+# Show destination statistics
+python trapninja.py --stats-destinations
+
+# Export full dashboard data
+python trapninja.py --stats-dashboard
+
+# Export statistics to file
+python trapninja.py --stats-export -f json -o /tmp/stats.json
+python trapninja.py --stats-export -f prometheus -o /tmp/stats.prom
+
+# Reset all statistics
+python trapninja.py --stats-reset
+
+# Show comprehensive stats help
+python trapninja.py --stats-help
+```
+
+See [GRANULAR_STATS.md](GRANULAR_STATS.md) for complete statistics documentation.
 
 ## Module Details
 

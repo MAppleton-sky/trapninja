@@ -10,18 +10,25 @@ trapninja/
 │   ├── trapninja.py          # Main entry point
 │   ├── VERSION               # Version file (read by code)
 │   ├── trapninja/            # Python package
-│   │   ├── __init__.py
+│   │   ├── __init__.py       # Package exports
 │   │   ├── __version__.py    # Reads VERSION file
 │   │   ├── main.py           # CLI argument handling
-│   │   ├── service.py        # Main service logic
+│   │   ├── service.py        # Main service orchestration
 │   │   ├── config.py         # Configuration loading
-│   │   ├── cli/              # CLI command modules
-│   │   ├── cache/            # Redis caching module
+│   │   ├── network.py        # Network/UDP listener logic
+│   │   ├── snmp.py           # SNMP processing logic
+│   │   ├── ebpf.py           # eBPF acceleration module
+│   │   ├── shadow.py         # Shadow/mirror mode logic
+│   │   ├── control.py        # Unix socket control interface
+│   │   ├── snmpv3_decryption.py  # SNMPv3 decryption
+│   │   ├── snmpv3_credentials.py # SNMPv3 credential mgmt
+│   │   ├── cli/              # CLI command modules (15 files)
+│   │   ├── cache/            # Redis caching module (5 files)
 │   │   ├── core/             # Types, constants, exceptions
-│   │   ├── ha/               # High Availability module
-│   │   ├── processing/       # Packet processing
-│   │   ├── stats/            # Statistics collection
-│   │   └── ...               # Other modules
+│   │   ├── ha/               # High Availability module (7 files)
+│   │   ├── processing/       # Packet processing (5 files)
+│   │   ├── stats/            # Statistics collection (4 files)
+│   │   └── ...               # Supporting modules
 │   └── config/               # Default configuration files
 │       ├── destinations.json
 │       ├── blocked_ips.json
