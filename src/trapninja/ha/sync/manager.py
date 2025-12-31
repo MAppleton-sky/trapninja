@@ -320,13 +320,41 @@ class ConfigSyncManager:
         
         logger.debug("Config sync monitor stopped")
     
-    def _pull_configs_async(self):
-        """Pull configs in background thread."""
-        try:
-            time.sleep(1.0)  # Brief delay to avoid overwhelming peer
-            self.pull_configs()
-        except Exception as e:
-            logger.error(f"Async config pull failed: {e}")
+    def _pull_configs_async(self, max_retries: int = 5):
+        """
+        Pull configs in background thread with retry logic.
+        
+        Args:
+            max_retries: Maximum number of retry attempts
+        """
+        retry_delays = [1.0, 2.0, 3.0, 5.0, 8.0]  # Progressive backoff
+        
+        for attempt in range(max_retries):
+            try:
+                delay = retry_delays[min(attempt, len(retry_delays) - 1)]
+                
+                if attempt == 0:
+                    logger.info(f"Attempting config pull from PRIMARY...")
+                else:
+                    logger.info(f"Retrying config pull (attempt {attempt + 1}/{max_retries}) in {delay}s...")
+                
+                time.sleep(delay)
+                
+                success = self.pull_configs()
+                if success:
+                    logger.info("Config sync from PRIMARY completed successfully")
+                    return
+                else:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Config pull attempt {attempt + 1} failed - will retry")
+                    else:
+                        logger.warning("Config pull failed after all retries")
+                        logger.info("Config will sync on next heartbeat mismatch or when PRIMARY pushes")
+                        
+            except Exception as e:
+                logger.error(f"Async config pull error: {e}")
+                if attempt >= max_retries - 1:
+                    logger.warning("Config pull failed after all retries due to errors")
     
     def pull_configs(self) -> bool:
         """
