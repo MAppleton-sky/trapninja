@@ -74,8 +74,14 @@ def _query_daemon_stats(query: Dict) -> Optional[Dict]:
         
         # Check if request was successful
         if result.get('status') == 0:  # SUCCESS
-            # Return data if present, otherwise return the message or full result
-            return result.get('data') or result.get('message') or result
+            # Return data if the key exists (even if it's an empty list/dict)
+            # Use 'in' check instead of truthiness to handle empty collections
+            if 'data' in result:
+                return result['data']
+            # For actions that only return a message (like reset)
+            if 'message' in result:
+                return result['message']
+            return result
         else:
             return None
         
