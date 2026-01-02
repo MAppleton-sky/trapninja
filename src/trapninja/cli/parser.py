@@ -145,6 +145,32 @@ Examples:
     group.add_argument('--list-blocked-oids', action='store_true',
                       help='List all blocked trap OIDs')
 
+    # IP redirection commands
+    group.add_argument('--redirect-ip', type=validated_ip, metavar='IP',
+                      help='Redirect traps from IP to a destination group (use with --tag)')
+    group.add_argument('--unredirect-ip', type=validated_ip, metavar='IP',
+                      help='Remove IP redirection rule')
+    group.add_argument('--list-redirected-ips', action='store_true',
+                      help='List all IP redirection rules')
+
+    # OID redirection commands
+    group.add_argument('--redirect-oid', type=validated_oid, metavar='OID',
+                      help='Redirect traps with OID to a destination group (use with --tag)')
+    group.add_argument('--unredirect-oid', type=validated_oid, metavar='OID',
+                      help='Remove OID redirection rule')
+    group.add_argument('--list-redirected-oids', action='store_true',
+                      help='List all OID redirection rules')
+
+    # Redirect destination group commands
+    group.add_argument('--add-redirect-dest', action='store_true',
+                      help='Add a destination to a redirect group (use with --tag, --ip, --port)')
+    group.add_argument('--remove-redirect-dest', action='store_true',
+                      help='Remove a destination from a redirect group (use with --tag, --ip, --port)')
+    group.add_argument('--list-redirect-dests', action='store_true',
+                      help='List all redirect destination groups')
+    group.add_argument('--redirection-help', action='store_true',
+                      help='Show comprehensive redirection help')
+
     # SNMPv3 commands
     group.add_argument('--snmpv3-add-user', action='store_true',
                       help='Add SNMPv3 user credentials')
