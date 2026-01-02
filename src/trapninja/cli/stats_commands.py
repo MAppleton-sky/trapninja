@@ -825,9 +825,33 @@ def handle_stats_debug(args: Namespace) -> int:
     print("  TrapNinja Statistics Debug Information")
     print("=" * 70 + "\n")
     
+    # Capture mode info
+    cm = data.get('capture_mode', {})
+    print("CAPTURE MODE:")
+    print(f"  Effective Mode:    {cm.get('effective_mode', 'unknown')}")
+    print(f"  Shadow Mode:       {cm.get('shadow_mode', False)}")
+    print(f"  Observe Only:      {cm.get('observe_only', False)}")
+    
+    # HA status
+    ha = data.get('ha_status', {})
+    print("\nHA STATUS:")
+    print(f"  HA Enabled:        {ha.get('enabled', False)}")
+    print(f"  Is Forwarding:     {ha.get('is_forwarding', True)}")
+    print(f"  HA State:          {ha.get('state', 'disabled')}")
+    
+    # Queue stats (packet capture -> workers)
+    qs = data.get('queue_stats', {})
+    print("\nPACKET QUEUE (capture -> workers):")
+    print(f"  Total Queued:      {qs.get('total_queued', 0):,}")
+    print(f"  Total Dropped:     {qs.get('total_dropped', 0):,}")
+    print(f"  Current Depth:     {qs.get('current_depth', 0):,}")
+    print(f"  Max Depth:         {qs.get('max_depth', 0):,}")
+    print(f"  Queue Capacity:    {qs.get('queue_capacity', 0):,}")
+    print(f"  Utilization:       {qs.get('utilization', 0):.1%}")
+    
     # Granular collector status
     gc = data.get('granular_collector', {})
-    print("GRANULAR STATISTICS COLLECTOR:")
+    print("\nGRANULAR STATISTICS COLLECTOR:")
     print(f"  Initialized:       {gc.get('initialized', False)}")
     print(f"  Running:           {gc.get('running', False)}")
     print(f"  Total Traps:       {gc.get('total_traps', 0):,}")
@@ -851,22 +875,45 @@ def handle_stats_debug(args: Namespace) -> int:
     # Diagnosis
     print("\nDIAGNOSIS:")
     
-    if not gc.get('initialized'):
+    total_queued = qs.get('total_queued', 0)
+    packets_processed = ps.get('packets_processed', 0)
+    total_traps = gc.get('total_traps', 0)
+    ha_blocked = ps.get('ha_blocked', 0)
+    is_forwarding = ha.get('is_forwarding', True)
+    observe_only = cm.get('observe_only', False)
+    
+    if total_queued == 0:
+        print("  ⚠️  No packets queued! Packets are NOT being captured.")
+        print("      Check:")
+        print("        - Is traffic reaching the interface?")
+        print("        - Is the BPF filter correct?")
+        print("        - Run: tcpdump -i <interface> udp port 162")
+    elif packets_processed == 0:
+        print("  ⚠️  Packets queued but NOT processed!")
+        print("      Workers may not be running. Check daemon logs.")
+    elif ha_blocked > 0 and not is_forwarding:
+        print("  ⚠️  Packets blocked by HA (secondary mode)!")
+        print(f"      {ha_blocked:,} packets dropped because this is SECONDARY.")
+        print("      Forwarding is disabled - only PRIMARY forwards.")
+    elif observe_only:
+        print("  ℹ️  Running in OBSERVE-ONLY mode (shadow mode).")
+        print("      Packets are counted but NOT forwarded.")
+        print("      This is expected for --shadow-mode.")
+    elif not gc.get('initialized'):
         print("  ⚠️  Granular collector NOT initialized!")
         print("      Check daemon startup logs for errors.")
     elif not gc.get('running'):
         print("  ⚠️  Granular collector initialized but NOT running!")
         print("      Background export thread may have stopped.")
-    elif gc.get('total_traps', 0) == 0:
-        if ps.get('packets_processed', 0) > 0:
-            print("  ⚠️  Packets being processed but granular stats NOT recording!")
-            print("      This likely means the code update hasn't been deployed.")
-            print("      Solution: Restart the daemon to load updated worker code.")
-        else:
-            print("  ℹ️  No packets processed yet.")
-            print("      Either no traps received or workers haven't started.")
-    else:
+    elif total_traps == 0 and packets_processed > 0:
+        print("  ⚠️  Packets being processed but granular stats NOT recording!")
+        print("      This likely means the code update hasn't been deployed.")
+        print("      Solution: Restart the daemon to load updated worker code.")
+    elif total_traps > 0:
         print("  ✓  Statistics collection appears to be working normally.")
+    else:
+        print("  ℹ️  No packets processed yet.")
+        print("      Either no traps received or workers haven't started.")
     
     print()
     return 0

@@ -303,11 +303,21 @@ class PacketWorker:
         capture modes (sniff, socket, eBPF).
         """
         try:
-            # CRITICAL: Check HA state FIRST before any processing
+            source_ip = packet_data['src_ip']
+            payload = packet_data['payload']
+            
+            # Always count packets received (for diagnostics)
+            self.stats.increment_processed()
+            
+            # CRITICAL: Check HA state before forwarding
             # Only the PRIMARY node should forward traps
+            # But ALWAYS record stats so we can see what's arriving
             if not is_forwarding_enabled():
                 # Track blocked packets for monitoring
                 self.stats.increment_ha_blocked()
+                
+                # Record in granular stats as 'ha_blocked' so it shows up in reports
+                self._record_granular_stats(source_ip, None, 'ha_blocked')
                 
                 # Log periodically to help diagnose issues without flooding
                 if self.stats.ha_blocked_count % 1000 == 1:  # First and every 1000th
@@ -318,10 +328,6 @@ class PacketWorker:
                 return  # Drop packet - we're in secondary mode
             
             config = _config_cache.get()
-            source_ip = packet_data['src_ip']
-            payload = packet_data['payload']
-            
-            self.stats.increment_processed()
             
             # DEBUG: Log packet info for troubleshooting
             if logger.isEnabledFor(logging.DEBUG):
