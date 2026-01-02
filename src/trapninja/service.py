@@ -730,7 +730,11 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
     capture_started = False
 
     # Try eBPF if available
-    if EBPF_AVAILABLE:
+    # IMPORTANT: Skip eBPF in parallel/shadow/mirror modes - eBPF binds exclusively
+    # and cannot coexist with other trap receivers. These modes require sniff capture.
+    if force_sniff_mode:
+        logger.info("Skipping eBPF - parallel/shadow/mirror mode requires sniff capture")
+    elif EBPF_AVAILABLE:
         logger.info("Checking for eBPF support...")
 
         # Check if eBPF is supported
