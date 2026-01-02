@@ -316,7 +316,13 @@ def handle_stats_top_ips(args: Namespace) -> int:
             ip_list = file_data.get('top_ips', [])
             ips = _sort_stats_list(ip_list, sort_by)[:count]
     
-    if not ips:
+    if not ips and ips is not None:
+        # Empty list means no data yet, but connection worked
+        print("No IP statistics available yet.")
+        print("Send some traps to the forwarder to start collecting data.")
+        return 0
+    
+    if ips is None:
         print("Error: Could not retrieve IP statistics.")
         print("Make sure TrapNinja is running with granular stats enabled.")
         return 1
@@ -372,7 +378,13 @@ def handle_stats_top_oids(args: Namespace) -> int:
             oid_list = file_data.get('top_oids', [])
             oids = _sort_stats_list(oid_list, sort_by)[:count]
     
-    if not oids:
+    if not oids and oids is not None:
+        # Empty list means no data yet, but connection worked
+        print("No OID statistics available yet.")
+        print("Send some traps to the forwarder to start collecting data.")
+        return 0
+    
+    if oids is None:
         print("Error: Could not retrieve OID statistics.")
         print("Make sure TrapNinja is running with granular stats enabled.")
         return 1
@@ -715,6 +727,7 @@ COMMANDS
   --stats-dashboard         Export full dashboard data as JSON
   --stats-export            Export statistics to file
   --stats-reset             Reset all statistics (requires --yes)
+  --stats-debug             Show diagnostic information for troubleshooting
 
 OPTIONS
 -------
@@ -765,6 +778,9 @@ trapninja --stats-export --format json -o /tmp/stats.json
 # Get dashboard data for visualization
 trapninja --stats-dashboard --pretty
 
+# Troubleshoot stats collection
+trapninja --stats-debug
+
 METRICS FILES
 -------------
 
@@ -785,4 +801,72 @@ To prevent unbounded memory growth, statistics are bounded:
 ================================================================================
 """
     print(help_text)
+    return 0
+
+
+def handle_stats_debug(args: Namespace) -> int:
+    """Handle --stats-debug command - show diagnostic information."""
+    use_json = getattr(args, 'json', False)
+    pretty = getattr(args, 'pretty', False)
+    
+    # Query debug info from daemon
+    data = _query_daemon_stats({'action': 'debug'})
+    
+    if data is None:
+        print("Error: Could not retrieve debug information.")
+        print("Make sure TrapNinja daemon is running.")
+        return 1
+    
+    if use_json:
+        _output_json(data, pretty)
+        return 0
+    
+    print("\n" + "=" * 70)
+    print("  TrapNinja Statistics Debug Information")
+    print("=" * 70 + "\n")
+    
+    # Granular collector status
+    gc = data.get('granular_collector', {})
+    print("GRANULAR STATISTICS COLLECTOR:")
+    print(f"  Initialized:       {gc.get('initialized', False)}")
+    print(f"  Running:           {gc.get('running', False)}")
+    print(f"  Total Traps:       {gc.get('total_traps', 0):,}")
+    print(f"  Unique IPs:        {gc.get('unique_ips', 0):,}")
+    print(f"  Unique OIDs:       {gc.get('unique_oids', 0):,}")
+    
+    # Processing stats (from worker threads)
+    ps = data.get('processing_stats', {})
+    print("\nPACKET PROCESSING STATS (worker threads):")
+    print(f"  Packets Processed: {ps.get('packets_processed', 0):,}")
+    print(f"  Packets Forwarded: {ps.get('packets_forwarded', 0):,}")
+    print(f"  Packets Blocked:   {ps.get('packets_blocked', 0):,}")
+    print(f"  Packets Redirected:{ps.get('packets_redirected', 0):,}")
+    print(f"  Processing Errors: {ps.get('processing_errors', 0):,}")
+    print(f"  HA Blocked:        {ps.get('ha_blocked', 0):,}")
+    print(f"  Fast Path Hits:    {ps.get('fast_path_hits', 0):,}")
+    print(f"  Slow Path Hits:    {ps.get('slow_path_hits', 0):,}")
+    print(f"  Processing Rate:   {ps.get('processing_rate', 0):.1f}/s")
+    print(f"  Uptime:            {ps.get('uptime_seconds', 0):.0f}s")
+    
+    # Diagnosis
+    print("\nDIAGNOSIS:")
+    
+    if not gc.get('initialized'):
+        print("  ⚠️  Granular collector NOT initialized!")
+        print("      Check daemon startup logs for errors.")
+    elif not gc.get('running'):
+        print("  ⚠️  Granular collector initialized but NOT running!")
+        print("      Background export thread may have stopped.")
+    elif gc.get('total_traps', 0) == 0:
+        if ps.get('packets_processed', 0) > 0:
+            print("  ⚠️  Packets being processed but granular stats NOT recording!")
+            print("      This likely means the code update hasn't been deployed.")
+            print("      Solution: Restart the daemon to load updated worker code.")
+        else:
+            print("  ℹ️  No packets processed yet.")
+            print("      Either no traps received or workers haven't started.")
+    else:
+        print("  ✓  Statistics collection appears to be working normally.")
+    
+    print()
     return 0

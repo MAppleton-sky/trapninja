@@ -194,8 +194,18 @@ class PacketWorker:
             destination: Destination tag or "ip:port"
         """
         # Lazy initialization of collector reference
-        if self._granular_collector is None and GRANULAR_STATS_AVAILABLE:
-            self._granular_collector = get_granular_stats()
+        if self._granular_collector is None:
+            if GRANULAR_STATS_AVAILABLE:
+                self._granular_collector = get_granular_stats()
+                if self._granular_collector:
+                    logger.debug(f"Worker {self.worker_id}: Got granular stats collector")
+                else:
+                    logger.warning(f"Worker {self.worker_id}: get_granular_stats() returned None - stats not initialized?")
+            else:
+                # Log once per worker that granular stats are not available
+                if not hasattr(self, '_granular_warning_logged'):
+                    logger.warning(f"Worker {self.worker_id}: GRANULAR_STATS_AVAILABLE is False - import failed")
+                    self._granular_warning_logged = True
         
         if self._granular_collector:
             try:
@@ -207,8 +217,7 @@ class PacketWorker:
                 )
             except Exception as e:
                 # Don't let stats recording errors affect packet processing
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"Error recording granular stats: {e}")
+                logger.debug(f"Error recording granular stats: {e}")
     
     def start(self) -> threading.Thread:
         """

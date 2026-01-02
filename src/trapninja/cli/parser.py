@@ -232,6 +232,8 @@ Examples:
                       help='Export statistics to file')
     group.add_argument('--stats-reset', action='store_true',
                       help='Reset all granular statistics')
+    group.add_argument('--stats-debug', action='store_true',
+                      help='Show diagnostic information for statistics troubleshooting')
     group.add_argument('--stats-help', action='store_true',
                       help='Show granular statistics help')
 

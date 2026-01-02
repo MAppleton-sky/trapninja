@@ -414,6 +414,9 @@ def execute_command(args: Namespace) -> int:
     elif args.stats_help:
         return stats_commands.handle_stats_help(args)
 
+    elif args.stats_debug:
+        return stats_commands.handle_stats_debug(args)
+
     # Handle shadow mode commands
     elif args.shadow_status:
         return shadow_commands.handle_shadow_status(args)

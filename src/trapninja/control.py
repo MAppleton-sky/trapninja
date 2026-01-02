@@ -797,6 +797,26 @@ class ControlSocket:
                     'message': 'Statistics reset'
                 }
 
+            elif action == 'debug':
+                # Debug info to diagnose stats collection issues
+                from .processing.stats import get_global_stats
+                processing_stats = get_global_stats()
+                
+                debug_info = {
+                    'granular_collector': {
+                        'initialized': collector is not None,
+                        'running': collector._running if collector else False,
+                        'total_traps': collector._total_traps if collector else 0,
+                        'unique_ips': len(collector._ip_stats) if collector else 0,
+                        'unique_oids': len(collector._oid_stats) if collector else 0,
+                    },
+                    'processing_stats': processing_stats.to_dict() if processing_stats else {},
+                }
+                return {
+                    'status': self.SUCCESS,
+                    'data': debug_info
+                }
+
             else:
                 return {
                     'status': self.INVALID_REQUEST,
