@@ -66,19 +66,20 @@ def get_top_oids(n: int = 10, sort_by: str = 'total') -> List[Dict[str, Any]]:
     return collector.get_top_oids(n, sort_by)
 
 
-def get_ip_details(ip_address: str) -> Optional[Dict[str, Any]]:
+def get_ip_details(ip_address: str, top_n_oids: int = 10) -> Optional[Dict[str, Any]]:
     """
     Get detailed statistics for a specific IP.
     
     Args:
         ip_address: IP address to look up
+        top_n_oids: Number of top OIDs to include (default 10, max 500)
         
     Returns:
         Dictionary with full IP stats including top OIDs,
         or None if IP not found
         
     Example:
-        >>> details = get_ip_details("10.0.0.1")
+        >>> details = get_ip_details("10.0.0.1", top_n_oids=50)
         >>> if details:
         ...     print(f"Total: {details['total_traps']}")
         ...     for oid in details['top_oids']:
@@ -88,22 +89,24 @@ def get_ip_details(ip_address: str) -> Optional[Dict[str, Any]]:
     if not collector:
         return None
     
-    return collector.get_ip_stats(ip_address)
+    top_n_oids = min(top_n_oids, 500)  # Cap at 500
+    return collector.get_ip_stats(ip_address, top_n_oids=top_n_oids)
 
 
-def get_oid_details(oid: str) -> Optional[Dict[str, Any]]:
+def get_oid_details(oid: str, top_n_sources: int = 10) -> Optional[Dict[str, Any]]:
     """
     Get detailed statistics for a specific OID.
     
     Args:
         oid: OID to look up
+        top_n_sources: Number of top source IPs to include (default 10, max 500)
         
     Returns:
         Dictionary with full OID stats including top source IPs,
         or None if OID not found
         
     Example:
-        >>> details = get_oid_details("1.3.6.1.4.1.9.9.41.2.0.1")
+        >>> details = get_oid_details("1.3.6.1.4.1.9.9.41.2.0.1", top_n_sources=30)
         >>> if details:
         ...     print(f"Total: {details['total_traps']}")
         ...     for ip in details['top_source_ips']:
@@ -113,7 +116,8 @@ def get_oid_details(oid: str) -> Optional[Dict[str, Any]]:
     if not collector:
         return None
     
-    return collector.get_oid_stats(oid)
+    top_n_sources = min(top_n_sources, 500)  # Cap at 500
+    return collector.get_oid_stats(oid, top_n_sources=top_n_sources)
 
 
 def get_destination_stats(destination: str = None) -> Any:

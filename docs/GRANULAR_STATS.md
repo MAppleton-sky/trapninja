@@ -109,11 +109,16 @@ trapninja stats top-ips -s blocked
 trapninja stats top-ips --json
 ```
 
-**Sort Options:**
+**Sort Options (`-s, --sort`):**
 - `total` - Total trap count (default)
 - `rate` - Current traps/minute
+- `peak` - Highest peak rate ever observed
 - `blocked` - Number blocked
 - `recent` - Most recently active
+
+**Detail Options:**
+- `--sources N` - Number of top source IPs for OID details (default: 10, max: 500)
+- `--oids N` - Number of top OIDs for IP details (default: 10, max: 500)
 
 Example output:
 ```
@@ -139,29 +144,41 @@ trapninja stats top-oids -n 50 -s rate
 ### IP Details
 
 ```bash
-# Detailed stats for specific IP
-trapninja stats ip 10.0.0.1
+# Detailed stats for specific IP (shows top 10 OIDs by default)
+trapninja --stats-ip --ip 10.0.0.1
+
+# Show top 50 OIDs from this IP
+trapninja --stats-ip --ip 10.0.0.1 --oids 50
+
+# Export as JSON for further analysis
+trapninja --stats-ip --ip 10.0.0.1 --oids 100 --json --pretty
 ```
 
 Shows comprehensive details:
 - All counters (total, forwarded, blocked, redirected, dropped)
 - Timing (first/last seen, age, idle time)
-- Current rates
-- Top 10 OIDs sent from this IP
+- Current and peak rates
+- Top N OIDs sent from this IP (configurable with `--oids`, default 10, max 500)
 - Destination breakdown
 
 ### OID Details
 
 ```bash
-# Detailed stats for specific OID
-trapninja stats oid 1.3.6.1.4.1.9.9.41.2.0.1
+# Detailed stats for specific OID (shows top 10 sources by default)
+trapninja --stats-oid --oid 1.3.6.1.4.1.9.9.41.2.0.1
+
+# Show top 30 source IPs for this OID
+trapninja --stats-oid --oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 30
+
+# Export as JSON for further analysis
+trapninja --stats-oid --oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 100 --json --pretty
 ```
 
 Shows comprehensive details:
 - All counters
 - Timing
-- Current rates
-- Top 10 source IPs for this OID
+- Current and peak rates
+- Top N source IPs for this OID (configurable with `--sources`, default 10, max 500)
 - Destination breakdown
 
 ### Destination Statistics

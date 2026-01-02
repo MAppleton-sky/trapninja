@@ -302,6 +302,10 @@ Examples:
     parser.add_argument('--sort', '-s', type=str, default='total',
                        choices=['total', 'rate', 'peak', 'blocked', 'recent'],
                        help='Sort order for stats lists (default: total)')
+    parser.add_argument('--sources', type=int, default=10,
+                       help='Number of top source IPs to show for OID details (default: 10, max: 500)')
+    parser.add_argument('--oids', type=int, default=10,
+                       help='Number of top OIDs to show for IP details (default: 10, max: 500)')
     parser.add_argument('--format', '-f', type=str, default='json',
                        choices=['json', 'prometheus'],
                        help='Export format for stats (default: json)')

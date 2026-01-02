@@ -409,6 +409,7 @@ def handle_stats_ip_detail(args: Namespace) -> int:
     ip_address = args.ip
     use_json = getattr(args, 'json', False)
     pretty = getattr(args, 'pretty', False)
+    top_n_oids = min(getattr(args, 'oids', 10), 500)  # Use --oids parameter
     
     if not ip_address:
         print("Error: IP address required. Use --ip <address>")
@@ -417,7 +418,8 @@ def handle_stats_ip_detail(args: Namespace) -> int:
     # Query daemon for real-time data - returns IP data dict directly on success
     ip_data = _query_daemon_stats({
         'action': 'ip_detail',
-        'ip_address': ip_address
+        'ip_address': ip_address,
+        'top_n_oids': top_n_oids
     })
     
     if ip_data is None:
@@ -458,9 +460,11 @@ def handle_stats_ip_detail(args: Namespace) -> int:
         print(f"  Peak Occurred:   {_format_timestamp(peak_ts):>12}")
     
     top_oids = ip_data.get('top_oids', [])
+    unique_oids = ip_data.get('unique_oids', len(top_oids))
     if top_oids:
-        print(f"\nTOP OIDs ({ip_data.get('unique_oids', len(top_oids))} unique):")
-        for i, oid_info in enumerate(top_oids[:10], 1):
+        showing = len(top_oids)
+        print(f"\nTOP OIDs (showing {showing} of {unique_oids} unique):")
+        for i, oid_info in enumerate(top_oids, 1):
             oid = oid_info.get('oid', 'N/A')
             count = oid_info.get('count', 0)
             # Truncate long OIDs
@@ -483,6 +487,7 @@ def handle_stats_oid_detail(args: Namespace) -> int:
     oid = args.oid
     use_json = getattr(args, 'json', False)
     pretty = getattr(args, 'pretty', False)
+    top_n_sources = min(getattr(args, 'sources', 10), 500)  # Use --sources parameter
     
     if not oid:
         print("Error: OID required. Use --oid <oid>")
@@ -491,7 +496,8 @@ def handle_stats_oid_detail(args: Namespace) -> int:
     # Query daemon for real-time data - returns OID data dict directly on success
     oid_data = _query_daemon_stats({
         'action': 'oid_detail',
-        'oid': oid
+        'oid': oid,
+        'top_n_sources': top_n_sources
     })
     
     if oid_data is None:
@@ -531,9 +537,11 @@ def handle_stats_oid_detail(args: Namespace) -> int:
         print(f"  Peak Occurred:   {_format_timestamp(peak_ts):>12}")
     
     top_ips = oid_data.get('top_source_ips', [])
+    unique_sources = oid_data.get('unique_sources', len(top_ips))
     if top_ips:
-        print(f"\nTOP SOURCE IPs ({oid_data.get('unique_sources', len(top_ips))} unique):")
-        for i, ip_info in enumerate(top_ips[:10], 1):
+        showing = len(top_ips)
+        print(f"\nTOP SOURCE IPs (showing {showing} of {unique_sources} unique):")
+        for i, ip_info in enumerate(top_ips, 1):
             ip = ip_info.get('ip', 'N/A')
             count = ip_info.get('count', 0)
             print(f"  {i:2}. {ip} ({count:,})")
@@ -705,13 +713,17 @@ COMMANDS
 OPTIONS
 -------
 
-  -n, --count <N>           Number of items to show (default: 10)
+  -n, --count <N>           Number of items to show in top lists (default: 10)
   -s, --sort <FIELD>        Sort by: total, rate, peak, blocked, recent
                             - total: highest total trap count
                             - rate: highest current rate (last 60 seconds)
                             - peak: highest peak rate ever observed
                             - blocked: most blocked traps
                             - recent: most recently seen
+  --sources <N>             Number of top source IPs to show for OID details
+                            (default: 10, max: 500) - use with --stats-oid
+  --oids <N>                Number of top OIDs to show for IP details
+                            (default: 10, max: 500) - use with --stats-ip
   --json                    Output as JSON
   --pretty                  Pretty-print JSON output
   -f, --format <FMT>        Export format: json, prometheus
@@ -731,6 +743,15 @@ trapninja --stats-top-oids --sort peak
 
 # Get details for a specific IP
 trapninja --stats-ip --ip 10.0.0.1
+
+# Get details for a specific IP with top 50 OIDs
+trapninja --stats-ip --ip 10.0.0.1 --oids 50
+
+# Get details for a specific OID with top 30 source IPs
+trapninja --stats-oid --oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 30
+
+# Export OID details as JSON for further analysis
+trapninja --stats-oid --oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 100 --json --pretty
 
 # Export statistics in JSON format
 trapninja --stats-export --format json -o /tmp/stats.json

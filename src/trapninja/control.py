@@ -743,7 +743,9 @@ class ControlSocket:
                         'status': self.INVALID_REQUEST,
                         'error': 'ip_address required'
                     }
-                data = collector.get_ip_stats(ip_address)
+                # Allow configurable number of top OIDs (default 10, max 500)
+                top_n_oids = min(request.get('top_n_oids', 10), 500)
+                data = collector.get_ip_stats(ip_address, top_n_oids=top_n_oids)
                 if data:
                     return {
                         'status': self.SUCCESS,
@@ -761,7 +763,9 @@ class ControlSocket:
                         'status': self.INVALID_REQUEST,
                         'error': 'oid required'
                     }
-                data = collector.get_oid_stats(oid)
+                # Allow configurable number of top sources (default 10, max 500)
+                top_n_sources = min(request.get('top_n_sources', 10), 500)
+                data = collector.get_oid_stats(oid, top_n_sources=top_n_sources)
                 if data:
                     return {
                         'status': self.SUCCESS,

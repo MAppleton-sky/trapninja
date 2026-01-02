@@ -243,32 +243,40 @@ class GranularStatsCollector:
     # QUERY METHODS
     # =========================================================================
     
-    def get_ip_stats(self, ip_address: str) -> Optional[Dict[str, Any]]:
+    def get_ip_stats(self, ip_address: str, top_n_oids: int = 10) -> Optional[Dict[str, Any]]:
         """
         Get detailed statistics for a specific IP.
         
         Args:
             ip_address: IP to look up
+            top_n_oids: Number of top OIDs to include in details (default 10)
             
         Returns:
             Dictionary with IP stats or None if not found
         """
         if ip_address in self._ip_stats:
-            return self._ip_stats[ip_address].to_dict(include_details=True)
+            return self._ip_stats[ip_address].to_dict(
+                include_details=True, 
+                top_n_oids=top_n_oids
+            )
         return None
     
-    def get_oid_stats(self, oid: str) -> Optional[Dict[str, Any]]:
+    def get_oid_stats(self, oid: str, top_n_sources: int = 10) -> Optional[Dict[str, Any]]:
         """
         Get detailed statistics for a specific OID.
         
         Args:
             oid: OID to look up
+            top_n_sources: Number of top source IPs to include (default 10)
             
         Returns:
             Dictionary with OID stats or None if not found
         """
         if oid in self._oid_stats:
-            return self._oid_stats[oid].to_dict(include_details=True)
+            return self._oid_stats[oid].to_dict(
+                include_details=True,
+                top_n_sources=top_n_sources
+            )
         return None
     
     def get_destination_stats(self, destination: str) -> Optional[Dict[str, Any]]:
