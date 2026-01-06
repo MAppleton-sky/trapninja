@@ -508,13 +508,28 @@ class PacketWorker:
             notify_trap_processed()  # Notify HA system of activity
     
     def _process_snmpv3(self, packet_data: Dict[str, Any], config: Dict):
-        """Process SNMPv3 packet."""
+        """
+        Process SNMPv3 packet with decryption support.
+        
+        Flow:
+        1. Extract metadata (engine_id, username) for logging/credential lookup
+        2. Attempt decryption if credentials are available
+        3. If decryption succeeds, convert to v2c and forward
+        4. If decryption fails but we have NO credentials, forward original v3
+        5. If decryption fails but we HAVE credentials, drop packet (config controls)
+        
+        The key insight is: if we have credentials configured for an engine but
+        decryption/conversion fails, we should NOT forward the encrypted v3 packet
+        as it's unlikely to be useful to NOC systems expecting v2c.
+        """
         source_ip = packet_data['src_ip']
         payload = packet_data['payload']
         
         logger.debug(f"Processing SNMPv3 trap from {source_ip} ({len(payload)} bytes)")
         
-        # Try to extract engine ID and username for logging
+        # Try to extract engine ID and username for logging/credential lookup
+        engine_id = None
+        username = None
         try:
             from ..snmpv3_decryption import extract_engine_id_from_bytes, extract_username_from_bytes
             engine_id = extract_engine_id_from_bytes(payload)
@@ -522,48 +537,95 @@ class PacketWorker:
             logger.debug(f"SNMPv3 trap: engine_id={engine_id}, username={username}")
         except Exception as e:
             logger.debug(f"Could not extract SNMPv3 metadata: {e}")
-            engine_id = None
-            username = None
+        
+        # Track whether we have credentials for this engine
+        # This determines fallback behavior when decryption fails
+        have_credentials = False
+        decryption_attempted = False
         
         # Try decryption
         try:
             from ..snmpv3_decryption import get_snmpv3_decryptor
+            from ..snmpv3_credentials import get_credential_store
+            
             decryptor = get_snmpv3_decryptor()
             
             if decryptor:
+                # Check if we have credentials for this engine BEFORE attempting decryption
+                if engine_id:
+                    credential_store = get_credential_store()
+                    users = credential_store.get_users_for_engine(engine_id.lower())
+                    have_credentials = len(users) > 0
+                    if have_credentials:
+                        logger.debug(
+                            f"Found {len(users)} credential(s) for engine {engine_id}"
+                        )
+                
                 logger.debug(f"Attempting SNMPv3 decryption for engine {engine_id}")
+                decryption_attempted = True
                 result = decryptor.decrypt_snmpv3_trap(payload)
                 
                 if result:
                     result_engine_id, trap_data = result
+                    # Extract username from USM params if available in trap_data
+                    decrypted_username = trap_data.get('username', username or 'N/A')
+                    varbind_count = len(trap_data.get('varbinds', []))
+                    
                     logger.info(
                         f"SNMPv3 decrypted from {source_ip}: engine={result_engine_id}, "
-                        f"user={trap_data.get('username', 'N/A')}, "
-                        f"varbinds={len(trap_data.get('varbinds', []))}"
+                        f"user={decrypted_username}, varbinds={varbind_count}"
                     )
                     
+                    # Convert to SNMPv2c format
                     v2c_payload = decryptor.convert_to_snmpv2c(trap_data, "public")
                     
                     if v2c_payload and len(v2c_payload) > 20:
                         logger.debug(
-                            f"SNMPv3->v2c conversion: {len(payload)} -> {len(v2c_payload)} bytes"
+                            f"SNMPv3->v2c conversion successful: "
+                            f"{len(payload)} -> {len(v2c_payload)} bytes"
                         )
                         if config['destinations']:
                             forward_packet(source_ip, v2c_payload, config['destinations'])
                             self.stats.increment_forwarded()
-                            self._record_granular_stats(source_ip, None, 'forwarded', 'default')
+                            self._record_granular_stats(
+                                source_ip, None, 'forwarded_v3_decrypted', 'default'
+                            )
                             notify_trap_processed()
                         return
                     else:
-                        logger.warning(
-                            f"SNMPv3->v2c conversion produced invalid payload: "
-                            f"{len(v2c_payload) if v2c_payload else 0} bytes"
+                        # CRITICAL FIX: Log error and return - do NOT fall through!
+                        # The decryption worked but v2c conversion failed.
+                        # This is a bug in the conversion code, not missing credentials.
+                        logger.error(
+                            f"SNMPv3->v2c conversion FAILED for {source_ip}: "
+                            f"produced {len(v2c_payload) if v2c_payload else 0} bytes "
+                            f"(expected >20). Decrypted data: varbinds={varbind_count}, "
+                            f"request_id={trap_data.get('request_id', 'N/A')}. "
+                            f"Packet will be DROPPED to avoid forwarding encrypted v3."
                         )
+                        # Record as conversion failure
+                        self._record_granular_stats(
+                            source_ip, None, 'v3_conversion_failed', None
+                        )
+                        self.stats.increment_error()
+                        return  # CRITICAL: Return here to prevent v3 fallback
                 else:
+                    # Decryption failed - result was None
                     logger.warning(
                         f"SNMPv3 decryption failed for {source_ip}: "
                         f"engine={engine_id}, user={username}"
                     )
+                    # If we have credentials but decryption failed, don't forward v3
+                    if have_credentials:
+                        logger.warning(
+                            f"Credentials exist for engine {engine_id} but decryption "
+                            f"failed - check auth/priv settings. Packet DROPPED."
+                        )
+                        self._record_granular_stats(
+                            source_ip, None, 'v3_decryption_failed', None
+                        )
+                        self.stats.increment_error()
+                        return  # Don't forward encrypted v3 when we have credentials
             else:
                 logger.warning("SNMPv3 decryptor not initialized")
                 
@@ -573,14 +635,42 @@ class PacketWorker:
             logger.warning(f"SNMPv3 processing error: {e}")
             import traceback
             logger.debug(traceback.format_exc())
+            # If we have credentials but got an exception, don't forward v3
+            if have_credentials:
+                logger.warning(
+                    f"Exception during decryption with credentials for engine "
+                    f"{engine_id} - packet DROPPED"
+                )
+                self._record_granular_stats(
+                    source_ip, None, 'v3_decryption_error', None
+                )
+                self.stats.increment_error()
+                return
         
-        # Forward original packet if decryption failed or not available
-        # Note: This forwards encrypted payload which may not be useful
-        logger.debug(f"Forwarding original SNMPv3 packet from {source_ip} (no decryption)")
+        # Fallback: Forward original v3 packet ONLY if:
+        # 1. No credentials exist for this engine (we can't decrypt anyway)
+        # 2. Decryptor wasn't initialized (module issue)
+        # 
+        # If we have credentials but failed, we already returned above.
+        # Forwarding encrypted v3 when we expected to decrypt is usually not useful.
+        if have_credentials:
+            # This shouldn't happen - we should have returned above
+            logger.error(
+                f"BUG: Reached v3 fallback with credentials for {source_ip}. "
+                f"This indicates a logic error. Packet DROPPED."
+            )
+            self._record_granular_stats(source_ip, None, 'v3_logic_error', None)
+            self.stats.increment_error()
+            return
+        
+        logger.debug(
+            f"Forwarding original SNMPv3 packet from {source_ip} "
+            f"(no credentials configured for engine {engine_id})"
+        )
         if config['destinations']:
             forward_packet(source_ip, payload, config['destinations'])
             self.stats.increment_forwarded()
-            self._record_granular_stats(source_ip, None, 'forwarded', 'default')
+            self._record_granular_stats(source_ip, None, 'forwarded_v3_passthrough', 'default')
             notify_trap_processed()
 
 

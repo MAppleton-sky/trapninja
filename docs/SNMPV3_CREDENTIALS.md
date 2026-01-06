@@ -1,6 +1,6 @@
 # TrapNinja SNMPv3 Credentials Guide
 
-**Version 0.7.12 (Beta)**
+**Version 0.7.14 (Beta)**
 
 Complete guide to managing SNMPv3 user credentials for trap decryption.
 
@@ -434,6 +434,62 @@ python3.9 -O trapninja.py --snmpv3-add-user \
 
 ---
 
+## SNMPv3 Processing Behavior
+
+TrapNinja handles SNMPv3 traps differently depending on whether credentials are configured for the trap's Engine ID.
+
+### When Credentials ARE Configured
+
+If credentials exist for the trap's Engine ID:
+
+1. TrapNinja attempts decryption using the configured credentials
+2. **On success**: The trap is converted to SNMPv2c and forwarded
+3. **On failure**: The trap is **DROPPED** (not forwarded as encrypted v3)
+
+This behavior prevents forwarding encrypted v3 traps that NOC systems cannot process. If you see traps being dropped, check:
+
+- Authentication protocol matches device configuration
+- Privacy protocol matches device configuration
+- Passphrases are correct
+- Username is exactly correct (case-sensitive)
+
+### When NO Credentials Are Configured
+
+If no credentials exist for the trap's Engine ID:
+
+1. TrapNinja logs that no credentials are available
+2. The original SNMPv3 trap is forwarded unchanged ("passthrough" mode)
+3. Downstream systems must handle the encrypted v3 format
+
+This allows mixed environments where some devices send v2c and others send v3 that TrapNinja cannot decrypt.
+
+### Granular Statistics Actions
+
+SNMPv3 processing records these action types in granular statistics:
+
+| Action | Description |
+|--------|-------------|
+| `forwarded_v3_decrypted` | Successfully decrypted and forwarded as v2c |
+| `forwarded_v3_passthrough` | Forwarded as original v3 (no credentials) |
+| `v3_decryption_failed` | Decryption failed, packet dropped |
+| `v3_conversion_failed` | Decryption OK but v2c conversion failed |
+| `v3_decryption_error` | Exception during processing, packet dropped |
+
+### Monitoring Decryption Health
+
+Use granular statistics to monitor SNMPv3 processing:
+
+```bash
+python3.9 -O trapninja.py --stats --summary
+```
+
+Look for:
+- High `v3_decryption_failed` counts → Check credentials
+- High `v3_conversion_failed` counts → Report as potential bug
+- `forwarded_v3_passthrough` → Devices without configured credentials
+
+---
+
 ## Troubleshooting
 
 ### "No credentials configured for Engine ID"
@@ -548,4 +604,4 @@ SNMPv3 passphrases must be at least 8 characters. If your network element requir
 
 ---
 
-*TrapNinja v0.7.12 (Beta)*
+*TrapNinja v0.7.14 (Beta)*
