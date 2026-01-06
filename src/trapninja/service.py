@@ -12,7 +12,7 @@ import sys
 import time
 import signal
 import logging
-from scapy.all import sniff, get_if_list
+from scapy.all import sniff, get_if_list, get_if_addr
 
 from .config import INTERFACE, PID_FILE, LISTEN_PORTS, stop_event, load_config, CONFIG_DIR, LOG_FILE
 from .network import start_all_udp_listeners, cleanup_udp_sockets, forward_trap, start_packet_processors, start_queue_monitor
@@ -134,14 +134,18 @@ except ImportError:
         return None
     def get_fragment_stats():
         return {}
-    def generate_fragment_aware_filter(ports, exclude_sport=None):
+    def generate_fragment_aware_filter(ports, exclude_sport=None, local_ip=None):
         # Fallback to simple filter
         port_filter = " or ".join([f"udp dst port {p}" for p in ports])
+        if local_ip:
+            port_filter = f"({port_filter} and dst host {local_ip})"
         if exclude_sport:
             return f"({port_filter}) and not (udp src port {exclude_sport})"
         return port_filter
-    def generate_simple_filter(ports, exclude_sport=None):
+    def generate_simple_filter(ports, exclude_sport=None, local_ip=None):
         port_filter = " or ".join([f"udp dst port {p}" for p in ports])
+        if local_ip:
+            port_filter = f"({port_filter} and dst host {local_ip})"
         if exclude_sport:
             return f"({port_filter}) and not (udp src port {exclude_sport})"
         return port_filter
@@ -897,20 +901,41 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
                 # CRITICAL: Must exclude our own forwarded packets to prevent re-capture loop
                 from .core.constants import FORWARD_SOURCE_PORT
                 
+                # Get local IP for the interface - CRITICAL for parallel/sniff mode
+                # Without this, we capture packets forwarded by other processes to
+                # other destinations, causing duplication
+                local_ip = None
+                if force_sniff_mode:  # parallel, shadow, or mirror mode
+                    try:
+                        local_ip = get_if_addr(INTERFACE)
+                        if local_ip and local_ip != '0.0.0.0':
+                            logger.info(f"Parallel mode: filtering to local IP {local_ip}")
+                        else:
+                            logger.warning(
+                                f"Could not determine local IP for {INTERFACE}, "
+                                f"may capture other processes' forwarded packets"
+                            )
+                            local_ip = None
+                    except Exception as e:
+                        logger.warning(f"Failed to get local IP for {INTERFACE}: {e}")
+                        local_ip = None
+                
                 if fragment_reassembly_enabled:
                     # Fragment-aware filter captures:
                     # 1. Complete UDP packets destined to our ports
                     # 2. Non-first IP fragments (which don't have UDP header visible)
                     port_filter = generate_fragment_aware_filter(
                         LISTEN_PORTS, 
-                        exclude_sport=FORWARD_SOURCE_PORT
+                        exclude_sport=FORWARD_SOURCE_PORT,
+                        local_ip=local_ip
                     )
                     logger.info("Using fragment-aware BPF filter")
                 else:
                     # Standard filter only captures complete packets
                     port_filter = generate_simple_filter(
                         LISTEN_PORTS,
-                        exclude_sport=FORWARD_SOURCE_PORT
+                        exclude_sport=FORWARD_SOURCE_PORT,
+                        local_ip=local_ip
                     )
                 
                 logger.info(f"BPF filter: {port_filter}")

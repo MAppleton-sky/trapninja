@@ -534,12 +534,13 @@ class FragmentReassemblyBuffer:
 def generate_fragment_aware_filter(
     listen_ports: List[int],
     exclude_sport: Optional[int] = None,
+    local_ip: Optional[str] = None,
 ) -> str:
     """
     Generate a BPF filter that captures both complete packets and fragments.
     
     The filter captures:
-    1. Complete UDP packets destined to listen_ports
+    1. Complete UDP packets destined to listen_ports (and optionally local_ip)
     2. First fragments (offset=0, MF=1) destined to listen_ports  
     3. Non-first UDP fragments (offset>0) regardless of port
        (port info is only in first fragment)
@@ -547,19 +548,25 @@ def generate_fragment_aware_filter(
     Args:
         listen_ports: List of UDP ports to capture
         exclude_sport: Source port to exclude (prevents re-capture of forwarded packets)
+        local_ip: Local IP to filter on (critical for parallel/sniff mode to avoid
+                  capturing packets forwarded by other processes to other destinations)
         
     Returns:
         BPF filter string
     
     Example:
-        >>> generate_fragment_aware_filter([162], exclude_sport=10162)
-        '((udp dst port 162) and not (udp src port 10162)) or ((ip[6:2] & 0x1fff) != 0 and ip proto 17)'
+        >>> generate_fragment_aware_filter([162], exclude_sport=10162, local_ip='10.0.0.1')
+        '((udp dst port 162 and dst host 10.0.0.1) and not (udp src port 10162)) or ...'
     """
     # Part 1: Complete packets and first fragments (UDP header visible)
     port_parts = [f"udp dst port {port}" for port in listen_ports]
     port_filter = " or ".join(port_parts)
     if len(listen_ports) > 1:
         port_filter = f"({port_filter})"
+    
+    # Add destination IP filter if specified (critical for parallel mode)
+    if local_ip:
+        port_filter = f"({port_filter} and dst host {local_ip})"
     
     # Add source port exclusion if specified
     if exclude_sport:
@@ -572,7 +579,11 @@ def generate_fragment_aware_filter(
     # & 0x1fff masks out the flags to get just the offset
     # != 0 means this is NOT the first fragment
     # ip proto 17 ensures it's UDP (we can't see port in non-first fragments)
-    fragment_filter = "((ip[6:2] & 0x1fff) != 0 and ip proto 17)"
+    # Also filter by local_ip if specified
+    if local_ip:
+        fragment_filter = f"((ip[6:2] & 0x1fff) != 0 and ip proto 17 and dst host {local_ip})"
+    else:
+        fragment_filter = "((ip[6:2] & 0x1fff) != 0 and ip proto 17)"
     
     # Combine: complete packets OR non-first fragments
     return f"{complete_filter} or {fragment_filter}"
@@ -581,6 +592,7 @@ def generate_fragment_aware_filter(
 def generate_simple_filter(
     listen_ports: List[int],
     exclude_sport: Optional[int] = None,
+    local_ip: Optional[str] = None,
 ) -> str:
     """
     Generate a simple BPF filter (no fragment support).
@@ -590,6 +602,8 @@ def generate_simple_filter(
     Args:
         listen_ports: List of UDP ports to capture
         exclude_sport: Source port to exclude
+        local_ip: Local IP to filter on (critical for parallel/sniff mode to avoid
+                  capturing packets forwarded by other processes to other destinations)
         
     Returns:
         BPF filter string
@@ -599,6 +613,10 @@ def generate_simple_filter(
     
     if len(listen_ports) > 1:
         port_filter = f"({port_filter})"
+    
+    # Add destination IP filter if specified (critical for parallel mode)
+    if local_ip:
+        port_filter = f"({port_filter} and dst host {local_ip})"
     
     if exclude_sport:
         return f"({port_filter}) and not (udp src port {exclude_sport})"
