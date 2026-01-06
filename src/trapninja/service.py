@@ -578,6 +578,7 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
     # Initialize metrics module
     # Load metrics configuration (supports custom directory and global labels)
     metrics_dir = os.path.join(os.path.dirname(LOG_FILE), "metrics")  # Default
+    metrics_config = None  # Initialize for later use in granular stats
     try:
         metrics_config = load_metrics_config()
         if metrics_config:
@@ -632,6 +633,11 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
     if GRANULAR_STATS_AVAILABLE:
         logger.info("Initializing granular statistics system...")
         try:
+            # Get global labels from metrics config (if available)
+            global_labels = {}
+            if metrics_config and metrics_config.global_labels:
+                global_labels = metrics_config.global_labels
+            
             # Configure the collector
             stats_config = CollectorConfig(
                 max_ips=10000,      # Track up to 10,000 unique source IPs
@@ -642,6 +648,7 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
                 rate_window=60,        # 1 minute rate calculation window
                 export_interval=60,    # Export to files every minute
                 metrics_dir=metrics_dir,  # Same directory as other metrics
+                global_labels=global_labels,  # Apply same labels as main metrics
             )
             
             # Initialize the collector
@@ -652,6 +659,9 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
                 logger.info(f"  Max tracked IPs: {stats_config.max_ips:,}")
                 logger.info(f"  Max tracked OIDs: {stats_config.max_oids:,}")
                 logger.info(f"  Export interval: {stats_config.export_interval}s")
+                if global_labels:
+                    labels_str = ", ".join(f"{k}={v}" for k, v in global_labels.items())
+                    logger.info(f"  Global labels: {labels_str}")
             else:
                 logger.warning("Failed to initialize granular statistics collector")
         except Exception as e:
