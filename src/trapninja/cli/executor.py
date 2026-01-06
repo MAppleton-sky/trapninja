@@ -423,6 +423,37 @@ def execute_command(args: Namespace) -> int:
     
     elif args.shadow_export:
         return shadow_commands.handle_shadow_export(args)
+    
+    # Handle metrics configuration commands
+    elif hasattr(args, 'metrics_config') and args.metrics_config:
+        from . import metrics_commands
+        return metrics_commands.show_metrics_config(json_output=getattr(args, 'json', False))
+    
+    elif hasattr(args, 'metrics_set_dir') and args.metrics_set_dir:
+        from . import metrics_commands
+        return metrics_commands.set_metrics_directory(args.metrics_set_dir)
+    
+    elif hasattr(args, 'metrics_add_label') and args.metrics_add_label:
+        from . import metrics_commands
+        label_name = getattr(args, 'label_name', None)
+        label_value = getattr(args, 'label_value', None)
+        if not label_name or label_value is None:
+            print("Error: --label-name and --label-value are required for --metrics-add-label")
+            print("Example: --metrics-add-label --label-name on_prem --label-value 1")
+            return 1
+        return metrics_commands.add_metrics_label(label_name, label_value)
+    
+    elif hasattr(args, 'metrics_remove_label') and args.metrics_remove_label:
+        from . import metrics_commands
+        return metrics_commands.remove_metrics_label(args.metrics_remove_label)
+    
+    elif hasattr(args, 'metrics_set_interval') and args.metrics_set_interval:
+        from . import metrics_commands
+        return metrics_commands.set_export_interval(args.metrics_set_interval)
+    
+    elif hasattr(args, 'metrics_help') and args.metrics_help:
+        from . import metrics_commands
+        return metrics_commands.show_metrics_help()
 
     # Handle configuration commands
     elif args.show_config:

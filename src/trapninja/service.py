@@ -17,7 +17,7 @@ from scapy.all import sniff, get_if_list, get_if_addr
 from .config import INTERFACE, PID_FILE, LISTEN_PORTS, stop_event, load_config, CONFIG_DIR, LOG_FILE
 from .network import start_all_udp_listeners, cleanup_udp_sockets, forward_trap, start_packet_processors, start_queue_monitor
 from .redirection import schedule_config_check, load_redirection_config
-from .metrics import init_metrics, get_metrics_summary
+from .metrics import init_metrics, get_metrics_summary, load_metrics_config
 from .ha import (
     load_ha_config, initialize_ha, shutdown_ha, get_ha_cluster,
     notify_trap_processed, is_forwarding_enabled,
@@ -576,9 +576,29 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
     from .config import redirected_ips, redirected_oids, redirected_destinations
 
     # Initialize metrics module
-    metrics_dir = os.path.join(os.path.dirname(LOG_FILE), "metrics")
-    init_metrics(metrics_directory=metrics_dir, export_interval=60)
-    logger.info(f"Metrics collection initialized with output to {metrics_dir}")
+    # Load metrics configuration (supports custom directory and global labels)
+    try:
+        metrics_config = load_metrics_config()
+        if metrics_config:
+            init_metrics(config=metrics_config)
+            logger.info(f"Metrics collection initialized:")
+            logger.info(f"  Output directory: {metrics_config.directory}")
+            logger.info(f"  Export interval: {metrics_config.export_interval_seconds}s")
+            if metrics_config.global_labels:
+                labels_str = ", ".join(
+                    f"{k}={v}" for k, v in metrics_config.global_labels.items()
+                )
+                logger.info(f"  Global labels: {labels_str}")
+        else:
+            # Fall back to default location
+            metrics_dir = os.path.join(os.path.dirname(LOG_FILE), "metrics")
+            init_metrics(metrics_directory=metrics_dir, export_interval=60)
+            logger.info(f"Metrics collection initialized with defaults: {metrics_dir}")
+    except Exception as e:
+        logger.warning(f"Error loading metrics config: {e}")
+        metrics_dir = os.path.join(os.path.dirname(LOG_FILE), "metrics")
+        init_metrics(metrics_directory=metrics_dir, export_interval=60)
+        logger.info(f"Metrics collection initialized with fallback: {metrics_dir}")
 
     # =======================================================================
     # Initialize Cache System (Redis-based trap buffering)

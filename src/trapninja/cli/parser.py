@@ -254,6 +254,20 @@ Examples:
                       help='Show shadow mode statistics')
     group.add_argument('--shadow-export', action='store_true',
                       help='Export shadow mode statistics to JSON')
+    
+    # Metrics configuration commands
+    group.add_argument('--metrics-config', action='store_true',
+                      help='Show current metrics configuration')
+    group.add_argument('--metrics-set-dir', type=str, metavar='DIRECTORY',
+                      help='Set metrics output directory (e.g., /opt/metrics)')
+    group.add_argument('--metrics-add-label', action='store_true',
+                      help='Add a global label to all metrics (use with --label-name, --label-value)')
+    group.add_argument('--metrics-remove-label', type=str, metavar='NAME',
+                      help='Remove a global label from metrics')
+    group.add_argument('--metrics-set-interval', type=int, metavar='SECONDS',
+                      help='Set metrics export interval in seconds')
+    group.add_argument('--metrics-help', action='store_true',
+                      help='Show comprehensive metrics configuration help')
 
     # Hidden option for internal daemon use (must be in the group to satisfy required=True)
     group.add_argument('--foreground-daemon', action='store_true',
@@ -363,6 +377,12 @@ Examples:
                        help='OID to exclude from cache replay')
     parser.add_argument('--limit', type=int, default=20,
                        help='Maximum entries to show in cache query (default: 20)')
+
+    # Metrics label parameters
+    parser.add_argument('--label-name', type=str,
+                       help='Label name for --metrics-add-label')
+    parser.add_argument('--label-value', type=str,
+                       help='Label value for --metrics-add-label')
 
     # Config sync parameters
     parser.add_argument('--config', type=str,

@@ -1,0 +1,15 @@
+{
+  "_comment": "TrapNinja Metrics Configuration",
+  "_comment2": "Global labels are applied to ALL Prometheus metrics",
+  
+  "enabled": true,
+  "directory": "/opt/metrics",
+  "export_interval_seconds": 60,
+  "prometheus_file": "trapninja_metrics.prom",
+  "json_file": "trapninja_metrics.json",
+  
+  "global_labels": {
+    "on_prem": "1",
+    "environment": "production"
+  }
+}
