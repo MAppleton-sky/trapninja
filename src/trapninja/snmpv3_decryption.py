@@ -1008,6 +1008,15 @@ class SNMPv3Decryptor:
                     f"varbinds={len(varbinds_bytes)}"
                 )
             
+            # DEBUG: Hex dump of generated message for troubleshooting
+            logger.debug(f"SNMPv2c message hex dump: {message.hex()}")
+            
+            # Validate the message structure
+            if not self._validate_snmpv2c_message(message):
+                logger.error(f"Generated SNMPv2c message FAILED validation!")
+                logger.error(f"Message hex: {message.hex()}")
+                return None
+            
             return message
             
         except Exception as e:
@@ -1015,6 +1024,92 @@ class SNMPv3Decryptor:
             import traceback
             logger.debug(traceback.format_exc())
             return None
+    
+    def _validate_snmpv2c_message(self, message: bytes) -> bool:
+        """
+        Validate that the generated SNMPv2c message has correct structure.
+        
+        Expected structure:
+        SEQUENCE {
+            INTEGER (version = 1)
+            OCTET STRING (community)
+            SNMPv2-Trap-PDU [7] {
+                INTEGER (request-id)
+                INTEGER (error-status)
+                INTEGER (error-index)
+                SEQUENCE (varbind-list)
+            }
+        }
+        """
+        try:
+            idx = 0
+            
+            # Outer SEQUENCE
+            if message[idx] != 0x30:
+                logger.error(f"Validation: Expected SEQUENCE (0x30), got 0x{message[idx]:02x}")
+                return False
+            idx += 1
+            
+            # Skip length
+            if message[idx] & 0x80:
+                len_bytes = message[idx] & 0x7f
+                idx += 1 + len_bytes
+            else:
+                idx += 1
+            
+            # Version INTEGER
+            if message[idx] != 0x02:
+                logger.error(f"Validation: Expected INTEGER (0x02) for version, got 0x{message[idx]:02x}")
+                return False
+            idx += 1
+            ver_len = message[idx]
+            idx += 1
+            version = int.from_bytes(message[idx:idx+ver_len], 'big')
+            if version != 1:
+                logger.error(f"Validation: Expected version 1, got {version}")
+                return False
+            idx += ver_len
+            
+            # Community OCTET STRING
+            if message[idx] != 0x04:
+                logger.error(f"Validation: Expected OCTET STRING (0x04) for community, got 0x{message[idx]:02x}")
+                return False
+            idx += 1
+            if message[idx] & 0x80:
+                len_bytes = message[idx] & 0x7f
+                comm_len = int.from_bytes(message[idx+1:idx+1+len_bytes], 'big')
+                idx += 1 + len_bytes
+            else:
+                comm_len = message[idx]
+                idx += 1
+            community = message[idx:idx+comm_len].decode('utf-8', errors='replace')
+            logger.debug(f"Validation: community='{community}'")
+            idx += comm_len
+            
+            # SNMPv2-Trap-PDU (tag 0xa7)
+            if message[idx] != 0xa7:
+                logger.error(f"Validation: Expected SNMPv2-Trap-PDU (0xa7), got 0x{message[idx]:02x}")
+                return False
+            idx += 1
+            
+            # Skip PDU length
+            if message[idx] & 0x80:
+                len_bytes = message[idx] & 0x7f
+                idx += 1 + len_bytes
+            else:
+                idx += 1
+            
+            # Request ID INTEGER
+            if message[idx] != 0x02:
+                logger.error(f"Validation: Expected INTEGER (0x02) for request-id, got 0x{message[idx]:02x}")
+                return False
+            
+            logger.debug("Validation: SNMPv2c message structure OK")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Validation error: {e}")
+            return False
     
     def _encode_length(self, length: int) -> bytes:
         """Encode BER length."""

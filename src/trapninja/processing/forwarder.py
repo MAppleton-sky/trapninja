@@ -287,6 +287,12 @@ def forward_packet(
     if not destinations:
         return False
     
+    # DEBUG: Log payload details
+    logger.debug(
+        f"forward_packet: source={source_ip}, payload_len={len(payload)}, "
+        f"destinations={len(destinations)}, first_20_bytes={payload[:20].hex()}"
+    )
+    
     # Try raw socket first
     pool = get_socket_pool()
     

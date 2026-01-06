@@ -584,7 +584,36 @@ class PacketWorker:
                             f"SNMPv3->v2c conversion successful: "
                             f"{len(payload)} -> {len(v2c_payload)} bytes"
                         )
+                        # Log first bytes to verify it's valid SNMP
+                        logger.debug(
+                            f"v2c payload first 20 bytes: {v2c_payload[:20].hex()}"
+                        )
+                        
+                        # Determine destination based on redirection rules
+                        # Check IP redirection first (same as v2c path)
+                        if source_ip in config['redirected_ips']:
+                            tag = config['redirected_ips'][source_ip]
+                            if tag in config['redirected_destinations']:
+                                dest_list = config['redirected_destinations'][tag]
+                                logger.info(
+                                    f"Forwarding decrypted v2c trap from {source_ip} "
+                                    f"({len(v2c_payload)} bytes) to REDIRECTED destination '{tag}' "
+                                    f"({len(dest_list)} hosts)"
+                                )
+                                forward_packet(source_ip, v2c_payload, dest_list)
+                                self.stats.increment_redirected()
+                                self._record_granular_stats(
+                                    source_ip, None, 'forwarded_v3_decrypted', tag
+                                )
+                                notify_trap_processed()
+                                return
+                        
+                        # Default destinations
                         if config['destinations']:
+                            logger.info(
+                                f"Forwarding decrypted v2c trap from {source_ip} "
+                                f"({len(v2c_payload)} bytes) to {len(config['destinations'])} destination(s)"
+                            )
                             forward_packet(source_ip, v2c_payload, config['destinations'])
                             self.stats.increment_forwarded()
                             self._record_granular_stats(
