@@ -743,7 +743,9 @@ class ControlSocket:
                         'status': self.INVALID_REQUEST,
                         'error': 'ip_address required'
                     }
-                data = collector.get_ip_stats(ip_address)
+                # Allow configurable number of top OIDs (default 10, max 500)
+                top_n_oids = min(request.get('top_n_oids', 10), 500)
+                data = collector.get_ip_stats(ip_address, top_n_oids=top_n_oids)
                 if data:
                     return {
                         'status': self.SUCCESS,
@@ -761,7 +763,9 @@ class ControlSocket:
                         'status': self.INVALID_REQUEST,
                         'error': 'oid required'
                     }
-                data = collector.get_oid_stats(oid)
+                # Allow configurable number of top sources (default 10, max 500)
+                top_n_sources = min(request.get('top_n_sources', 10), 500)
+                data = collector.get_oid_stats(oid, top_n_sources=top_n_sources)
                 if data:
                     return {
                         'status': self.SUCCESS,
@@ -791,6 +795,49 @@ class ControlSocket:
                 return {
                     'status': self.SUCCESS,
                     'message': 'Statistics reset'
+                }
+
+            elif action == 'debug':
+                # Debug info to diagnose stats collection issues
+                from .processing.stats import get_global_stats
+                from .network import get_queue_stats
+                from .ha import is_forwarding_enabled, get_ha_cluster
+                from .shadow import is_shadow_mode, is_observe_only, get_effective_capture_mode
+                
+                processing_stats = get_global_stats()
+                queue_stats = get_queue_stats()
+                
+                # Get HA status
+                ha_cluster = get_ha_cluster()
+                ha_info = {
+                    'enabled': ha_cluster is not None and ha_cluster.config.enabled if ha_cluster else False,
+                    'is_forwarding': is_forwarding_enabled(),
+                    'state': ha_cluster.current_state.value if ha_cluster else 'disabled',
+                }
+                
+                # Get capture mode info
+                capture_info = {
+                    'shadow_mode': is_shadow_mode(),
+                    'observe_only': is_observe_only(),
+                    'effective_mode': get_effective_capture_mode(),
+                }
+                
+                debug_info = {
+                    'granular_collector': {
+                        'initialized': collector is not None,
+                        'running': collector._running if collector else False,
+                        'total_traps': collector._total_traps if collector else 0,
+                        'unique_ips': len(collector._ip_stats) if collector else 0,
+                        'unique_oids': len(collector._oid_stats) if collector else 0,
+                    },
+                    'processing_stats': processing_stats.to_dict() if processing_stats else {},
+                    'queue_stats': queue_stats,
+                    'ha_status': ha_info,
+                    'capture_mode': capture_info,
+                }
+                return {
+                    'status': self.SUCCESS,
+                    'data': debug_info
                 }
 
             else:

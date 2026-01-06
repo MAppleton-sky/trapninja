@@ -246,8 +246,14 @@ class IPStats:
         """Get top N OIDs by count."""
         return self.oid_counts.most_common(n)
     
-    def to_dict(self, include_details: bool = True) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
+    def to_dict(self, include_details: bool = True, top_n_oids: int = 10) -> Dict[str, Any]:
+        """
+        Convert to dictionary for JSON serialization.
+        
+        Args:
+            include_details: Whether to include top OIDs and destinations
+            top_n_oids: Number of top OIDs to include (default 10)
+        """
         result = {
             'ip_address': self.ip_address,
             'total_traps': self.total_traps,
@@ -268,7 +274,7 @@ class IPStats:
         if include_details:
             result['top_oids'] = [
                 {'oid': oid, 'count': count} 
-                for oid, count in self.get_top_oids(10)
+                for oid, count in self.get_top_oids(top_n_oids)
             ]
             result['unique_oids'] = len(self.oid_counts)
             result['destinations'] = dict(self.destination_counts)
@@ -377,8 +383,14 @@ class OIDStats:
         """Get top N source IPs by count."""
         return self.ip_counts.most_common(n)
     
-    def to_dict(self, include_details: bool = True) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
+    def to_dict(self, include_details: bool = True, top_n_sources: int = 10) -> Dict[str, Any]:
+        """
+        Convert to dictionary for JSON serialization.
+        
+        Args:
+            include_details: Whether to include top source IPs and destinations
+            top_n_sources: Number of top source IPs to include (default 10)
+        """
         result = {
             'oid': self.oid,
             'total_traps': self.total_traps,
@@ -401,7 +413,7 @@ class OIDStats:
         if include_details:
             result['top_source_ips'] = [
                 {'ip': ip, 'count': count}
-                for ip, count in self.get_top_ips(10)
+                for ip, count in self.get_top_ips(top_n_sources)
             ]
             result['destinations'] = dict(self.destination_counts)
         

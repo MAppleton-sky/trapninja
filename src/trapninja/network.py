@@ -102,14 +102,19 @@ class QueueStats:
             self.max_depth = depth
     
     def get_stats(self) -> Dict[str, Any]:
+        # Update max depth on every stats check
+        current_depth = packet_queue.qsize()
+        if current_depth > self.max_depth:
+            self.max_depth = current_depth
+        
         return {
-            'current_depth': packet_queue.qsize(),
+            'current_depth': current_depth,
             'max_depth': self.max_depth,
             'total_queued': self.total_queued,
             'total_dropped': self.total_dropped,
             'full_events': self.full_events,
             'queue_capacity': QUEUE_MAX_SIZE,
-            'utilization': packet_queue.qsize() / QUEUE_MAX_SIZE
+            'utilization': current_depth / QUEUE_MAX_SIZE
         }
 
 
@@ -364,7 +369,9 @@ def start_packet_processors(num_workers: int = None) -> List[threading.Thread]:
         from .processing import start_workers
         
         # Start workers
-        workers = start_workers(packet_queue, num_workers)
+        # IMPORTANT: Use keyword argument for num_workers to avoid
+        # passing it as stop_event (which is the 2nd positional parameter)
+        workers = start_workers(packet_queue, num_workers=num_workers)
         
         return workers
         

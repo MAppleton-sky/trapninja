@@ -74,8 +74,14 @@ def _query_daemon_stats(query: Dict) -> Optional[Dict]:
         
         # Check if request was successful
         if result.get('status') == 0:  # SUCCESS
-            # Return data if present, otherwise return the message or full result
-            return result.get('data') or result.get('message') or result
+            # Return data if the key exists (even if it's an empty list/dict)
+            # Use 'in' check instead of truthiness to handle empty collections
+            if 'data' in result:
+                return result['data']
+            # For actions that only return a message (like reset)
+            if 'message' in result:
+                return result['message']
+            return result
         else:
             return None
         
@@ -310,7 +316,13 @@ def handle_stats_top_ips(args: Namespace) -> int:
             ip_list = file_data.get('top_ips', [])
             ips = _sort_stats_list(ip_list, sort_by)[:count]
     
-    if not ips:
+    if not ips and ips is not None:
+        # Empty list means no data yet, but connection worked
+        print("No IP statistics available yet.")
+        print("Send some traps to the forwarder to start collecting data.")
+        return 0
+    
+    if ips is None:
         print("Error: Could not retrieve IP statistics.")
         print("Make sure TrapNinja is running with granular stats enabled.")
         return 1
@@ -366,7 +378,13 @@ def handle_stats_top_oids(args: Namespace) -> int:
             oid_list = file_data.get('top_oids', [])
             oids = _sort_stats_list(oid_list, sort_by)[:count]
     
-    if not oids:
+    if not oids and oids is not None:
+        # Empty list means no data yet, but connection worked
+        print("No OID statistics available yet.")
+        print("Send some traps to the forwarder to start collecting data.")
+        return 0
+    
+    if oids is None:
         print("Error: Could not retrieve OID statistics.")
         print("Make sure TrapNinja is running with granular stats enabled.")
         return 1
@@ -409,6 +427,7 @@ def handle_stats_ip_detail(args: Namespace) -> int:
     ip_address = args.ip
     use_json = getattr(args, 'json', False)
     pretty = getattr(args, 'pretty', False)
+    top_n_oids = min(getattr(args, 'oids', 10), 500)  # Use --oids parameter
     
     if not ip_address:
         print("Error: IP address required. Use --ip <address>")
@@ -417,7 +436,8 @@ def handle_stats_ip_detail(args: Namespace) -> int:
     # Query daemon for real-time data - returns IP data dict directly on success
     ip_data = _query_daemon_stats({
         'action': 'ip_detail',
-        'ip_address': ip_address
+        'ip_address': ip_address,
+        'top_n_oids': top_n_oids
     })
     
     if ip_data is None:
@@ -458,9 +478,11 @@ def handle_stats_ip_detail(args: Namespace) -> int:
         print(f"  Peak Occurred:   {_format_timestamp(peak_ts):>12}")
     
     top_oids = ip_data.get('top_oids', [])
+    unique_oids = ip_data.get('unique_oids', len(top_oids))
     if top_oids:
-        print(f"\nTOP OIDs ({ip_data.get('unique_oids', len(top_oids))} unique):")
-        for i, oid_info in enumerate(top_oids[:10], 1):
+        showing = len(top_oids)
+        print(f"\nTOP OIDs (showing {showing} of {unique_oids} unique):")
+        for i, oid_info in enumerate(top_oids, 1):
             oid = oid_info.get('oid', 'N/A')
             count = oid_info.get('count', 0)
             # Truncate long OIDs
@@ -483,6 +505,7 @@ def handle_stats_oid_detail(args: Namespace) -> int:
     oid = args.oid
     use_json = getattr(args, 'json', False)
     pretty = getattr(args, 'pretty', False)
+    top_n_sources = min(getattr(args, 'sources', 10), 500)  # Use --sources parameter
     
     if not oid:
         print("Error: OID required. Use --oid <oid>")
@@ -491,7 +514,8 @@ def handle_stats_oid_detail(args: Namespace) -> int:
     # Query daemon for real-time data - returns OID data dict directly on success
     oid_data = _query_daemon_stats({
         'action': 'oid_detail',
-        'oid': oid
+        'oid': oid,
+        'top_n_sources': top_n_sources
     })
     
     if oid_data is None:
@@ -531,9 +555,11 @@ def handle_stats_oid_detail(args: Namespace) -> int:
         print(f"  Peak Occurred:   {_format_timestamp(peak_ts):>12}")
     
     top_ips = oid_data.get('top_source_ips', [])
+    unique_sources = oid_data.get('unique_sources', len(top_ips))
     if top_ips:
-        print(f"\nTOP SOURCE IPs ({oid_data.get('unique_sources', len(top_ips))} unique):")
-        for i, ip_info in enumerate(top_ips[:10], 1):
+        showing = len(top_ips)
+        print(f"\nTOP SOURCE IPs (showing {showing} of {unique_sources} unique):")
+        for i, ip_info in enumerate(top_ips, 1):
             ip = ip_info.get('ip', 'N/A')
             count = ip_info.get('count', 0)
             print(f"  {i:2}. {ip} ({count:,})")
@@ -701,17 +727,22 @@ COMMANDS
   --stats-dashboard         Export full dashboard data as JSON
   --stats-export            Export statistics to file
   --stats-reset             Reset all statistics (requires --yes)
+  --stats-debug             Show diagnostic information for troubleshooting
 
 OPTIONS
 -------
 
-  -n, --count <N>           Number of items to show (default: 10)
+  -n, --count <N>           Number of items to show in top lists (default: 10)
   -s, --sort <FIELD>        Sort by: total, rate, peak, blocked, recent
                             - total: highest total trap count
                             - rate: highest current rate (last 60 seconds)
                             - peak: highest peak rate ever observed
                             - blocked: most blocked traps
                             - recent: most recently seen
+  --sources <N>             Number of top source IPs to show for OID details
+                            (default: 10, max: 500) - use with --stats-oid
+  --oids <N>                Number of top OIDs to show for IP details
+                            (default: 10, max: 500) - use with --stats-ip
   --json                    Output as JSON
   --pretty                  Pretty-print JSON output
   -f, --format <FMT>        Export format: json, prometheus
@@ -732,11 +763,23 @@ trapninja --stats-top-oids --sort peak
 # Get details for a specific IP
 trapninja --stats-ip --ip 10.0.0.1
 
+# Get details for a specific IP with top 50 OIDs
+trapninja --stats-ip --ip 10.0.0.1 --oids 50
+
+# Get details for a specific OID with top 30 source IPs
+trapninja --stats-oid --oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 30
+
+# Export OID details as JSON for further analysis
+trapninja --stats-oid --oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 100 --json --pretty
+
 # Export statistics in JSON format
 trapninja --stats-export --format json -o /tmp/stats.json
 
 # Get dashboard data for visualization
 trapninja --stats-dashboard --pretty
+
+# Troubleshoot stats collection
+trapninja --stats-debug
 
 METRICS FILES
 -------------
@@ -758,4 +801,119 @@ To prevent unbounded memory growth, statistics are bounded:
 ================================================================================
 """
     print(help_text)
+    return 0
+
+
+def handle_stats_debug(args: Namespace) -> int:
+    """Handle --stats-debug command - show diagnostic information."""
+    use_json = getattr(args, 'json', False)
+    pretty = getattr(args, 'pretty', False)
+    
+    # Query debug info from daemon
+    data = _query_daemon_stats({'action': 'debug'})
+    
+    if data is None:
+        print("Error: Could not retrieve debug information.")
+        print("Make sure TrapNinja daemon is running.")
+        return 1
+    
+    if use_json:
+        _output_json(data, pretty)
+        return 0
+    
+    print("\n" + "=" * 70)
+    print("  TrapNinja Statistics Debug Information")
+    print("=" * 70 + "\n")
+    
+    # Capture mode info
+    cm = data.get('capture_mode', {})
+    print("CAPTURE MODE:")
+    print(f"  Effective Mode:    {cm.get('effective_mode', 'unknown')}")
+    print(f"  Shadow Mode:       {cm.get('shadow_mode', False)}")
+    print(f"  Observe Only:      {cm.get('observe_only', False)}")
+    
+    # HA status
+    ha = data.get('ha_status', {})
+    print("\nHA STATUS:")
+    print(f"  HA Enabled:        {ha.get('enabled', False)}")
+    print(f"  Is Forwarding:     {ha.get('is_forwarding', True)}")
+    print(f"  HA State:          {ha.get('state', 'disabled')}")
+    
+    # Queue stats (packet capture -> workers)
+    qs = data.get('queue_stats', {})
+    print("\nPACKET QUEUE (capture -> workers):")
+    print(f"  Total Queued:      {qs.get('total_queued', 0):,}")
+    print(f"  Total Dropped:     {qs.get('total_dropped', 0):,}")
+    print(f"  Current Depth:     {qs.get('current_depth', 0):,}")
+    print(f"  Max Depth:         {qs.get('max_depth', 0):,}")
+    print(f"  Queue Capacity:    {qs.get('queue_capacity', 0):,}")
+    print(f"  Utilization:       {qs.get('utilization', 0):.1%}")
+    
+    # Granular collector status
+    gc = data.get('granular_collector', {})
+    print("\nGRANULAR STATISTICS COLLECTOR:")
+    print(f"  Initialized:       {gc.get('initialized', False)}")
+    print(f"  Running:           {gc.get('running', False)}")
+    print(f"  Total Traps:       {gc.get('total_traps', 0):,}")
+    print(f"  Unique IPs:        {gc.get('unique_ips', 0):,}")
+    print(f"  Unique OIDs:       {gc.get('unique_oids', 0):,}")
+    
+    # Processing stats (from worker threads)
+    ps = data.get('processing_stats', {})
+    print("\nPACKET PROCESSING STATS (worker threads):")
+    print(f"  Packets Processed: {ps.get('packets_processed', 0):,}")
+    print(f"  Packets Forwarded: {ps.get('packets_forwarded', 0):,}")
+    print(f"  Packets Blocked:   {ps.get('packets_blocked', 0):,}")
+    print(f"  Packets Redirected:{ps.get('packets_redirected', 0):,}")
+    print(f"  Processing Errors: {ps.get('processing_errors', 0):,}")
+    print(f"  HA Blocked:        {ps.get('ha_blocked', 0):,}")
+    print(f"  Fast Path Hits:    {ps.get('fast_path_hits', 0):,}")
+    print(f"  Slow Path Hits:    {ps.get('slow_path_hits', 0):,}")
+    print(f"  Processing Rate:   {ps.get('processing_rate', 0):.1f}/s")
+    print(f"  Uptime:            {ps.get('uptime_seconds', 0):.0f}s")
+    
+    # Diagnosis
+    print("\nDIAGNOSIS:")
+    
+    total_queued = qs.get('total_queued', 0)
+    packets_processed = ps.get('packets_processed', 0)
+    total_traps = gc.get('total_traps', 0)
+    ha_blocked = ps.get('ha_blocked', 0)
+    is_forwarding = ha.get('is_forwarding', True)
+    observe_only = cm.get('observe_only', False)
+    
+    if total_queued == 0:
+        print("  ⚠️  No packets queued! Packets are NOT being captured.")
+        print("      Check:")
+        print("        - Is traffic reaching the interface?")
+        print("        - Is the BPF filter correct?")
+        print("        - Run: tcpdump -i <interface> udp port 162")
+    elif packets_processed == 0:
+        print("  ⚠️  Packets queued but NOT processed!")
+        print("      Workers may not be running. Check daemon logs.")
+    elif ha_blocked > 0 and not is_forwarding:
+        print("  ⚠️  Packets blocked by HA (secondary mode)!")
+        print(f"      {ha_blocked:,} packets dropped because this is SECONDARY.")
+        print("      Forwarding is disabled - only PRIMARY forwards.")
+    elif observe_only:
+        print("  ℹ️  Running in OBSERVE-ONLY mode (shadow mode).")
+        print("      Packets are counted but NOT forwarded.")
+        print("      This is expected for --shadow-mode.")
+    elif not gc.get('initialized'):
+        print("  ⚠️  Granular collector NOT initialized!")
+        print("      Check daemon startup logs for errors.")
+    elif not gc.get('running'):
+        print("  ⚠️  Granular collector initialized but NOT running!")
+        print("      Background export thread may have stopped.")
+    elif total_traps == 0 and packets_processed > 0:
+        print("  ⚠️  Packets being processed but granular stats NOT recording!")
+        print("      This likely means the code update hasn't been deployed.")
+        print("      Solution: Restart the daemon to load updated worker code.")
+    elif total_traps > 0:
+        print("  ✓  Statistics collection appears to be working normally.")
+    else:
+        print("  ℹ️  No packets processed yet.")
+        print("      Either no traps received or workers haven't started.")
+    
+    print()
     return 0

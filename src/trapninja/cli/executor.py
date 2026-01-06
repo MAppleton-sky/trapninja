@@ -210,6 +210,55 @@ def execute_command(args: Namespace) -> int:
     elif args.list_blocked_oids:
         return 0 if filtering_commands.list_blocked_oids() else 1
 
+    # Handle IP redirection commands
+    elif args.redirect_ip:
+        if not args.tag:
+            print("Error: --tag is required for --redirect-ip")
+            print("Example: --redirect-ip 10.0.0.1 --tag security")
+            return 1
+        return 0 if filtering_commands.redirect_ip(args.redirect_ip, args.tag) else 1
+    
+    elif args.unredirect_ip:
+        return 0 if filtering_commands.unredirect_ip(args.unredirect_ip) else 1
+    
+    elif args.list_redirected_ips:
+        return 0 if filtering_commands.list_redirected_ips() else 1
+
+    # Handle OID redirection commands
+    elif args.redirect_oid:
+        if not args.tag:
+            print("Error: --tag is required for --redirect-oid")
+            print("Example: --redirect-oid 1.3.6.1.4.1.9.9.41.2.0.1 --tag security")
+            return 1
+        return 0 if filtering_commands.redirect_oid(args.redirect_oid, args.tag) else 1
+    
+    elif args.unredirect_oid:
+        return 0 if filtering_commands.unredirect_oid(args.unredirect_oid) else 1
+    
+    elif args.list_redirected_oids:
+        return 0 if filtering_commands.list_redirected_oids() else 1
+
+    # Handle redirect destination commands
+    elif args.add_redirect_dest:
+        if not args.tag or not args.ip or not args.port:
+            print("Error: --tag, --ip, and --port are required for --add-redirect-dest")
+            print("Example: --add-redirect-dest --tag security --ip 10.1.1.100 --port 162")
+            return 1
+        return 0 if filtering_commands.add_redirect_destination(args.tag, args.ip, args.port) else 1
+    
+    elif args.remove_redirect_dest:
+        if not args.tag or not args.ip or not args.port:
+            print("Error: --tag, --ip, and --port are required for --remove-redirect-dest")
+            print("Example: --remove-redirect-dest --tag security --ip 10.1.1.100 --port 162")
+            return 1
+        return 0 if filtering_commands.remove_redirect_destination(args.tag, args.ip, args.port) else 1
+    
+    elif args.list_redirect_dests:
+        return 0 if filtering_commands.list_redirect_destinations() else 1
+    
+    elif args.redirection_help:
+        return 0 if filtering_commands.show_redirection_help() else 1
+
     # Handle SNMPv3 commands
     elif args.snmpv3_add_user:
         if not args.username or not args.engine_id:
@@ -364,6 +413,9 @@ def execute_command(args: Namespace) -> int:
 
     elif args.stats_help:
         return stats_commands.handle_stats_help(args)
+
+    elif args.stats_debug:
+        return stats_commands.handle_stats_debug(args)
 
     # Handle shadow mode commands
     elif args.shadow_status:

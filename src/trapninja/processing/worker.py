@@ -24,6 +24,15 @@ from .parser import is_snmpv2c, is_snmpv3, extract_trap_oid_fast, parse_snmp_pac
 from .forwarder import forward_packet
 from .stats import ProcessingStats, StatsCollector, get_global_stats
 
+# Import granular statistics collector
+try:
+    from ..stats import get_stats_collector as get_granular_stats
+    GRANULAR_STATS_AVAILABLE = True
+except ImportError:
+    GRANULAR_STATS_AVAILABLE = False
+    def get_granular_stats():
+        return None
+
 # Import HA functions for forwarding control
 # CRITICAL: These functions control whether this node should forward traps
 try:
@@ -171,6 +180,44 @@ class PacketWorker:
         self._thread: Optional[threading.Thread] = None
         self._packets_since_log = 0
         self._log_interval = 1000
+        self._granular_collector = None  # Cached reference to granular stats
+    
+    def _record_granular_stats(self, source_ip: str, oid: str = None,
+                                action: str = 'forwarded', destination: str = None):
+        """
+        Record trap in granular statistics collector.
+        
+        Args:
+            source_ip: Source IP address
+            oid: Trap OID (if extracted)
+            action: 'forwarded', 'blocked', 'redirected', 'dropped'
+            destination: Destination tag or "ip:port"
+        """
+        # Lazy initialization of collector reference
+        if self._granular_collector is None:
+            if GRANULAR_STATS_AVAILABLE:
+                self._granular_collector = get_granular_stats()
+                if self._granular_collector:
+                    logger.debug(f"Worker {self.worker_id}: Got granular stats collector")
+                else:
+                    logger.warning(f"Worker {self.worker_id}: get_granular_stats() returned None - stats not initialized?")
+            else:
+                # Log once per worker that granular stats are not available
+                if not hasattr(self, '_granular_warning_logged'):
+                    logger.warning(f"Worker {self.worker_id}: GRANULAR_STATS_AVAILABLE is False - import failed")
+                    self._granular_warning_logged = True
+        
+        if self._granular_collector:
+            try:
+                self._granular_collector.record_trap(
+                    source_ip=source_ip,
+                    oid=oid,
+                    action=action,
+                    destination=destination
+                )
+            except Exception as e:
+                # Don't let stats recording errors affect packet processing
+                logger.debug(f"Error recording granular stats: {e}")
     
     def start(self) -> threading.Thread:
         """
@@ -256,11 +303,21 @@ class PacketWorker:
         capture modes (sniff, socket, eBPF).
         """
         try:
-            # CRITICAL: Check HA state FIRST before any processing
+            source_ip = packet_data['src_ip']
+            payload = packet_data['payload']
+            
+            # Always count packets received (for diagnostics)
+            self.stats.increment_processed()
+            
+            # CRITICAL: Check HA state before forwarding
             # Only the PRIMARY node should forward traps
+            # But ALWAYS record stats so we can see what's arriving
             if not is_forwarding_enabled():
                 # Track blocked packets for monitoring
                 self.stats.increment_ha_blocked()
+                
+                # Record in granular stats as 'ha_blocked' so it shows up in reports
+                self._record_granular_stats(source_ip, None, 'ha_blocked')
                 
                 # Log periodically to help diagnose issues without flooding
                 if self.stats.ha_blocked_count % 1000 == 1:  # First and every 1000th
@@ -271,10 +328,6 @@ class PacketWorker:
                 return  # Drop packet - we're in secondary mode
             
             config = _config_cache.get()
-            source_ip = packet_data['src_ip']
-            payload = packet_data['payload']
-            
-            self.stats.increment_processed()
             
             # DEBUG: Log packet info for troubleshooting
             if logger.isEnabledFor(logging.DEBUG):
@@ -304,6 +357,7 @@ class PacketWorker:
             # Quick IP block check
             if source_ip in config['blocked_ips']:
                 self.stats.increment_blocked()
+                self._record_granular_stats(source_ip, None, 'blocked')
                 return
             
             # Check for SNMPv3 FIRST before trying v2c fast path
@@ -325,6 +379,7 @@ class PacketWorker:
                     # Check OID blocking
                     if trap_oid in config['blocked_traps']:
                         self.stats.increment_blocked()
+                        self._record_granular_stats(source_ip, trap_oid, 'blocked')
                         if config['blocked_dest']:
                             forward_packet(source_ip, payload, config['blocked_dest'])
                         return
@@ -338,6 +393,7 @@ class PacketWorker:
                                 config['redirected_destinations'][tag]
                             )
                             self.stats.increment_redirected()
+                            self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
                             notify_trap_processed()  # Notify HA system of activity
                             return
                     
@@ -350,6 +406,7 @@ class PacketWorker:
                                 config['redirected_destinations'][tag]
                             )
                             self.stats.increment_redirected()
+                            self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
                             notify_trap_processed()  # Notify HA system of activity
                             return
                     
@@ -357,6 +414,7 @@ class PacketWorker:
                     if config['destinations']:
                         forward_packet(source_ip, payload, config['destinations'])
                         self.stats.increment_forwarded()
+                        self._record_granular_stats(source_ip, trap_oid, 'forwarded', 'default')
                         notify_trap_processed()  # Notify HA system of activity
                     
                     return
@@ -389,6 +447,7 @@ class PacketWorker:
             if config['destinations']:
                 forward_packet(source_ip, payload, config['destinations'])
                 self.stats.increment_forwarded()
+                self._record_granular_stats(source_ip, None, 'forwarded', 'default')
                 notify_trap_processed()  # Notify HA system of activity
             return
         
@@ -404,12 +463,14 @@ class PacketWorker:
             if config['destinations']:
                 forward_packet(source_ip, payload, config['destinations'])
                 self.stats.increment_forwarded()
+                self._record_granular_stats(source_ip, None, 'forwarded', 'default')
                 notify_trap_processed()  # Notify HA system of activity
             return
         
         # Check blocking
         if trap_oid in config['blocked_traps']:
             self.stats.increment_blocked()
+            self._record_granular_stats(source_ip, trap_oid, 'blocked')
             if config['blocked_dest']:
                 forward_packet(source_ip, payload, config['blocked_dest'])
             return
@@ -423,6 +484,7 @@ class PacketWorker:
                     config['redirected_destinations'][tag]
                 )
                 self.stats.increment_redirected()
+                self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
                 notify_trap_processed()  # Notify HA system of activity
                 return
         
@@ -434,6 +496,7 @@ class PacketWorker:
                     config['redirected_destinations'][tag]
                 )
                 self.stats.increment_redirected()
+                self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
                 notify_trap_processed()  # Notify HA system of activity
                 return
         
@@ -441,6 +504,7 @@ class PacketWorker:
         if config['destinations']:
             forward_packet(source_ip, payload, config['destinations'])
             self.stats.increment_forwarded()
+            self._record_granular_stats(source_ip, trap_oid, 'forwarded', 'default')
             notify_trap_processed()  # Notify HA system of activity
     
     def _process_snmpv3(self, packet_data: Dict[str, Any], config: Dict):
@@ -487,6 +551,7 @@ class PacketWorker:
                         if config['destinations']:
                             forward_packet(source_ip, v2c_payload, config['destinations'])
                             self.stats.increment_forwarded()
+                            self._record_granular_stats(source_ip, None, 'forwarded', 'default')
                             notify_trap_processed()
                         return
                     else:
@@ -515,6 +580,7 @@ class PacketWorker:
         if config['destinations']:
             forward_packet(source_ip, payload, config['destinations'])
             self.stats.increment_forwarded()
+            self._record_granular_stats(source_ip, None, 'forwarded', 'default')
             notify_trap_processed()
 
 
