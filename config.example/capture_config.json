@@ -1,0 +1,26 @@
+{
+  "_comment": "TrapNinja Capture Configuration",
+  "_comment2": "Controls packet capture behavior including fragment reassembly",
+  
+  "mode": "auto",
+  "_mode_options": "auto | sniff | socket - auto tries eBPF, then sniff",
+  
+  "allow_parallel": false,
+  "_allow_parallel_comment": "Set true for shadow/mirror mode coexistence",
+  
+  "fragment_reassembly": {
+    "_comment": "IP fragment reassembly for SNMP traps exceeding MTU",
+    
+    "enabled": false,
+    "_enabled_comment": "Enable for sniff mode when large traps (>1472 bytes) are expected",
+    
+    "timeout_seconds": 5.0,
+    "_timeout_comment": "Time to wait for all fragments (increase for high-latency networks)",
+    
+    "max_buffer_mb": 100.0,
+    "_max_buffer_comment": "Maximum memory for fragment reassembly buffer",
+    
+    "max_datagrams": 10000,
+    "_max_datagrams_comment": "Maximum concurrent incomplete datagrams to track"
+  }
+}

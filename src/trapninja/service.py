@@ -113,6 +113,39 @@ try:
 except ImportError:
     EBPF_AVAILABLE = False
 
+# Import fragmentation support with fallback
+try:
+    from .core.fragmentation import (
+        initialize_fragment_buffer,
+        shutdown_fragment_buffer,
+        get_fragment_buffer,
+        get_fragment_stats,
+        generate_fragment_aware_filter,
+        generate_simple_filter,
+    )
+    FRAGMENTATION_AVAILABLE = True
+except ImportError:
+    FRAGMENTATION_AVAILABLE = False
+    def initialize_fragment_buffer(**kwargs):
+        return None
+    def shutdown_fragment_buffer():
+        pass
+    def get_fragment_buffer():
+        return None
+    def get_fragment_stats():
+        return {}
+    def generate_fragment_aware_filter(ports, exclude_sport=None):
+        # Fallback to simple filter
+        port_filter = " or ".join([f"udp dst port {p}" for p in ports])
+        if exclude_sport:
+            return f"({port_filter}) and not (udp src port {exclude_sport})"
+        return port_filter
+    def generate_simple_filter(ports, exclude_sport=None):
+        port_filter = " or ".join([f"udp dst port {p}" for p in ports])
+        if exclude_sport:
+            return f"({port_filter}) and not (udp src port {exclude_sport})"
+        return port_filter
+
 # Get logger instance
 logger = logging.getLogger("trapninja")
 
@@ -821,24 +854,91 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
             cleanup_udp_sockets()
             logger.debug("Cleaned up any existing UDP socket listeners")
             
+            # =======================================================================
+            # Initialize Fragment Reassembly (for traps exceeding MTU)
+            # =======================================================================
+            fragment_reassembly_enabled = False
+            fragment_buffer = None
+            
+            if FRAGMENTATION_AVAILABLE:
+                # Load capture config to check if fragmentation is enabled
+                try:
+                    import json
+                    capture_config_file = os.path.join(CONFIG_DIR, 'capture_config.json')
+                    if os.path.exists(capture_config_file):
+                        with open(capture_config_file, 'r') as f:
+                            capture_cfg = json.load(f)
+                        
+                        frag_cfg = capture_cfg.get('fragment_reassembly', {})
+                        fragment_reassembly_enabled = frag_cfg.get('enabled', False)
+                        
+                        if fragment_reassembly_enabled:
+                            timeout_seconds = frag_cfg.get('timeout_seconds', 5.0)
+                            max_buffer_mb = frag_cfg.get('max_buffer_mb', 100.0)
+                            max_datagrams = frag_cfg.get('max_datagrams', 10000)
+                            
+                            fragment_buffer = initialize_fragment_buffer(
+                                timeout_seconds=timeout_seconds,
+                                max_buffer_mb=max_buffer_mb,
+                                max_datagrams=max_datagrams,
+                            )
+                            logger.info("Fragment reassembly ENABLED")
+                            logger.info(f"  Timeout: {timeout_seconds}s, Buffer: {max_buffer_mb}MB, Max datagrams: {max_datagrams}")
+                    else:
+                        logger.debug("No capture_config.json found, fragment reassembly disabled")
+                except Exception as e:
+                    logger.warning(f"Could not load fragment reassembly config: {e}")
+                    logger.info("Fragment reassembly disabled")
+            else:
+                logger.debug("Fragmentation module not available")
+            
             try:
-                # Construct BPF filter for incoming traps only
+                # Construct BPF filter for incoming traps
                 # CRITICAL: Must exclude our own forwarded packets to prevent re-capture loop
-                # - "udp dst port 162" captures packets destined to port 162
-                # - "not udp src port 10162" excludes packets WE are sending (FORWARD_SOURCE_PORT)
-                # Without the exclusion, forwarded packets (sport=10162, dport=162) would be re-captured
                 from .core.constants import FORWARD_SOURCE_PORT
-                port_filter = " or ".join(
-                    [f"(udp dst port {port} and not udp src port {FORWARD_SOURCE_PORT})" 
-                     for port in LISTEN_PORTS]
-                )
+                
+                if fragment_reassembly_enabled:
+                    # Fragment-aware filter captures:
+                    # 1. Complete UDP packets destined to our ports
+                    # 2. Non-first IP fragments (which don't have UDP header visible)
+                    port_filter = generate_fragment_aware_filter(
+                        LISTEN_PORTS, 
+                        exclude_sport=FORWARD_SOURCE_PORT
+                    )
+                    logger.info("Using fragment-aware BPF filter")
+                else:
+                    # Standard filter only captures complete packets
+                    port_filter = generate_simple_filter(
+                        LISTEN_PORTS,
+                        exclude_sport=FORWARD_SOURCE_PORT
+                    )
+                
                 logger.info(f"BPF filter: {port_filter}")
+                
+                # Create the appropriate packet handler
+                if fragment_reassembly_enabled and fragment_buffer:
+                    # Use fragment-aware handler
+                    def fragment_aware_trap_handler(packet):
+                        """Handle packets with fragment reassembly support."""
+                        try:
+                            result = fragment_buffer.process_packet(packet)
+                            if result:
+                                # Got a complete packet (either non-fragmented or reassembled)
+                                forward_trap_dict(result)
+                        except Exception as e:
+                            logger.error(f"Error in fragment-aware handler: {e}")
+                    
+                    packet_handler = fragment_aware_trap_handler
+                    logger.info("Using fragment-aware packet handler")
+                else:
+                    # Use standard handler
+                    packet_handler = ha_aware_forward_trap
                 
                 # Use prn callback to queue packets instead of processing them directly
                 sniff(
                     iface=INTERFACE,
                     filter=port_filter,
-                    prn=ha_aware_forward_trap,  # Use HA-aware packet handler
+                    prn=packet_handler,
                     store=0,  # Don't store packets in memory
                     stop_filter=lambda x: stop_event.is_set()
                 )
@@ -889,6 +989,20 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
             shutdown_shadow_mode()
         except Exception as e:
             logger.error(f"Error shutting down shadow mode: {e}")
+
+    # Shutdown fragment reassembly buffer
+    if FRAGMENTATION_AVAILABLE:
+        try:
+            frag_stats = get_fragment_stats()
+            if frag_stats:
+                logger.info(
+                    f"Fragment stats: completed={frag_stats.get('datagrams_completed', 0)}, "
+                    f"timeout={frag_stats.get('datagrams_timeout', 0)}, "
+                    f"evicted={frag_stats.get('datagrams_evicted', 0)}"
+                )
+            shutdown_fragment_buffer()
+        except Exception as e:
+            logger.debug(f"Error shutting down fragment buffer: {e}")
 
     # Shutdown packet processor (socket pool)
     try:
@@ -982,6 +1096,43 @@ def ha_aware_forward_trap(packet):
         logger.error(f"Error in packet capture callback: {e}")
 
 
+def forward_trap_dict(packet_info: dict):
+    """
+    Queue a packet for processing from a dict (used by fragment reassembly).
+    
+    This function handles packets that have been reassembled from fragments,
+    which are passed as dicts rather than Scapy packets.
+    
+    Args:
+        packet_info: Dict with 'src_ip', 'dst_port', 'payload' keys
+    """
+    from .network import packet_queue, _queue_stats
+    import queue
+    
+    try:
+        packet_data = {
+            'src_ip': packet_info.get('src_ip', ''),
+            'dst_port': packet_info.get('dst_port', 162),
+            'payload': packet_info.get('payload', b''),
+        }
+        
+        # Log if this was a reassembled fragment
+        if packet_info.get('fragmented', False):
+            logger.debug(
+                f"Reassembled fragmented trap from {packet_data['src_ip']}, "
+                f"payload size: {len(packet_data['payload'])} bytes"
+            )
+        
+        try:
+            packet_queue.put_nowait(packet_data)
+            _queue_stats.record_queued()
+        except queue.Full:
+            _queue_stats.record_dropped()
+            
+    except Exception as e:
+        logger.error(f"Error queuing reassembled packet: {e}")
+
+
 def get_ha_status():
     """
     Get HA status from the cluster instance
@@ -1033,5 +1184,14 @@ def get_service_status():
         status["metrics"] = metrics
     except Exception:
         status["metrics"] = {}
+    
+    # Add fragment reassembly stats if available
+    if FRAGMENTATION_AVAILABLE:
+        try:
+            frag_stats = get_fragment_stats()
+            if frag_stats:
+                status["fragment_reassembly"] = frag_stats
+        except Exception:
+            pass
 
     return status
