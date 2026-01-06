@@ -577,10 +577,12 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
 
     # Initialize metrics module
     # Load metrics configuration (supports custom directory and global labels)
+    metrics_dir = os.path.join(os.path.dirname(LOG_FILE), "metrics")  # Default
     try:
         metrics_config = load_metrics_config()
         if metrics_config:
             init_metrics(config=metrics_config)
+            metrics_dir = metrics_config.directory  # Use configured directory
             logger.info(f"Metrics collection initialized:")
             logger.info(f"  Output directory: {metrics_config.directory}")
             logger.info(f"  Export interval: {metrics_config.export_interval_seconds}s")
@@ -591,12 +593,10 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
                 logger.info(f"  Global labels: {labels_str}")
         else:
             # Fall back to default location
-            metrics_dir = os.path.join(os.path.dirname(LOG_FILE), "metrics")
             init_metrics(metrics_directory=metrics_dir, export_interval=60)
             logger.info(f"Metrics collection initialized with defaults: {metrics_dir}")
     except Exception as e:
         logger.warning(f"Error loading metrics config: {e}")
-        metrics_dir = os.path.join(os.path.dirname(LOG_FILE), "metrics")
         init_metrics(metrics_directory=metrics_dir, export_interval=60)
         logger.info(f"Metrics collection initialized with fallback: {metrics_dir}")
 

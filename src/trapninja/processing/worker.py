@@ -181,6 +181,8 @@ class PacketWorker:
         self._packets_since_log = 0
         self._log_interval = 1000
         self._granular_collector = None  # Cached reference to granular stats
+        self._granular_retries = 0       # Track retries for deferred warning
+        self._granular_max_retries = 10  # Only warn after this many retries
     
     def _record_granular_stats(self, source_ip: str, oid: str = None,
                                 action: str = 'forwarded', destination: str = None):
@@ -193,18 +195,34 @@ class PacketWorker:
             action: 'forwarded', 'blocked', 'redirected', 'dropped'
             destination: Destination tag or "ip:port"
         """
-        # Lazy initialization of collector reference
+        # Lazy initialization of collector reference with retry logic
         if self._granular_collector is None:
             if GRANULAR_STATS_AVAILABLE:
                 self._granular_collector = get_granular_stats()
                 if self._granular_collector:
-                    logger.debug(f"Worker {self.worker_id}: Got granular stats collector")
+                    if self._granular_retries > 0:
+                        # Log success after retries
+                        logger.debug(
+                            f"Worker {self.worker_id}: Got granular stats collector "
+                            f"after {self._granular_retries} retries"
+                        )
+                    else:
+                        logger.debug(f"Worker {self.worker_id}: Got granular stats collector")
                 else:
-                    logger.warning(f"Worker {self.worker_id}: get_granular_stats() returned None - stats not initialized?")
+                    # Track retries - only warn after several attempts
+                    self._granular_retries += 1
+                    if self._granular_retries == self._granular_max_retries:
+                        logger.warning(
+                            f"Worker {self.worker_id}: get_granular_stats() still returning None "
+                            f"after {self._granular_retries} attempts - stats may not be initialized"
+                        )
             else:
                 # Log once per worker that granular stats are not available
                 if not hasattr(self, '_granular_warning_logged'):
-                    logger.warning(f"Worker {self.worker_id}: GRANULAR_STATS_AVAILABLE is False - import failed")
+                    logger.debug(
+                        f"Worker {self.worker_id}: GRANULAR_STATS_AVAILABLE is False - "
+                        f"granular statistics disabled"
+                    )
                     self._granular_warning_logged = True
         
         if self._granular_collector:
