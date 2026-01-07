@@ -242,6 +242,12 @@ def execute_command(args: Namespace) -> int:
     Returns:
         Exit code (0 for success, non-zero for failure)
     """
+    # CRITICAL: Check for --foreground-daemon FIRST before any routing
+    # This is a hidden flag used by start_daemon() to run the actual daemon process
+    # It must be handled before subcommand routing to avoid recursive spawning
+    if getattr(args, 'foreground_daemon', False):
+        return _execute_foreground_daemon(args)
+    
     # Check if using subcommand style (new)
     category = getattr(args, 'category', None)
     command = getattr(args, 'command', None)
@@ -252,6 +258,83 @@ def execute_command(args: Namespace) -> int:
     
     # Otherwise, try legacy flat-style routing
     return _execute_legacy_command(args)
+
+
+def _execute_foreground_daemon(args: Namespace) -> int:
+    """
+    Execute the actual daemon process (called via --foreground-daemon).
+    
+    This is the hidden entry point used by start_daemon() when spawning
+    the background daemon process. It sets up logging, writes the PID file,
+    and runs the service.
+    
+    Args:
+        args: Parsed arguments
+        
+    Returns:
+        Exit code from the service
+    """
+    from ..logger import setup_logging
+    from ..config import ensure_config_dir, LOG_MAX_SIZE, LOG_BACKUP_COUNT, LOG_COMPRESS
+    from ..service import run_service
+    from ..config import PID_FILE
+
+    # Extract runtime options from args
+    debug_mode = getattr(args, 'debug', False)
+    shadow_mode = getattr(args, 'shadow_mode', False)
+    mirror_mode = getattr(args, 'mirror_mode', False)
+    parallel = getattr(args, 'parallel', False)
+    capture_mode = getattr(args, 'capture_mode', None)
+    log_traps = getattr(args, 'log_traps', None)
+
+    # Set log level if specified
+    log_level = getattr(args, 'log_level', None)
+
+    # Set up logging with rotation settings
+    # Note: console=False since we're running as daemon (stdout goes to /dev/null)
+    setup_logging(
+        console=False,
+        log_level=log_level,
+        max_size=LOG_MAX_SIZE,
+        backup_count=LOG_BACKUP_COUNT,
+        compress=LOG_COMPRESS
+    )
+
+    ensure_config_dir()
+
+    # Write PID file
+    daemon_pid = os.getpid()
+    with open(PID_FILE, 'w') as f:
+        f.write(str(daemon_pid))
+
+    # Log startup
+    logger = logging.getLogger("trapninja")
+    logger.info(f"TrapNinja daemon started with HA support - PID {daemon_pid}")
+
+    # Log the log rotation settings
+    logger.info(
+        f"Log rotation settings: max_size={LOG_MAX_SIZE} bytes, "
+        f"backup_count={LOG_BACKUP_COUNT}, "
+        f"compression={'enabled' if LOG_COMPRESS else 'disabled'}"
+    )
+
+    # Log runtime mode if any special modes are enabled
+    if shadow_mode:
+        logger.info("Running in SHADOW MODE (observe only, no forwarding)")
+    elif mirror_mode:
+        logger.info("Running in MIRROR MODE (parallel capture and forward)")
+    elif parallel:
+        logger.info("Running in PARALLEL MODE (sniff capture for coexistence)")
+
+    # Run the service with all runtime options
+    return run_service(
+        debug=debug_mode,
+        shadow_mode=shadow_mode,
+        mirror_mode=mirror_mode,
+        parallel=parallel,
+        capture_mode=capture_mode,
+        log_traps=log_traps
+    )
 
 
 def _execute_subcommand(args: Namespace, category: str, command: str) -> int:
@@ -1031,70 +1114,6 @@ def _execute_legacy_command(args: Namespace) -> int:
             parallel=getattr(args, 'parallel', False),
             capture_mode=getattr(args, 'capture_mode', None),
             log_traps=getattr(args, 'log_traps', None)
-        )
-    
-    elif getattr(args, 'foreground_daemon', False):
-        # Hidden mode used by start_daemon() to run the actual daemon
-        from ..logger import setup_logging
-        from ..config import ensure_config_dir, LOG_MAX_SIZE, LOG_BACKUP_COUNT, LOG_COMPRESS
-        from ..service import run_service
-        from ..config import PID_FILE
-
-        # Extract runtime options from args
-        debug_mode = getattr(args, 'debug', False)
-        shadow_mode = getattr(args, 'shadow_mode', False)
-        mirror_mode = getattr(args, 'mirror_mode', False)
-        parallel = getattr(args, 'parallel', False)
-        capture_mode = getattr(args, 'capture_mode', None)
-        log_traps = getattr(args, 'log_traps', None)
-
-        # Set log level if specified
-        log_level = getattr(args, 'log_level', None)
-
-        # Set up logging with rotation settings
-        # Note: console=False since we're running as daemon (stdout goes to /dev/null)
-        setup_logging(
-            console=False,
-            log_level=log_level,
-            max_size=LOG_MAX_SIZE,
-            backup_count=LOG_BACKUP_COUNT,
-            compress=LOG_COMPRESS
-        )
-
-        ensure_config_dir()
-
-        # Write PID file
-        daemon_pid = os.getpid()
-        with open(PID_FILE, 'w') as f:
-            f.write(str(daemon_pid))
-
-        # Log startup
-        logger = logging.getLogger("trapninja")
-        logger.info(f"TrapNinja daemon started with HA support - PID {daemon_pid}")
-
-        # Log the log rotation settings
-        logger.info(
-            f"Log rotation settings: max_size={LOG_MAX_SIZE} bytes, "
-            f"backup_count={LOG_BACKUP_COUNT}, "
-            f"compression={'enabled' if LOG_COMPRESS else 'disabled'}"
-        )
-
-        # Log runtime mode if any special modes are enabled
-        if shadow_mode:
-            logger.info("Running in SHADOW MODE (observe only, no forwarding)")
-        elif mirror_mode:
-            logger.info("Running in MIRROR MODE (parallel capture and forward)")
-        elif parallel:
-            logger.info("Running in PARALLEL MODE (sniff capture for coexistence)")
-
-        # Run the service with all runtime options
-        return run_service(
-            debug=debug_mode,
-            shadow_mode=shadow_mode,
-            mirror_mode=mirror_mode,
-            parallel=parallel,
-            capture_mode=capture_mode,
-            log_traps=log_traps
         )
 
     # No command specified - show help
