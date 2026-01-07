@@ -306,6 +306,9 @@ def _add_daemon_subcommands(subparsers):
     
     # queue-stats
     daemon_cmds.add_parser('queue-stats', help='Show packet queue statistics')
+    
+    # help
+    daemon_cmds.add_parser('help', help='Show daemon command help')
 
 
 def _add_logging_options(parser: argparse.ArgumentParser):
@@ -518,6 +521,9 @@ def _add_snmpv3_subcommands(subparsers):
     test_decrypt.add_argument('--convert', action='store_true',
                               help='Convert to SNMPv2c')
     test_decrypt.add_argument('--output', help='Output file path')
+    
+    # help
+    snmpv3_cmds.add_parser('help', help='Show SNMPv3 command help')
 
 
 # =============================================================================
@@ -726,6 +732,9 @@ def _add_shadow_subcommands(subparsers):
     
     # export
     shadow_cmds.add_parser('export', help='Export statistics to JSON')
+    
+    # help
+    shadow_cmds.add_parser('help', help='Show shadow mode help')
 
 
 # =============================================================================

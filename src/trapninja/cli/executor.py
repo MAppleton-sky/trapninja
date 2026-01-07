@@ -26,12 +26,15 @@ from . import shadow_commands
 from .validation import InputValidator, parse_size
 
 
-def _show_category_help(category: str) -> None:
+def _show_category_help(category: str) -> int:
     """
     Show help for a specific command category.
     
     Args:
         category: Category name (daemon, filter, ha, etc.)
+        
+    Returns:
+        Exit code (0 for success)
     """
     from .parser import create_argument_parser
     parser = create_argument_parser()
@@ -39,8 +42,84 @@ def _show_category_help(category: str) -> None:
     for action in parser._subparsers._actions:
         if hasattr(action, 'choices') and category in action.choices:
             action.choices[category].print_help()
-            return
+            return 0
     print(f"Run 'trapninja {category} --help' to see available commands.")
+    return 0
+
+
+def _show_missing_command_help(category: str) -> int:
+    """
+    Show helpful message when a category is used without a command.
+    
+    Args:
+        category: Category name (daemon, filter, ha, etc.)
+        
+    Returns:
+        Exit code (1 to indicate user needs to provide more info)
+    """
+    print(f"\n\033[93mNo command specified for '{category}'\033[0m")
+    print(f"\nRun \033[92mtrapninja {category} --help\033[0m to see available commands.")
+    print(f"\nQuick examples:")
+    
+    # Show category-specific examples
+    examples = {
+        'daemon': [
+            ('daemon start', 'Start the service'),
+            ('daemon status', 'Check service status'),
+            ('daemon foreground', 'Run in foreground'),
+        ],
+        'filter': [
+            ('filter block-ip 10.0.0.1', 'Block an IP'),
+            ('filter list-blocked-ips', 'List blocked IPs'),
+            ('filter redirect-ip 10.0.0.1 --tag noc', 'Redirect IP'),
+        ],
+        'ha': [
+            ('ha status', 'Check HA status'),
+            ('ha configure --mode primary --peer 192.168.1.102', 'Configure HA'),
+            ('ha promote', 'Promote to PRIMARY'),
+        ],
+        'snmpv3': [
+            ('snmpv3 list-users', 'List SNMPv3 users'),
+            ('snmpv3 status', 'Check SNMPv3 status'),
+            ('snmpv3 add-user --username USER --engine-id ID', 'Add user'),
+        ],
+        'cache': [
+            ('cache status', 'Show cache status'),
+            ('cache query --destination default --from "-2h" --to now', 'Query cache'),
+            ('cache replay --destination default --from "-1h" --to now', 'Replay cache'),
+        ],
+        'stats': [
+            ('stats summary', 'Show statistics summary'),
+            ('stats top-ips', 'Show top source IPs'),
+            ('stats top-oids -n 20 -s rate', 'Top 20 OIDs by rate'),
+        ],
+        'metrics': [
+            ('metrics config', 'Show metrics configuration'),
+            ('metrics set-dir /opt/metrics', 'Set output directory'),
+            ('metrics add-label --name region --value us-west', 'Add label'),
+        ],
+        'shadow': [
+            ('shadow status', 'Show shadow mode statistics'),
+            ('shadow export', 'Export statistics'),
+        ],
+        'failover': [
+            ('failover status', 'Show failover status'),
+            ('failover detect', 'Detect gaps'),
+            ('failover replay', 'Trigger gap replay'),
+        ],
+        'sync': [
+            ('sync status', 'Show sync status'),
+            ('sync now', 'Sync with peer'),
+        ],
+    }
+    
+    if category in examples:
+        for cmd, desc in examples[category]:
+            print(f"  trapninja {cmd}")
+            print(f"      {desc}")
+    
+    print()
+    return 1
 
 
 def update_global_config(args: Namespace) -> None:
@@ -224,8 +303,10 @@ def _execute_subcommand(args: Namespace, category: str, command: str) -> int:
 def _execute_daemon_command(args: Namespace, command: str) -> int:
     """Execute daemon-related commands."""
     if not command:
-        _show_category_help('daemon')
-        return 0
+        return _show_missing_command_help('daemon')
+    
+    if command == 'help':
+        return _show_category_help('daemon')
     
     if command == 'start':
         return daemon_commands.start()
@@ -263,8 +344,10 @@ def _execute_daemon_command(args: Namespace, command: str) -> int:
 def _execute_filter_command(args: Namespace, command: str) -> int:
     """Execute filtering-related commands."""
     if not command:
-        _show_category_help('filter')
-        return 0
+        return _show_missing_command_help('filter')
+    
+    if command == 'help':
+        return _show_category_help('filter')
     
     # IP blocking
     if command == 'block-ip':
@@ -306,9 +389,6 @@ def _execute_filter_command(args: Namespace, command: str) -> int:
     elif command == 'list-redirect-dests':
         return 0 if filtering_commands.list_redirect_destinations() else 1
     
-    elif command == 'help':
-        return 0 if filtering_commands.show_redirection_help() else 1
-    
     else:
         print(f"Unknown filter command: {command}")
         print("Run 'trapninja filter --help' to see available commands.")
@@ -322,8 +402,10 @@ def _execute_filter_command(args: Namespace, command: str) -> int:
 def _execute_ha_command(args: Namespace, command: str) -> int:
     """Execute HA-related commands."""
     if not command:
-        _show_category_help('ha')
-        return 0
+        return _show_missing_command_help('ha')
+    
+    if command == 'help':
+        return _show_category_help('ha')
     
     if command == 'configure':
         return 0 if ha_commands.configure_ha(
@@ -343,8 +425,6 @@ def _execute_ha_command(args: Namespace, command: str) -> int:
         return 0 if ha_commands.force_failover() else 1
     elif command == 'disable':
         return 0 if ha_commands.disable_ha() else 1
-    elif command == 'help':
-        return 0 if ha_commands.show_ha_help() else 1
     else:
         print(f"Unknown HA command: {command}")
         print("Run 'trapninja ha --help' to see available commands.")
@@ -358,8 +438,10 @@ def _execute_ha_command(args: Namespace, command: str) -> int:
 def _execute_snmpv3_command(args: Namespace, command: str) -> int:
     """Execute SNMPv3-related commands."""
     if not command:
-        _show_category_help('snmpv3')
-        return 0
+        return _show_missing_command_help('snmpv3')
+    
+    if command == 'help':
+        return _show_category_help('snmpv3')
     
     if command == 'add-user':
         return snmpv3_commands.handle_snmpv3_add_user(args)
@@ -386,8 +468,10 @@ def _execute_snmpv3_command(args: Namespace, command: str) -> int:
 def _execute_cache_command(args: Namespace, command: str) -> int:
     """Execute cache-related commands."""
     if not command:
-        _show_category_help('cache')
-        return 0
+        return _show_missing_command_help('cache')
+    
+    if command == 'help':
+        return _show_category_help('cache')
     
     verbose = getattr(args, 'verbose', False)
     yes = getattr(args, 'yes', False)
@@ -422,8 +506,6 @@ def _execute_cache_command(args: Namespace, command: str) -> int:
         ) else 1
     elif command == 'trim':
         return 0 if cache_commands.trim_cache(yes=yes) else 1
-    elif command == 'help':
-        return 0 if cache_commands.show_cache_help() else 1
     else:
         print(f"Unknown cache command: {command}")
         print("Run 'trapninja cache --help' to see available commands.")
@@ -437,8 +519,10 @@ def _execute_cache_command(args: Namespace, command: str) -> int:
 def _execute_stats_command(args: Namespace, command: str) -> int:
     """Execute statistics-related commands."""
     if not command:
-        _show_category_help('stats')
-        return 0
+        return _show_missing_command_help('stats')
+    
+    if command == 'help':
+        return _show_category_help('stats')
     
     if command == 'summary':
         return stats_commands.handle_stats_summary(args)
@@ -460,8 +544,6 @@ def _execute_stats_command(args: Namespace, command: str) -> int:
         return stats_commands.handle_stats_reset(args)
     elif command == 'debug':
         return stats_commands.handle_stats_debug(args)
-    elif command == 'help':
-        return stats_commands.handle_stats_help(args)
     else:
         print(f"Unknown stats command: {command}")
         print("Run 'trapninja stats --help' to see available commands.")
@@ -477,8 +559,10 @@ def _execute_metrics_command(args: Namespace, command: str) -> int:
     from . import metrics_commands
     
     if not command:
-        _show_category_help('metrics')
-        return 0
+        return _show_missing_command_help('metrics')
+    
+    if command == 'help':
+        return _show_category_help('metrics')
     
     json_output = getattr(args, 'json', False)
     
@@ -492,8 +576,6 @@ def _execute_metrics_command(args: Namespace, command: str) -> int:
         return metrics_commands.remove_metrics_label(args.name)
     elif command == 'set-interval':
         return metrics_commands.set_export_interval(args.seconds)
-    elif command == 'help':
-        return metrics_commands.show_metrics_help()
     else:
         print(f"Unknown metrics command: {command}")
         print("Run 'trapninja metrics --help' to see available commands.")
@@ -507,8 +589,10 @@ def _execute_metrics_command(args: Namespace, command: str) -> int:
 def _execute_shadow_command(args: Namespace, command: str) -> int:
     """Execute shadow mode-related commands."""
     if not command:
-        _show_category_help('shadow')
-        return 0
+        return _show_missing_command_help('shadow')
+    
+    if command == 'help':
+        return _show_category_help('shadow')
     
     if command == 'status':
         return shadow_commands.handle_shadow_status(args)
@@ -529,8 +613,10 @@ def _execute_failover_command(args: Namespace, command: str) -> int:
     from . import failover_commands
     
     if not command:
-        _show_category_help('failover')
-        return 0
+        return _show_missing_command_help('failover')
+    
+    if command == 'help':
+        return _show_category_help('failover')
     
     verbose = getattr(args, 'verbose', False)
     yes = getattr(args, 'yes', False)
@@ -554,8 +640,6 @@ def _execute_failover_command(args: Namespace, command: str) -> int:
             dry_run=dry_run,
             yes=yes
         ) else 1
-    elif command == 'help':
-        return 0 if failover_commands.show_failover_help() else 1
     else:
         print(f"Unknown failover command: {command}")
         print("Run 'trapninja failover --help' to see available commands.")
@@ -571,16 +655,16 @@ def _execute_sync_command(args: Namespace, command: str) -> int:
     from . import sync_commands
     
     if not command:
-        _show_category_help('sync')
-        return 0
+        return _show_missing_command_help('sync')
+    
+    if command == 'help':
+        return _show_category_help('sync')
     
     if command == 'now':
         force = getattr(args, 'force', False)
         return 0 if sync_commands.sync_now(force=force) else 1
     elif command == 'status':
         return 0 if sync_commands.show_sync_status() else 1
-    elif command == 'help':
-        return 0 if sync_commands.show_sync_help() else 1
     else:
         print(f"Unknown sync command: {command}")
         print("Run 'trapninja sync --help' to see available commands.")
