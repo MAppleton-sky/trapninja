@@ -74,6 +74,9 @@ class ConfigCache:
     Thread-safe configuration cache with TTL.
     
     Reduces import and dict access overhead on hot path.
+    
+    IMPORTANT: We import the config MODULE (not variables) to avoid
+    stale references when load_config() reassigns variables.
     """
     
     def __init__(self, ttl: float = 30.0):
@@ -97,20 +100,19 @@ class ConfigCache:
                 return self._cache
             
             try:
-                from ..config import (
-                    destinations, blocked_traps, blocked_dest,
-                    blocked_ips, redirected_ips, redirected_oids,
-                    redirected_destinations
-                )
+                # IMPORTANT: Import the MODULE, not variables directly!
+                # Variables are reassigned in load_config(), so direct imports
+                # would get stale references to old objects.
+                from .. import config as cfg
                 
                 self._cache = {
-                    'destinations': destinations,
-                    'blocked_traps': blocked_traps,
-                    'blocked_dest': blocked_dest,
-                    'blocked_ips': blocked_ips,
-                    'redirected_ips': redirected_ips,
-                    'redirected_oids': redirected_oids,
-                    'redirected_destinations': redirected_destinations
+                    'destinations': cfg.destinations,
+                    'blocked_traps': cfg.blocked_traps,
+                    'blocked_dest': cfg.blocked_dest,
+                    'blocked_ips': cfg.blocked_ips,
+                    'redirected_ips': cfg.redirected_ips,
+                    'redirected_oids': cfg.redirected_oids,
+                    'redirected_destinations': cfg.redirected_destinations
                 }
             except ImportError:
                 # Minimal fallback
@@ -620,8 +622,9 @@ class PacketWorker:
                                 )
                                 forward_packet(source_ip, v2c_payload, dest_list)
                                 self.stats.increment_redirected()
+                                # Use 'redirected' action for proper stats counting
                                 self._record_granular_stats(
-                                    source_ip, None, 'forwarded_v3_decrypted', tag
+                                    source_ip, None, 'redirected', tag
                                 )
                                 notify_trap_processed()
                                 return
@@ -634,8 +637,9 @@ class PacketWorker:
                             )
                             forward_packet(source_ip, v2c_payload, config['destinations'])
                             self.stats.increment_forwarded()
+                            # Use 'forwarded' action for proper stats counting
                             self._record_granular_stats(
-                                source_ip, None, 'forwarded_v3_decrypted', 'default'
+                                source_ip, None, 'forwarded', 'default'
                             )
                             notify_trap_processed()
                         return
@@ -717,7 +721,8 @@ class PacketWorker:
         if config['destinations']:
             forward_packet(source_ip, payload, config['destinations'])
             self.stats.increment_forwarded()
-            self._record_granular_stats(source_ip, None, 'forwarded_v3_passthrough', 'default')
+            # Use 'forwarded' action for proper stats counting
+            self._record_granular_stats(source_ip, None, 'forwarded', 'default')
             notify_trap_processed()
 
 
