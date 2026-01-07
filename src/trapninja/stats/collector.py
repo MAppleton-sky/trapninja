@@ -828,8 +828,14 @@ class GranularStatsCollector:
                 self.config.metrics_dir, 
                 "trapninja_granular.prom"
             )
+
+            content = self.export_prometheus()
+
+            # Ensure exactly one trailing newline
+            content = content.rstrip('\n') + '\n'
+
             with open(prom_path, 'w') as f:
-                f.write(self.export_prometheus())
+                f.write(content)
             
             # Export JSON format
             json_path = os.path.join(
