@@ -401,6 +401,20 @@ class GranularStatsCollector:
             snapshot.oldest_data = min(all_first_seen) if all_first_seen else 0
             snapshot.newest_data = max(all_last_seen) if all_last_seen else 0
         
+        # IP+OID combinations (top 100)
+        ip_oid_combinations = []
+        for ip_stat in ip_stats_list:
+            for oid, count in ip_stat.oid_counts.items():
+                ip_oid_combinations.append({
+                    'ip': ip_stat.ip_address,
+                    'oid': oid,
+                    'count': count
+                })
+        
+        # Sort by count and take top 100
+        ip_oid_combinations.sort(key=lambda x: x['count'], reverse=True)
+        snapshot.top_ip_oid_combinations = ip_oid_combinations[:100]
+        
         return snapshot
     
     def search_ips(self, pattern: str, limit: int = 100) -> List[Dict[str, Any]]:
@@ -701,6 +715,28 @@ class GranularStatsCollector:
             if dest_stat.failed > 0:
                 labels = self._format_labels({"destination": dest_stat.destination})
                 lines.append(f'trapninja_dest_failures_total{labels} {dest_stat.failed}')
+        
+        # =================================================================
+        # IP+OID COMBINATION METRICS (top 100 combinations)
+        # =================================================================
+        # Collect all IP+OID combinations from IP stats
+        # This provides granular visibility into which devices send which trap types
+        ip_oid_combinations = []
+        for ip_stat in ip_stats_list:
+            for oid, count in ip_stat.oid_counts.items():
+                ip_oid_combinations.append((ip_stat.ip_address, oid, count))
+        
+        # Sort by count and take top 100 to limit cardinality
+        ip_oid_combinations.sort(key=lambda x: x[2], reverse=True)
+        top_combinations = ip_oid_combinations[:100]
+        
+        if top_combinations:
+            lines.append("")
+            lines.append("# HELP trapninja_ip_oid_traps_total Traps from specific IP with specific OID")
+            lines.append("# TYPE trapninja_ip_oid_traps_total counter")
+            for ip, oid, count in top_combinations:
+                labels = self._format_labels({"ip": ip, "oid": oid})
+                lines.append(f'trapninja_ip_oid_traps_total{labels} {count}')
         
         return "\n".join(lines)
     

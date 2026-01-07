@@ -540,6 +540,7 @@ class StatsSnapshot:
     top_ips: List[Dict] = field(default_factory=list)
     top_oids: List[Dict] = field(default_factory=list)
     top_destinations: List[Dict] = field(default_factory=list)
+    top_ip_oid_combinations: List[Dict] = field(default_factory=list)
     
     # Time range
     oldest_data: float = 0.0
@@ -565,6 +566,7 @@ class StatsSnapshot:
             'top_ips': self.top_ips,
             'top_oids': self.top_oids,
             'top_destinations': self.top_destinations,
+            'top_ip_oid_combinations': self.top_ip_oid_combinations,
             'time_range': {
                 'oldest': datetime.fromtimestamp(self.oldest_data).isoformat() if self.oldest_data else None,
                 'newest': datetime.fromtimestamp(self.newest_data).isoformat() if self.newest_data else None,
