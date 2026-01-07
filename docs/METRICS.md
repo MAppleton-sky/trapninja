@@ -65,6 +65,7 @@ The configuration file should be placed alongside other TrapNinja config files:
   "export_interval_seconds": 60,
   "prometheus_file": "trapninja_metrics.prom",
   "json_file": "trapninja_metrics.json",
+  "json_enabled": true,
   "global_labels": {
     "on_prem": "1",
     "environment": "production",
@@ -80,6 +81,7 @@ The configuration file should be placed alongside other TrapNinja config files:
 | `export_interval_seconds` | integer | `60` | How often to export metrics (seconds) |
 | `prometheus_file` | string | `trapninja_metrics.prom` | Prometheus metrics filename |
 | `json_file` | string | `trapninja_metrics.json` | JSON metrics filename |
+| `json_enabled` | boolean | `true` | Enable/disable JSON format output |
 | `global_labels` | object | `{}` | Labels applied to ALL metrics |
 
 ### Global Labels
@@ -391,6 +393,27 @@ sudo chmod 755 /opt/metrics
 ```
 
 ## Troubleshooting
+
+### Node Exporter Not Reading Metrics File
+
+If node_exporter's textfile collector isn't picking up metrics but copying a single line to a new file works:
+
+1. **Missing trailing newline** - Fixed in v0.5.1+. If running an older version, ensure the `.prom` file ends with a newline.
+
+2. **File permissions** - Ensure node_exporter can read the metrics directory and files:
+   ```bash
+   ls -la /opt/metrics/trapninja_metrics.prom
+   ```
+
+3. **Syntax errors** - Check for malformed metrics:
+   ```bash
+   promtool check metrics < /opt/metrics/trapninja_metrics.prom
+   ```
+
+4. **Directory not configured** - Verify node_exporter is using the correct textfile directory:
+   ```bash
+   ps aux | grep node_exporter | grep textfile
+   ```
 
 ### Metrics Directory Not Created
 

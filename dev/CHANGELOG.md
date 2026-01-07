@@ -16,6 +16,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.14] - 2026-01-07
+
+### Fixed
+
+#### Prometheus Metrics - Node Exporter Compatibility
+- **Fixed missing trailing newline** in `.prom` file output that caused node_exporter's
+  textfile collector to not read the metrics file. The Prometheus exposition format
+  requires files to end with a newline character.
+
+### Added
+
+#### Metrics Configuration - JSON Output Control
+- **Added `json_enabled` configuration option** to `metrics_config.json` allowing
+  the JSON metrics file to be disabled while keeping Prometheus format output.
+  Set `"json_enabled": false` to stop generating the `.json` metrics file.
+
+### Documentation
+- Added troubleshooting section for node_exporter integration issues
+- Updated metrics configuration documentation with new `json_enabled` option
+
+---
+
 ## [0.7.13] - 2025-12-31
 
 ### Changed

@@ -473,16 +473,18 @@ def export_metrics(metrics_summary: Dict[str, Any] = None) -> bool:
         
         with open(temp_path, 'w') as f:
             f.write("\n".join(lines))
+            f.write("\n")  # Trailing newline required for node_exporter
         
         os.rename(temp_path, prom_path)
         logger.debug(f"Metrics exported to {prom_path}")
 
-        # Write JSON format file
-        json_path = config.json_path
-        with open(json_path, 'w') as f:
-            json.dump(metrics_summary, f, indent=2)
-        
-        logger.debug(f"Metrics exported to JSON: {json_path}")
+        # Write JSON format file (if enabled)
+        if config.json_enabled:
+            json_path = config.json_path
+            with open(json_path, 'w') as f:
+                json.dump(metrics_summary, f, indent=2)
+            
+            logger.debug(f"Metrics exported to JSON: {json_path}")
         
         return True
 

@@ -53,6 +53,7 @@ class MetricsConfig:
         export_interval_seconds: How often to export metrics (seconds)
         prometheus_file: Filename for Prometheus format metrics
         json_file: Filename for JSON format metrics
+        json_enabled: Whether to write JSON format metrics file
         global_labels: Labels/tags to apply to ALL metrics
     """
     enabled: bool = True
@@ -60,6 +61,7 @@ class MetricsConfig:
     export_interval_seconds: int = DEFAULT_EXPORT_INTERVAL
     prometheus_file: str = DEFAULT_PROMETHEUS_FILE
     json_file: str = DEFAULT_JSON_FILE
+    json_enabled: bool = True
     global_labels: Dict[str, str] = field(default_factory=dict)
     
     def __post_init__(self):
@@ -133,6 +135,7 @@ class MetricsConfig:
             export_interval_seconds=data.get('export_interval_seconds', DEFAULT_EXPORT_INTERVAL),
             prometheus_file=data.get('prometheus_file', DEFAULT_PROMETHEUS_FILE),
             json_file=data.get('json_file', DEFAULT_JSON_FILE),
+            json_enabled=data.get('json_enabled', True),
             global_labels=data.get('global_labels', {}),
         )
     
@@ -149,6 +152,7 @@ class MetricsConfig:
             'export_interval_seconds': self.export_interval_seconds,
             'prometheus_file': self.prometheus_file,
             'json_file': self.json_file,
+            'json_enabled': self.json_enabled,
             'global_labels': self.global_labels,
         }
     
@@ -296,6 +300,7 @@ def create_example_config() -> Dict[str, Any]:
         "export_interval_seconds": 60,
         "prometheus_file": "trapninja_metrics.prom",
         "json_file": "trapninja_metrics.json",
+        "json_enabled": True,
         "global_labels": {
             "on_prem": "1",
             "environment": "production"
