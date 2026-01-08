@@ -72,12 +72,20 @@ def run_command_safe(command, timeout=30):
         return ""
 
 
-def start_daemon():
+def start_daemon(shadow_mode=False, mirror_mode=False, parallel=False,
+                 capture_mode=None, log_traps=None):
     """
     Start the daemon process with startup verification.
     
     After spawning the daemon, waits briefly and verifies it started
     successfully by checking the control socket.
+
+    Args:
+        shadow_mode (bool): Run in shadow mode (observe only, no forwarding)
+        mirror_mode (bool): Run in mirror mode (parallel capture and forward)
+        parallel (bool): Enable parallel operation (sniff capture)
+        capture_mode (str): Force capture mode (auto, sniff, socket)
+        log_traps (str): Log all observed traps to file
 
     Returns:
         int: 0 on success, non-zero on failure
@@ -152,11 +160,38 @@ def start_daemon():
             '--start', '--stop', '--restart', '--status', '--foreground',
             '--foreground-daemon'
         }
+        
+        # Shadow mode arguments that may be passed via function params
+        # These need to be added explicitly as they may not be in sys.argv
+        # when using subcommand style (e.g., 'daemon start --shadow-mode')
+        SHADOW_MODE_ARGS = {
+            '--shadow-mode', '--mirror-mode', '--parallel',
+            '--capture-mode', '--log-traps'
+        }
 
         # Copy runtime configuration arguments, filtering out daemon control commands
+        # and shadow mode args (we'll add those explicitly below)
         for arg in sys.argv[1:]:
-            if arg not in DAEMON_CONTROL_ARGS:
-                args.append(arg)
+            # Skip daemon control args
+            if arg in DAEMON_CONTROL_ARGS:
+                continue
+            # Skip shadow mode args from argv (we add them explicitly)
+            if arg in SHADOW_MODE_ARGS:
+                continue
+            # Skip the value following --capture-mode or --log-traps if present
+            args.append(arg)
+        
+        # Explicitly add shadow mode arguments based on function parameters
+        if shadow_mode:
+            args.append('--shadow-mode')
+        if mirror_mode:
+            args.append('--mirror-mode')
+        if parallel:
+            args.append('--parallel')
+        if capture_mode:
+            args.extend(['--capture-mode', capture_mode])
+        if log_traps:
+            args.extend(['--log-traps', log_traps])
 
         # Python 3.6 compatible way to start detached process
         if os.name == 'posix':  # Unix/Linux/MacOS
@@ -525,16 +560,30 @@ def status_daemon():
         return 2
 
 
-def restart_daemon():
+def restart_daemon(shadow_mode=False, mirror_mode=False, parallel=False,
+                   capture_mode=None, log_traps=None):
     """
     Restart the daemon
+
+    Args:
+        shadow_mode (bool): Run in shadow mode (observe only, no forwarding)
+        mirror_mode (bool): Run in mirror mode (parallel capture and forward)
+        parallel (bool): Enable parallel operation (sniff capture)
+        capture_mode (str): Force capture mode (auto, sniff, socket)
+        log_traps (str): Log all observed traps to file
 
     Returns:
         int: 0 on success, non-zero on failure
     """
     stop_result = stop_daemon()
     time.sleep(2)  # Give it a moment to fully shut down
-    start_result = start_daemon()
+    start_result = start_daemon(
+        shadow_mode=shadow_mode,
+        mirror_mode=mirror_mode,
+        parallel=parallel,
+        capture_mode=capture_mode,
+        log_traps=log_traps
+    )
 
     return 0 if (stop_result == 0 and start_result == 0) else 1
 

@@ -256,6 +256,9 @@ def _add_daemon_subcommands(subparsers):
             Examples:
               trapninja daemon start              Start as background daemon
               trapninja daemon start --debug      Start with debug logging
+              trapninja daemon start --shadow-mode   Start in shadow mode (observe only)
+              trapninja daemon start --mirror-mode   Start in mirror mode (parallel capture)
+              trapninja daemon start --parallel      Start with sniff capture for coexistence
               trapninja daemon foreground         Run in foreground
               trapninja daemon status             Check if running
               trapninja daemon config             Show configuration
@@ -269,6 +272,7 @@ def _add_daemon_subcommands(subparsers):
     start_cmd = daemon_cmds.add_parser('start', help='Start the daemon')
     start_cmd.add_argument('--interface', type=str, help='Network interface')
     start_cmd.add_argument('--ports', type=str, help='Comma-separated UDP ports')
+    _add_shadow_mode_options(start_cmd)
     _add_logging_options(start_cmd)
     
     # stop
@@ -278,6 +282,7 @@ def _add_daemon_subcommands(subparsers):
     restart_cmd = daemon_cmds.add_parser('restart', help='Restart the daemon')
     restart_cmd.add_argument('--interface', type=str, help='Network interface')
     restart_cmd.add_argument('--ports', type=str, help='Comma-separated UDP ports')
+    _add_shadow_mode_options(restart_cmd)
     _add_logging_options(restart_cmd)
     
     # status
@@ -287,16 +292,7 @@ def _add_daemon_subcommands(subparsers):
     fg_cmd = daemon_cmds.add_parser('foreground', help='Run in foreground (not as daemon)')
     fg_cmd.add_argument('--interface', type=str, help='Network interface')
     fg_cmd.add_argument('--ports', type=str, help='Comma-separated UDP ports')
-    fg_cmd.add_argument('--shadow-mode', action='store_true',
-                        help='Run in shadow mode (observe only)')
-    fg_cmd.add_argument('--mirror-mode', action='store_true',
-                        help='Run in mirror mode (parallel capture)')
-    fg_cmd.add_argument('--parallel', action='store_true',
-                        help='Enable parallel operation')
-    fg_cmd.add_argument('--capture-mode', choices=['auto', 'sniff', 'socket'],
-                        help='Packet capture mode')
-    fg_cmd.add_argument('--log-traps', type=str, metavar='FILE',
-                        help='Log observed traps to file')
+    _add_shadow_mode_options(fg_cmd)
     _add_logging_options(fg_cmd)
     
     # config
@@ -309,6 +305,21 @@ def _add_daemon_subcommands(subparsers):
     
     # help
     daemon_cmds.add_parser('help', help='Show daemon command help')
+
+
+def _add_shadow_mode_options(parser: argparse.ArgumentParser):
+    """Add shadow/parallel mode options to a parser."""
+    shadow_group = parser.add_argument_group('Shadow/Parallel Mode Options')
+    shadow_group.add_argument('--shadow-mode', action='store_true',
+                              help='Run in shadow mode (observe only, no forwarding)')
+    shadow_group.add_argument('--mirror-mode', action='store_true',
+                              help='Run in mirror mode (parallel capture and forward)')
+    shadow_group.add_argument('--parallel', action='store_true',
+                              help='Enable parallel operation (sniff capture)')
+    shadow_group.add_argument('--capture-mode', choices=['auto', 'sniff', 'socket'],
+                              help='Packet capture mode')
+    shadow_group.add_argument('--log-traps', type=str, metavar='FILE',
+                              help='Log observed traps to file')
 
 
 def _add_logging_options(parser: argparse.ArgumentParser):
@@ -719,8 +730,11 @@ def _add_shadow_subcommands(subparsers):
               trapninja shadow status            Show shadow mode statistics
               trapninja shadow export            Export statistics to JSON
               
-              To run in shadow mode:
-              trapninja daemon foreground --shadow-mode
+            Running Shadow/Parallel Modes:
+              trapninja daemon start --shadow-mode    Background shadow mode (observe only)
+              trapninja daemon start --mirror-mode    Background mirror mode (parallel capture)
+              trapninja daemon start --parallel       Background parallel operation
+              trapninja daemon foreground --shadow-mode   Foreground shadow mode
         ''')
     )
     shadow_parser.set_defaults(command_category='shadow')

@@ -12,15 +12,38 @@ from typing import Optional
 from ..daemon import start_daemon, stop_daemon, restart_daemon, status_daemon, run_foreground_daemon
 
 
-def start() -> int:
+def start(shadow_mode: bool = False, mirror_mode: bool = False, 
+          parallel: bool = False, capture_mode: str = None, 
+          log_traps: str = None) -> int:
     """
     Start the TrapNinja daemon
+
+    Args:
+        shadow_mode: Run in shadow mode (observe only, no forwarding)
+        mirror_mode: Run in mirror mode (parallel capture and forward)
+        parallel: Enable parallel operation (sniff capture)
+        capture_mode: Force capture mode (auto, sniff, socket)
+        log_traps: Log all observed traps to file
 
     Returns:
         Exit code (0 for success, non-zero for failure)
     """
-    print("Starting TrapNinja daemon with HA support...")
-    return start_daemon()
+    mode_desc = ""
+    if shadow_mode:
+        mode_desc = " in SHADOW MODE (observe only)"
+    elif mirror_mode:
+        mode_desc = " in MIRROR MODE (parallel capture)"
+    elif parallel:
+        mode_desc = " in PARALLEL MODE"
+    
+    print(f"Starting TrapNinja daemon with HA support{mode_desc}...")
+    return start_daemon(
+        shadow_mode=shadow_mode,
+        mirror_mode=mirror_mode,
+        parallel=parallel,
+        capture_mode=capture_mode,
+        log_traps=log_traps
+    )
 
 
 def stop() -> int:
@@ -33,15 +56,38 @@ def stop() -> int:
     return stop_daemon()
 
 
-def restart() -> int:
+def restart(shadow_mode: bool = False, mirror_mode: bool = False,
+            parallel: bool = False, capture_mode: str = None,
+            log_traps: str = None) -> int:
     """
     Restart the TrapNinja daemon
+
+    Args:
+        shadow_mode: Run in shadow mode (observe only, no forwarding)
+        mirror_mode: Run in mirror mode (parallel capture and forward)
+        parallel: Enable parallel operation (sniff capture)
+        capture_mode: Force capture mode (auto, sniff, socket)
+        log_traps: Log all observed traps to file
 
     Returns:
         Exit code (0 for success, non-zero for failure)
     """
-    print("Restarting TrapNinja daemon with HA support...")
-    return restart_daemon()
+    mode_desc = ""
+    if shadow_mode:
+        mode_desc = " in SHADOW MODE (observe only)"
+    elif mirror_mode:
+        mode_desc = " in MIRROR MODE (parallel capture)"
+    elif parallel:
+        mode_desc = " in PARALLEL MODE"
+    
+    print(f"Restarting TrapNinja daemon with HA support{mode_desc}...")
+    return restart_daemon(
+        shadow_mode=shadow_mode,
+        mirror_mode=mirror_mode,
+        parallel=parallel,
+        capture_mode=capture_mode,
+        log_traps=log_traps
+    )
 
 
 def status() -> int:

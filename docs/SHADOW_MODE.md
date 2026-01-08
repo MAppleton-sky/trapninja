@@ -1,4 +1,4 @@
-git # TrapNinja Shadow/Parallel Mode Guide
+# TrapNinja Shadow/Parallel Mode Guide
 
 ## Overview
 
@@ -57,6 +57,55 @@ Simply forces sniff capture mode without changing forwarding behavior. Use when 
 sudo python3 trapninja.py --foreground --parallel
 ```
 
+## Running Modes
+
+### Foreground Mode
+
+Run in foreground for testing and debugging:
+
+```bash
+# Shadow mode - observe only
+sudo python3 trapninja.py --foreground --shadow-mode --debug
+
+# Mirror mode - parallel forwarding
+sudo python3 trapninja.py --foreground --mirror-mode --debug
+
+# Parallel capture
+sudo python3 trapninja.py --foreground --parallel
+```
+
+### Background Daemon Mode
+
+Run as a background daemon for production use:
+
+```bash
+# Start daemon in shadow mode (observe only)
+sudo python3 trapninja.py daemon start --shadow-mode
+
+# Start daemon in mirror mode (parallel capture and forward)
+sudo python3 trapninja.py daemon start --mirror-mode
+
+# Start daemon with parallel capture
+sudo python3 trapninja.py daemon start --parallel
+
+# Restart with shadow mode
+sudo python3 trapninja.py daemon restart --shadow-mode
+
+# Check status
+sudo python3 trapninja.py daemon status
+
+# Stop daemon
+sudo python3 trapninja.py daemon stop
+```
+
+**Legacy command style (also supported):**
+
+```bash
+sudo python3 trapninja.py --start --shadow-mode
+sudo python3 trapninja.py --restart --mirror-mode
+sudo python3 trapninja.py --start --parallel
+```
+
 ## Command Line Options
 
 | Option | Description |
@@ -66,6 +115,8 @@ sudo python3 trapninja.py --foreground --parallel
 | `--parallel` | Force sniff capture for coexistence |
 | `--capture-mode MODE` | Force capture mode: `auto`, `sniff`, or `socket` |
 | `--log-traps FILE` | Log all observed traps to file |
+
+These options work with both foreground and daemon modes.
 
 ## Configuration Files
 

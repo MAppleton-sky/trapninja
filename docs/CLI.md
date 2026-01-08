@@ -77,15 +77,45 @@ trapninja daemon start
 # Start with custom interface and ports
 trapninja daemon start --interface eth0 --ports 162,1162
 
+# Start in shadow mode (observe only, no forwarding)
+trapninja daemon start --shadow-mode
+
+# Start in mirror mode (parallel capture and forward)
+trapninja daemon start --mirror-mode
+
+# Start with parallel capture (sniff mode for coexistence)
+trapninja daemon start --parallel
+
+# Start with specific capture mode
+trapninja daemon start --capture-mode sniff
+
+# Start with trap logging
+trapninja daemon start --shadow-mode --log-traps /var/log/shadow_traps.log
+
 # Stop daemon
 trapninja daemon stop
 
 # Restart daemon
 trapninja daemon restart
 
+# Restart in shadow mode
+trapninja daemon restart --shadow-mode
+
 # Check daemon status
 trapninja daemon status
 ```
+
+### Shadow/Parallel Mode Options
+
+These options are available for `start`, `restart`, and `foreground`:
+
+| Option | Description |
+|--------|-------------|
+| `--shadow-mode` | Observe traps without forwarding (for testing) |
+| `--mirror-mode` | Parallel capture and forward (duplicates traps) |
+| `--parallel` | Force sniff capture for coexistence |
+| `--capture-mode` | Force capture mode: `auto`, `sniff`, or `socket` |
+| `--log-traps FILE` | Log all observed traps to file |
 
 ### Foreground Mode
 

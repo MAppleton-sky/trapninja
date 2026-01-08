@@ -60,6 +60,29 @@ trapninja daemon status | grep received
 | `daemon foreground` | Run in foreground (for debugging) |
 | `daemon foreground --debug` | Run with verbose debug logging |
 
+### Shadow/Parallel Mode (Testing)
+
+Run TrapNinja alongside an existing trap receiver for testing:
+
+| Option | Description |
+|--------|-------------|
+| `--shadow-mode` | Observe traps without forwarding (safe testing) |
+| `--mirror-mode` | Capture and forward in parallel (duplicates) |
+| `--parallel` | Force sniff capture for coexistence |
+
+```bash
+# Start daemon in shadow mode (observe only)
+trapninja daemon start --shadow-mode
+
+# Start daemon in mirror mode
+trapninja daemon start --mirror-mode
+
+# Foreground testing with debug output
+trapninja daemon foreground --shadow-mode --debug
+```
+
+See [SHADOW_MODE.md](SHADOW_MODE.md) for detailed documentation.
+
 ### Service Status
 
 ```bash

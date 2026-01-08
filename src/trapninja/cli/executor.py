@@ -392,11 +392,23 @@ def _execute_daemon_command(args: Namespace, command: str) -> int:
         return _show_category_help('daemon')
     
     if command == 'start':
-        return daemon_commands.start()
+        return daemon_commands.start(
+            shadow_mode=getattr(args, 'shadow_mode', False),
+            mirror_mode=getattr(args, 'mirror_mode', False),
+            parallel=getattr(args, 'parallel', False),
+            capture_mode=getattr(args, 'capture_mode', None),
+            log_traps=getattr(args, 'log_traps', None)
+        )
     elif command == 'stop':
         return daemon_commands.stop()
     elif command == 'restart':
-        return daemon_commands.restart()
+        return daemon_commands.restart(
+            shadow_mode=getattr(args, 'shadow_mode', False),
+            mirror_mode=getattr(args, 'mirror_mode', False),
+            parallel=getattr(args, 'parallel', False),
+            capture_mode=getattr(args, 'capture_mode', None),
+            log_traps=getattr(args, 'log_traps', None)
+        )
     elif command == 'status':
         return daemon_commands.status()
     elif command == 'foreground':
@@ -1095,13 +1107,25 @@ def _execute_legacy_command(args: Namespace) -> int:
 
     # Handle daemon control commands
     elif getattr(args, 'start', False):
-        return daemon_commands.start()
+        return daemon_commands.start(
+            shadow_mode=getattr(args, 'shadow_mode', False),
+            mirror_mode=getattr(args, 'mirror_mode', False),
+            parallel=getattr(args, 'parallel', False),
+            capture_mode=getattr(args, 'capture_mode', None),
+            log_traps=getattr(args, 'log_traps', None)
+        )
     
     elif getattr(args, 'stop', False):
         return daemon_commands.stop()
     
     elif getattr(args, 'restart', False):
-        return daemon_commands.restart()
+        return daemon_commands.restart(
+            shadow_mode=getattr(args, 'shadow_mode', False),
+            mirror_mode=getattr(args, 'mirror_mode', False),
+            parallel=getattr(args, 'parallel', False),
+            capture_mode=getattr(args, 'capture_mode', None),
+            log_traps=getattr(args, 'log_traps', None)
+        )
     
     elif getattr(args, 'status', False):
         return daemon_commands.status()
