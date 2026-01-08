@@ -815,6 +815,6 @@ config_manager.invalidate_cache()
 
 ---
 
-**Module Version**: 3.0.0  
-**Python Compatibility**: 3.6+  
-**Last Updated**: 2026-01-07
+**CLI Version**: 3.0.0  
+**Python Compatibility**: 3.9+  
+**Last Updated**: 2025-01-08

@@ -1,4 +1,4 @@
- # TrapNinja User Guide
+# TrapNinja User Guide
 
 **Version 0.7.13 (Beta)**
 
@@ -11,10 +11,12 @@ A high-performance SNMP trap forwarder for telecommunications environments.
 Throughout this guide, TrapNinja is invoked using:
 
 ```bash
-python3.9 -O trapninja.py <options>
+python3.9 -O trapninja.py <subcommand> [options]
 ```
 
 The `-O` flag enables Python optimizations for better performance.
+
+**CLI v3.0.0 Note:** TrapNinja now uses a modern subcommand-based interface (e.g., `daemon start` instead of `--start`). Legacy flat-style arguments are still supported for backward compatibility.
 
 ---
 
@@ -24,13 +26,13 @@ The `-O` flag enables Python optimizations for better performance.
 
 ```bash
 # Start as daemon
-python3.9 -O trapninja.py --start
+trapninja daemon start
 
 # Check status
-python3.9 -O trapninja.py --status
+trapninja daemon status
 
 # Stop service
-python3.9 -O trapninja.py --stop
+trapninja daemon stop
 ```
 
 ### Verify Operation
@@ -40,7 +42,7 @@ python3.9 -O trapninja.py --stop
 snmptrap -v 2c -c public localhost:162 "" .1.3.6.1.6.3.1.1.5.1
 
 # Check it was processed
-python3.9 -O trapninja.py --status | grep received
+trapninja daemon status | grep received
 ```
 
 ---
@@ -51,17 +53,17 @@ python3.9 -O trapninja.py --status | grep received
 
 | Command | Description |
 |---------|-------------|
-| `--start` | Start as background daemon |
-| `--stop` | Stop the daemon |
-| `--restart` | Stop then start |
-| `--status` | Show service status and statistics |
-| `--foreground` | Run in foreground (for debugging) |
-| `--foreground --debug` | Run with verbose debug logging |
+| `daemon start` | Start as background daemon |
+| `daemon stop` | Stop the daemon |
+| `daemon restart` | Stop then start |
+| `daemon status` | Show service status and statistics |
+| `daemon foreground` | Run in foreground (for debugging) |
+| `daemon foreground --debug` | Run with verbose debug logging |
 
 ### Service Status
 
 ```bash
-python3.9 -O trapninja.py --status
+trapninja daemon status
 ```
 
 Key values to check:
@@ -92,13 +94,13 @@ Block traps from a noisy or unwanted source:
 
 ```bash
 # Block an IP
-python3.9 -O trapninja.py --block-ip 10.0.1.50
+trapninja filter block-ip 10.0.1.50
 
 # Verify
-python3.9 -O trapninja.py --list-blocked-ips
+trapninja filter list-blocked-ips
 
 # Remove block
-python3.9 -O trapninja.py --unblock-ip 10.0.1.50
+trapninja filter unblock-ip 10.0.1.50
 ```
 
 ### Block by OID
@@ -107,16 +109,16 @@ Block specific trap types (e.g., temperature warnings):
 
 ```bash
 # Block specific OID
-python3.9 -O trapninja.py --block-oid 1.3.6.1.4.1.8072.2.3.0.1
+trapninja filter block-oid 1.3.6.1.4.1.8072.2.3.0.1
 
 # Block OID prefix (blocks all matching)
-python3.9 -O trapninja.py --block-oid 1.3.6.1.4.1.8072
+trapninja filter block-oid 1.3.6.1.4.1.8072
 
 # List blocked OIDs
-python3.9 -O trapninja.py --list-blocked-oids
+trapninja filter list-blocked-oids
 
 # Remove block
-python3.9 -O trapninja.py --unblock-oid 1.3.6.1.4.1.8072.2.3.0.1
+trapninja filter unblock-oid 1.3.6.1.4.1.8072.2.3.0.1
 ```
 
 ### Changes Apply Immediately
@@ -266,7 +268,7 @@ After editing config files, verify with statistics:
 
 ```bash
 # Check overall redirected count
-python3.9 -O trapninja.py --stats-summary
+trapninja stats summary
 
 # Look for "Redirected" in output
 ```
@@ -282,7 +284,7 @@ Redirection configuration is checked periodically (every 60 seconds by default).
 
 To force an immediate reload, restart the service:
 ```bash
-python3.9 -O trapninja.py --restart
+trapninja daemon restart
 ```
 
 ### Troubleshooting Redirection
@@ -307,7 +309,7 @@ TrapNinja supports Primary/Secondary clustering for 99.999% availability.
 ### HA Status
 
 ```bash
-python3.9 -O trapninja.py --ha-status
+trapninja ha status
 ```
 
 Output shows:
@@ -322,17 +324,17 @@ To perform maintenance on the PRIMARY node:
 
 **On the SECONDARY node:**
 ```bash
-python3.9 -O trapninja.py --promote
+trapninja ha promote
 ```
 
 **On the PRIMARY node:**
 ```bash
-python3.9 -O trapninja.py --demote
+trapninja ha demote
 ```
 
 Verify both nodes show expected states:
 ```bash
-python3.9 -O trapninja.py --ha-status
+trapninja ha status
 ```
 
 ### Return to Normal After Maintenance
@@ -341,12 +343,12 @@ When maintenance is complete, reverse the process:
 
 **On the original PRIMARY:**
 ```bash
-python3.9 -O trapninja.py --promote
+trapninja ha promote
 ```
 
 **On the original SECONDARY:**
 ```bash
-python3.9 -O trapninja.py --demote
+trapninja ha demote
 ```
 
 ### Emergency Failover
@@ -355,17 +357,17 @@ If PRIMARY fails unexpectedly, SECONDARY auto-promotes within 3-5 seconds.
 
 To force immediate failover:
 ```bash
-python3.9 -O trapninja.py --force-failover
+trapninja ha force-failover
 ```
 
 ### HA Quick Reference
 
 | Scenario | Action |
 |----------|--------|
-| Check status | `--ha-status` |
-| Planned maintenance | `--promote` on secondary, then `--demote` on primary |
-| Force failover | `--force-failover` |
-| Both nodes confused | `--demote` on one node to break tie |
+| Check status | `trapninja ha status` |
+| Planned maintenance | `trapninja ha promote` on secondary, then `trapninja ha demote` on primary |
+| Force failover | `trapninja ha force-failover` |
+| Both nodes confused | `trapninja ha demote` on one node to break tie |
 
 See [HA.md](HA.md) for detailed configuration.
 
@@ -376,36 +378,36 @@ See [HA.md](HA.md) for detailed configuration.
 ### Quick Statistics Summary
 
 ```bash
-python3.9 -O trapninja.py --stats-summary
+trapninja stats summary
 ```
 
 ### Top Trap Sources
 
 ```bash
 # Top 10 by volume (default)
-python3.9 -O trapninja.py --stats-top-ips
+trapninja stats top-ips
 
 # Top 20 by current rate
-python3.9 -O trapninja.py --stats-top-ips -n 20 -s rate
+trapninja stats top-ips --count 20 --sort rate
 
 # Top blocked sources
-python3.9 -O trapninja.py --stats-top-ips -s blocked
+trapninja stats top-ips --sort blocked
 ```
 
 ### Top OIDs (Trap Types)
 
 ```bash
 # Top 10 by volume
-python3.9 -O trapninja.py --stats-top-oids
+trapninja stats top-oids
 
 # By current rate
-python3.9 -O trapninja.py --stats-top-oids -s rate
+trapninja stats top-oids --sort rate
 ```
 
 ### Investigate Specific Source
 
 ```bash
-python3.9 -O trapninja.py --stats-ip --ip 10.0.0.1
+trapninja stats ip-details --ip 10.0.0.1
 ```
 
 Shows:
@@ -417,7 +419,7 @@ Shows:
 ### Investigate Specific OID
 
 ```bash
-python3.9 -O trapninja.py --stats-oid --oid 1.3.6.1.4.1.9.9.41.2.0.1
+trapninja stats oid-details --oid 1.3.6.1.4.1.9.9.41.2.0.1
 ```
 
 Shows:
@@ -428,26 +430,26 @@ Shows:
 ### Destination Statistics
 
 ```bash
-python3.9 -O trapninja.py --stats-destinations
+trapninja stats destinations
 ```
 
 ### Export Statistics
 
 ```bash
 # JSON export
-python3.9 -O trapninja.py --stats-export -f json --output /tmp/stats.json
+trapninja stats export --format json --output /tmp/stats.json
 
 # Prometheus format
-python3.9 -O trapninja.py --stats-export -f prometheus --output /tmp/stats.prom
+trapninja stats export --format prometheus --output /tmp/stats.prom
 ```
 
 ### Statistics Options Reference
 
 | Option | Description |
 |--------|-------------|
-| `-n`, `--count` | Number of items to show (default: 10) |
-| `-s`, `--sort` | Sort by: `total`, `rate`, `blocked`, `recent` |
-| `-f`, `--format` | Export format: `json`, `prometheus` |
+| `--count N` | Number of items to show (default: 10) |
+| `--sort TYPE` | Sort by: `total`, `rate`, `blocked`, `recent` |
+| `--format FMT` | Export format: `json`, `prometheus` |
 | `--json` | Output as JSON |
 | `--pretty` | Pretty print JSON |
 
@@ -462,7 +464,7 @@ TrapNinja caches traps in Redis for replay during monitoring outages.
 ### Check Cache Status
 
 ```bash
-python3.9 -O trapninja.py --cache-status
+trapninja cache status
 ```
 
 Shows:
@@ -474,13 +476,13 @@ Shows:
 
 ```bash
 # Query default destination, last 2 hours
-python3.9 -O trapninja.py --cache-query --destination default
+trapninja cache query --destination default
 
 # Specific time window
-python3.9 -O trapninja.py --cache-query --destination default --from "14:30" --to "15:45"
+trapninja cache query --destination default --from "14:30" --to "15:45"
 
 # Relative time
-python3.9 -O trapninja.py --cache-query --destination default --from "-2h" --to "-1h"
+trapninja cache query --destination default --from "-2h" --to "-1h"
 ```
 
 ### Replay Traps
@@ -489,15 +491,15 @@ After a monitoring system outage, replay missed traps:
 
 ```bash
 # Preview first (dry run)
-python3.9 -O trapninja.py --cache-replay --destination default \
+trapninja cache replay --destination default \
     --from "14:30" --to "15:45" --dry-run
 
 # Actual replay with rate limiting
-python3.9 -O trapninja.py --cache-replay --destination default \
+trapninja cache replay --destination default \
     --from "14:30" --to "15:45" --rate-limit 1000
 
 # Skip confirmation prompt
-python3.9 -O trapninja.py --cache-replay --destination default \
+trapninja cache replay --destination default \
     --from "14:30" --to "15:45" -y
 ```
 
@@ -505,10 +507,10 @@ python3.9 -O trapninja.py --cache-replay --destination default \
 
 ```bash
 # Clear specific destination
-python3.9 -O trapninja.py --cache-clear --destination default
+trapninja cache clear --destination default
 
 # Clear all
-python3.9 -O trapninja.py --cache-clear -y
+trapninja cache clear -y
 ```
 
 See [CACHE.md](CACHE.md) for Redis setup and configuration.
@@ -522,7 +524,7 @@ TrapNinja can decrypt SNMPv3 traps and forward them as SNMPv2c.
 ### Check SNMPv3 Status
 
 ```bash
-python3.9 -O trapninja.py --snmpv3-status
+trapninja snmpv3 status
 ```
 
 ### Add SNMPv3 User
@@ -530,7 +532,7 @@ python3.9 -O trapninja.py --snmpv3-status
 Interactive mode (recommended - passwords not shown on screen):
 
 ```bash
-python3.9 -O trapninja.py --snmpv3-add-user \
+trapninja snmpv3 add-user \
     --username myuser \
     --engine-id 80001f888056565656565656 \
     --auth-protocol SHA \
@@ -550,7 +552,7 @@ Confirm privacy passphrase:
 For scripted deployments, passphrases can be provided directly:
 
 ```bash
-python3.9 -O trapninja.py --snmpv3-add-user \
+trapninja snmpv3 add-user \
     --username myuser \
     --engine-id 80001f888056565656565656 \
     --auth-protocol SHA \
@@ -564,13 +566,13 @@ python3.9 -O trapninja.py --snmpv3-add-user \
 ### List Configured Users
 
 ```bash
-python3.9 -O trapninja.py --snmpv3-list-users
+trapninja snmpv3 list-users
 ```
 
 ### Remove User
 
 ```bash
-python3.9 -O trapninja.py --snmpv3-remove-user \
+trapninja snmpv3 remove-user \
     --engine-id 80001f888056565656565656 \
     --username myuser
 ```
@@ -630,7 +632,7 @@ Restart required after editing.
 netstat -ulnp | grep 162
 
 # Run in foreground for errors
-python3.9 -O trapninja.py --foreground --debug
+trapninja daemon foreground --debug
 ```
 
 ### No Traps Received
@@ -647,23 +649,23 @@ firewall-cmd --list-ports | grep 162
 
 ```bash
 # Check HA state (must be PRIMARY to forward)
-python3.9 -O trapninja.py --ha-status | grep Forwarding
+trapninja ha status | grep Forwarding
 
 # Check destinations configured
 cat config/destinations.json
 
 # Check if source is blocked
-python3.9 -O trapninja.py --list-blocked-ips
+trapninja filter list-blocked-ips
 ```
 
 ### High CPU Usage
 
 ```bash
 # Check capture mode
-python3.9 -O trapninja.py --status | grep -i capture
+trapninja daemon status | grep -i capture
 
 # Enable eBPF (requires root and BCC)
-sudo python3.9 -O trapninja.py --start
+sudo trapninja daemon start
 ```
 
 ### HA Issues
@@ -686,69 +688,75 @@ See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for comprehensive diagnostics.
 
 ```bash
 # Start/stop
-python3.9 -O trapninja.py --start
-python3.9 -O trapninja.py --stop
-python3.9 -O trapninja.py --restart
-python3.9 -O trapninja.py --status
+trapninja daemon start
+trapninja daemon stop
+trapninja daemon restart
+trapninja daemon status
 
 # HA management
-python3.9 -O trapninja.py --ha-status
-python3.9 -O trapninja.py --promote
-python3.9 -O trapninja.py --demote
+trapninja ha status
+trapninja ha promote
+trapninja ha demote
 
 # Statistics
-python3.9 -O trapninja.py --stats-summary
-python3.9 -O trapninja.py --stats-top-ips
-python3.9 -O trapninja.py --stats-top-oids
-python3.9 -O trapninja.py --stats-destinations
+trapninja stats summary
+trapninja stats top-ips
+trapninja stats top-oids
+trapninja stats destinations
 ```
 
 ### Filtering
 
 ```bash
 # Block/unblock IPs
-python3.9 -O trapninja.py --block-ip <ip>
-python3.9 -O trapninja.py --unblock-ip <ip>
-python3.9 -O trapninja.py --list-blocked-ips
+trapninja filter block-ip <ip>
+trapninja filter unblock-ip <ip>
+trapninja filter list-blocked-ips
 
 # Block/unblock OIDs
-python3.9 -O trapninja.py --block-oid <oid>
-python3.9 -O trapninja.py --unblock-oid <oid>
-python3.9 -O trapninja.py --list-blocked-oids
+trapninja filter block-oid <oid>
+trapninja filter unblock-oid <oid>
+trapninja filter list-blocked-oids
 ```
 
 ### Cache Operations
 
 ```bash
-python3.9 -O trapninja.py --cache-status
-python3.9 -O trapninja.py --cache-query --destination <dest> --from <time> --to <time>
-python3.9 -O trapninja.py --cache-replay --destination <dest> --from <time> --to <time>
+trapninja cache status
+trapninja cache query --destination <dest> --from <time> --to <time>
+trapninja cache replay --destination <dest> --from <time> --to <time>
 ```
 
 ### Help
 
 ```bash
-python3.9 -O trapninja.py --help
-python3.9 -O trapninja.py --ha-help
-python3.9 -O trapninja.py --cache-help
-python3.9 -O trapninja.py --stats-help
+trapninja --help
+trapninja daemon --help
+trapninja ha --help
+trapninja cache --help
+trapninja stats --help
+trapninja filter --help
 ```
 
 ---
 
 ## Getting Help
 
-- **CLI Help**: `python3.9 -O trapninja.py --help`
-- **HA Help**: `python3.9 -O trapninja.py --ha-help`
-- **Cache Help**: `python3.9 -O trapninja.py --cache-help`
-- **Stats Help**: `python3.9 -O trapninja.py --stats-help`
-- **Detailed docs**: See other files in the `documentation/` directory
+- **Main Help**: `trapninja --help`
+- **Category Help**: `trapninja <category> --help`
+  - `trapninja daemon --help`
+  - `trapninja ha --help`
+  - `trapninja cache --help`
+  - `trapninja stats --help`
+  - `trapninja filter --help`
+  - `trapninja snmpv3 --help`
+- **Detailed docs**: See other files in the `docs/` directory
 
 ### Related Documentation
 
 | Document | Contents |
 |----------|----------|
-| [CLI.md](CLI.md) | Full CLI reference |
+| [CLI.md](CLI.md) | Full CLI reference with all subcommands |
 | [HA.md](HA.md) | HA configuration and deployment |
 | [CACHE.md](CACHE.md) | Redis cache setup |
 | [METRICS.md](METRICS.md) | Prometheus metrics reference |
