@@ -12,6 +12,20 @@ The granular statistics system provides detailed tracking beyond the aggregate m
 | **Per-OID** | Volume, rate, source IPs | Understand alarm types, spot patterns |
 | **Per-Destination** | Forwards, success rate, sources | Monitor forwarding health |
 
+### SNMPv3 Support
+
+As of v0.7.15, decrypted SNMPv3 traps are **routed through the standard v2c processing pipeline**. When an SNMPv3 trap is successfully decrypted and converted to v2c format:
+
+1. The converted v2c payload is processed exactly like a native v2c trap
+2. OID-based blocking rules are applied (same as v2c)
+3. OID-based redirection rules are applied (same as v2c)
+4. IP-based redirection rules are applied (same as v2c)
+5. The OID is extracted and recorded in granular statistics
+
+This unified processing ensures consistent behavior - blocking/redirection rules work identically for both native v2c and decrypted v3 traps.
+
+**Example:** If you block OID `1.3.6.1.4.1.9.9.41.2.0.1`, it will be blocked whether it arrives as v2c or encrypted v3.
+
 ## Architecture
 
 ```
@@ -162,6 +176,8 @@ Shows comprehensive details:
 - Destination breakdown
 
 ### OID Details
+
+> **Note:** The `--oid` query searches **all tracked OIDs** (up to 5,000), not just the top 100 shown by `stats top-oids`. If an OID has been seen but isn't in the top list, it can still be queried directly.
 
 ```bash
 # Detailed stats for specific OID (shows top 10 sources by default)
@@ -332,6 +348,25 @@ scrape_configs:
 ### Missing IPs/OIDs
 
 Entries are removed after `stale_threshold` seconds of inactivity. Increase this value for longer retention.
+
+### SNMPv3 OIDs Not Appearing
+
+If decrypted SNMPv3 traps aren't showing in OID statistics:
+
+1. **Check decryption is working:** Look for "SNMPv3 decrypted" in logs:
+   ```bash
+   journalctl -u trapninja | grep "SNMPv3 decrypted"
+   ```
+
+2. **Verify varbind extraction:** Enable debug logging to see OID extraction:
+   ```bash
+   journalctl -u trapninja | grep "Extracted trap OID"
+   ```
+
+3. **Restart after upgrade:** If you upgraded TrapNinja, restart to load new worker code:
+   ```bash
+   systemctl restart trapninja
+   ```
 
 ## See Also
 

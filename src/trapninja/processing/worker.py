@@ -527,6 +527,95 @@ class PacketWorker:
             self._record_granular_stats(source_ip, trap_oid, 'forwarded', 'default')
             notify_trap_processed()  # Notify HA system of activity
     
+    def _process_v2c_payload(
+        self,
+        source_ip: str,
+        payload: bytes,
+        config: Dict,
+        trap_oid: Optional[str] = None,
+        is_decrypted_v3: bool = False
+    ) -> bool:
+        """
+        Process an SNMPv2c payload through the standard filtering/forwarding pipeline.
+        
+        This is the unified processing path for:
+        - Native SNMPv2c traps (fast path)
+        - Decrypted SNMPv3 traps (after conversion to v2c)
+        
+        Args:
+            source_ip: Source IP address
+            payload: SNMPv2c packet bytes
+            config: Configuration dict from cache
+            trap_oid: Pre-extracted trap OID (optional, will extract if None)
+            is_decrypted_v3: True if this came from SNMPv3 decryption (for logging)
+            
+        Returns:
+            True if packet was handled, False if processing failed
+        """
+        # Extract OID if not provided
+        if trap_oid is None:
+            trap_oid = extract_trap_oid_fast(payload)
+        
+        log_prefix = "[v3->v2c] " if is_decrypted_v3 else ""
+        
+        # Check OID blocking
+        if trap_oid and trap_oid in config['blocked_traps']:
+            self.stats.increment_blocked()
+            self._record_granular_stats(source_ip, trap_oid, 'blocked')
+            if config['blocked_dest']:
+                forward_packet(source_ip, payload, config['blocked_dest'])
+            logger.debug(f"{log_prefix}Trap blocked by OID filter: {trap_oid}")
+            return True
+        
+        # Check IP redirection (takes priority over OID redirection)
+        if source_ip in config['redirected_ips']:
+            tag = config['redirected_ips'][source_ip]
+            if tag in config['redirected_destinations']:
+                dest_list = config['redirected_destinations'][tag]
+                forward_packet(source_ip, payload, dest_list)
+                self.stats.increment_redirected()
+                self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
+                notify_trap_processed()
+                if is_decrypted_v3:
+                    logger.info(
+                        f"{log_prefix}Forwarded from {source_ip} to '{tag}' "
+                        f"({len(dest_list)} hosts)"
+                    )
+                return True
+        
+        # Check OID redirection
+        if trap_oid and trap_oid in config['redirected_oids']:
+            tag = config['redirected_oids'][trap_oid]
+            if tag in config['redirected_destinations']:
+                dest_list = config['redirected_destinations'][tag]
+                forward_packet(source_ip, payload, dest_list)
+                self.stats.increment_redirected()
+                self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
+                notify_trap_processed()
+                if is_decrypted_v3:
+                    logger.info(
+                        f"{log_prefix}OID {trap_oid} redirected to '{tag}' "
+                        f"({len(dest_list)} hosts)"
+                    )
+                return True
+        
+        # Forward to default destinations
+        if config['destinations']:
+            forward_packet(source_ip, payload, config['destinations'])
+            self.stats.increment_forwarded()
+            self._record_granular_stats(source_ip, trap_oid, 'forwarded', 'default')
+            notify_trap_processed()
+            if is_decrypted_v3:
+                logger.info(
+                    f"{log_prefix}Forwarded from {source_ip} "
+                    f"({len(payload)} bytes) to {len(config['destinations'])} destination(s)"
+                )
+            return True
+        
+        # No destinations configured
+        logger.debug(f"{log_prefix}No destinations configured, packet dropped")
+        return False
+    
     def _process_snmpv3(self, packet_data: Dict[str, Any], config: Dict):
         """
         Process SNMPv3 packet with decryption support.
@@ -604,44 +693,17 @@ class PacketWorker:
                             f"SNMPv3->v2c conversion successful: "
                             f"{len(payload)} -> {len(v2c_payload)} bytes"
                         )
-                        # Log first bytes to verify it's valid SNMP
-                        logger.debug(
-                            f"v2c payload first 20 bytes: {v2c_payload[:20].hex()}"
+                        
+                        # Route through standard v2c processing pipeline
+                        # This applies all blocking, redirection, and forwarding rules
+                        # exactly as they would be applied to native v2c traps
+                        self._process_v2c_payload(
+                            source_ip=source_ip,
+                            payload=v2c_payload,
+                            config=config,
+                            trap_oid=None,  # Let it extract from the v2c payload
+                            is_decrypted_v3=True
                         )
-                        
-                        # Determine destination based on redirection rules
-                        # Check IP redirection first (same as v2c path)
-                        if source_ip in config['redirected_ips']:
-                            tag = config['redirected_ips'][source_ip]
-                            if tag in config['redirected_destinations']:
-                                dest_list = config['redirected_destinations'][tag]
-                                logger.info(
-                                    f"Forwarding decrypted v2c trap from {source_ip} "
-                                    f"({len(v2c_payload)} bytes) to REDIRECTED destination '{tag}' "
-                                    f"({len(dest_list)} hosts)"
-                                )
-                                forward_packet(source_ip, v2c_payload, dest_list)
-                                self.stats.increment_redirected()
-                                # Use 'redirected' action for proper stats counting
-                                self._record_granular_stats(
-                                    source_ip, None, 'redirected', tag
-                                )
-                                notify_trap_processed()
-                                return
-                        
-                        # Default destinations
-                        if config['destinations']:
-                            logger.info(
-                                f"Forwarding decrypted v2c trap from {source_ip} "
-                                f"({len(v2c_payload)} bytes) to {len(config['destinations'])} destination(s)"
-                            )
-                            forward_packet(source_ip, v2c_payload, config['destinations'])
-                            self.stats.increment_forwarded()
-                            # Use 'forwarded' action for proper stats counting
-                            self._record_granular_stats(
-                                source_ip, None, 'forwarded', 'default'
-                            )
-                            notify_trap_processed()
                         return
                     else:
                         # CRITICAL FIX: Log error and return - do NOT fall through!

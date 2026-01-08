@@ -16,6 +16,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+#### SNMPv3 Decrypted Traps - Unified v2c Processing Pipeline
+- **Fixed OID statistics not being recorded for SNMPv3 decrypted traps**. Previously,
+  when SNMPv3 traps were successfully decrypted and converted to v2c, the trap OID
+  was not extracted and the v3 handler had its own duplicated forwarding logic.
+- **Decrypted SNMPv3 traps now route through the standard v2c processing pipeline**:
+  - OID-based blocking rules are properly applied
+  - OID-based redirection rules are properly applied  
+  - IP-based redirection rules are properly applied
+  - OID statistics are correctly recorded via `extract_trap_oid_fast()`
+  - All filtering/forwarding behavior is consistent with native v2c traps
+- Added `_process_v2c_payload()` unified method for processing v2c payloads from
+  any source (native v2c or decrypted v3)
+- Removed duplicated forwarding logic from `_process_snmpv3()` (~60 lines)
+
+### Documentation
+- Updated GRANULAR_STATS.md with SNMPv3 OID tracking support
+- Added troubleshooting section for SNMPv3 OIDs not appearing in stats
+- Clarified that `--oid` query searches all tracked OIDs (not just top 100)
+
+---
+
 ## [0.7.14] - 2026-01-07
 
 ### Fixed
