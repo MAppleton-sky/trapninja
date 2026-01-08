@@ -74,14 +74,14 @@ Key values to check:
 
 ### Log Files
 
-| Log | Location | Purpose |
-|-----|----------|---------|
-| Main log | `/var/log/trapninja.log` | Operations and errors |
-| Metrics | `/var/log/trapninja/metrics/` | Prometheus/JSON metrics |
+| Log      | Location                           | Purpose                 |
+|----------|------------------------------------|-------------------------|
+| Main log | `/var/log/trapninja/trapninja.log` | Operations and errors   |
+| Metrics  | `/opt/metrics/`                    | Prometheus/JSON metrics |
 
 View recent logs:
 ```bash
-tail -f /var/log/trapninja.log
+tail -f /var/log/trapninja/trapninja.log
 ```
 
 ---
@@ -275,7 +275,7 @@ trapninja stats summary
 
 You can also check the log file:
 ```bash
-grep -i redirect /var/log/trapninja.log | tail -10
+grep -i redirect /var/log/trapninja/trapninja.log | tail -10
 ```
 
 ### Configuration Reload
@@ -293,7 +293,7 @@ trapninja daemon restart
 1. Verify JSON syntax is valid: `python3 -m json.tool config/redirected_ips.json`
 2. Check that the destination tag exists in `redirected_destinations.json`
 3. Verify IP/OID format is correct (no typos)
-4. Check logs: `grep -i redirect /var/log/trapninja.log`
+4. Check logs: `grep -i redirect /var/log/trapninja/trapninja.log`
 
 **Traps going to wrong destination:**
 1. Remember IP rules take priority over OID rules
@@ -675,7 +675,7 @@ sudo trapninja daemon start
 nc -vzu <peer_ip> 5000
 
 # Check HA logs
-grep "HA:" /var/log/trapninja.log | tail -20
+grep "HA:" /var/log/trapninja/trapninja.log | tail -20
 ```
 
 See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for comprehensive diagnostics.
