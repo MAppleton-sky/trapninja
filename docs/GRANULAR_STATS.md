@@ -159,13 +159,13 @@ trapninja stats top-oids -n 50 -s rate
 
 ```bash
 # Detailed stats for specific IP (shows top 10 OIDs by default)
-trapninja --stats-ip --ip 10.0.0.1
+trapninja stats ip --ip 10.0.0.1
 
 # Show top 50 OIDs from this IP
-trapninja --stats-ip --ip 10.0.0.1 --oids 50
+trapninja stats ip --ip 10.0.0.1 --oids 50
 
 # Export as JSON for further analysis
-trapninja --stats-ip --ip 10.0.0.1 --oids 100 --json --pretty
+trapninja stats ip --ip 10.0.0.1 --oids 100 --json --pretty
 ```
 
 Shows comprehensive details:
@@ -181,13 +181,13 @@ Shows comprehensive details:
 
 ```bash
 # Detailed stats for specific OID (shows top 10 sources by default)
-trapninja --stats-oid --oid 1.3.6.1.4.1.9.9.41.2.0.1
+trapninja stats oid --oid 1.3.6.1.4.1.9.9.41.2.0.1
 
 # Show top 30 source IPs for this OID
-trapninja --stats-oid --oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 30
+trapninja stats oid --oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 30
 
 # Export as JSON for further analysis
-trapninja --stats-oid --oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 100 --json --pretty
+trapninja stats oid --oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 100 --json --pretty
 ```
 
 Shows comprehensive details:
@@ -335,7 +335,7 @@ scrape_configs:
 
 ### Statistics Not Updating
 
-1. Check service is running: `trapninja --status`
+1. Check service is running: `trapninja daemon status`
 2. Check for errors: `journalctl -u trapninja | grep -i granular`
 3. Verify metrics directory: `ls -la /var/log/trapninja/metrics/`
 

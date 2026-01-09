@@ -97,7 +97,7 @@ Add the `failover_replay` section to your cache configuration:
 
 ```bash
 # Show failover replay status
-trapninja --failover-status
+trapninja failover status
 ```
 
 Output:
@@ -138,7 +138,7 @@ Preview what would be replayed if a failover happened now:
 
 ```bash
 # Detect current forwarding gaps
-trapninja --failover-detect
+trapninja failover detect
 ```
 
 Output:
@@ -178,7 +178,7 @@ Summary:
   Estimated traps to replay: 7,379
   Estimated replay time: 3.7 seconds
 
-To replay these gaps, use: trapninja --failover-replay
+To replay these gaps, use: trapninja failover replay
 ```
 
 ### Manual Replay
@@ -187,23 +187,23 @@ Trigger a manual replay for detected gaps or a specific time window:
 
 ```bash
 # Auto-detect and replay gaps
-trapninja --failover-replay --destination detect
+trapninja failover replay --destination detect
 
 # Replay specific destination and time window
-trapninja --failover-replay --destination default \
+trapninja failover replay --destination default \
     --from "-5m" --to "now" --rate-limit 2000
 
 # Dry run to preview
-trapninja --failover-replay --destination detect --dry-run
+trapninja failover replay --destination detect --dry-run
 
 # Skip confirmation
-trapninja --failover-replay --destination detect -y
+trapninja failover replay --destination detect -y
 ```
 
 ### Show Help
 
 ```bash
-trapninja --failover-help
+trapninja failover help
 ```
 
 ## How It Works
@@ -355,7 +355,7 @@ Gap for default (450.0s) exceeds maximum (300.0s) - capping replay window
 **Solutions:**
 1. Use manual replay for larger windows:
    ```bash
-   trapninja --cache-replay --destination default --from "-10m" --to "now"
+   trapninja cache replay --destination default --from "-10m" --to "now"
    ```
 2. Increase `max_gap_seconds` if appropriate
 
@@ -394,8 +394,8 @@ redis-cli hgetall "trapninja:failover:last_forwarded:default"
    - `min_gap_seconds`: 1-2 seconds (ignore tiny gaps)
    - `max_gap_seconds`: 5 minutes (prevent runaway replays)
 3. **Match Rate Limits**: `replay_rate_limit` should match or be slightly higher than your typical trap rate
-4. **Test Before Production**: Use `--failover-detect` and `--dry-run` to validate
-5. **Monitor Replay History**: Check `--failover-status` regularly
+4. **Test Before Production**: Use `trapninja failover detect` and `--dry-run` to validate
+5. **Monitor Replay History**: Check `trapninja failover status` regularly
 
 ## Metrics
 
@@ -411,4 +411,4 @@ The following metrics are available for monitoring:
 
 ---
 
-**Last Updated**: December 2024
+**Last Updated**: 2025-01-09

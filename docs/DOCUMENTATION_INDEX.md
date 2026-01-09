@@ -1,7 +1,7 @@
 # TrapNinja Documentation Index
 
-**Last Updated**: 2025-01-08  
-**TrapNinja Version**: 0.7.13 (Beta)
+**Last Updated**: 2025-01-09  
+**TrapNinja Version**: 0.7.14 (Beta)
 
 This index provides an overview of all documentation files and their purposes.
 
@@ -22,14 +22,14 @@ This index provides an overview of all documentation files and their purposes.
 
 | Document | Purpose | Status | Last Updated |
 |----------|---------|--------|--------------|
-| **HA.md** | High Availability configuration | 📝 Needs Review | - |
-| **CACHE.md** | Redis caching and replay | 📝 Needs Review | - |
-| **GRANULAR_STATS.md** | Statistics system details | 📝 Needs Review | - |
-| **METRICS.md** | Prometheus metrics reference | 📝 Needs Review | - |
-| **SNMPV3_CREDENTIALS.md** | SNMPv3 user management | 📝 Needs Review | - |
-| **SHADOW_MODE.md** | Testing and observation modes | 📝 Needs Review | - |
-| **FAILOVER_REPLAY.md** | Automatic gap replay | 📝 Needs Review | - |
-| **CONFIG_SYNC.md** | HA configuration synchronization | 📝 Needs Review | - |
+| **HA.md** | High Availability configuration | ✅ Current | 2025-01-09 |
+| **CACHE.md** | Redis caching and replay | ✅ Current | 2025-01-09 |
+| **GRANULAR_STATS.md** | Statistics system details | ✅ Current | 2025-01-09 |
+| **METRICS.md** | Prometheus metrics reference | ✅ Current | - |
+| **SNMPV3_CREDENTIALS.md** | SNMPv3 user management | ✅ Current | 2025-01-09 |
+| **SHADOW_MODE.md** | Testing and observation modes | ✅ Current | 2025-01-09 |
+| **FAILOVER_REPLAY.md** | Automatic gap replay | ✅ Current | 2025-01-09 |
+| **CONFIG_SYNC.md** | HA configuration synchronization | ✅ Current | 2025-01-09 |
 | **FRAGMENTATION.md** | Packet fragmentation handling | 📝 Needs Review | - |
 
 ### Operational Documentation
@@ -55,7 +55,7 @@ This index provides an overview of all documentation files and their purposes.
 
 | Document | Purpose | Status | Last Updated |
 |----------|---------|--------|--------------|
-| **CLI_MODULE.md** | CLI module internals | 📝 Needs Review | - |
+| **CLI_MODULE.md** | CLI module internals | ✅ Current | 2025-01-09 |
 | **CODE_REVIEW.md** | Code review and quality notes | 📝 Needs Review | - |
 
 ### Development Process
@@ -76,9 +76,13 @@ This index provides an overview of all documentation files and their purposes.
 ```bash
 # Modern subcommand style (recommended)
 trapninja daemon start
+trapninja ha status
+trapninja filter block-ip 10.0.0.1
+trapninja cache replay --destination default --from "-2h" --to "-1h"
 
 # Legacy flat-style (backward compatible)
 python3.9 -O trapninja.py --start
+python3.9 -O trapninja.py --ha-status
 ```
 
 **Note**: `trapninja` is used as shorthand. Actual invocation depends on installation:
@@ -86,13 +90,22 @@ python3.9 -O trapninja.py --start
 - Module invocation: `python3.9 -O -m trapninja.main`
 - Installed command: `trapninja`
 
-### CLI Changes
+### CLI v3.0.0 Structure
 
-**v3.0.0** introduced subcommand-based CLI structure:
-- Organized into categories (daemon, filter, ha, snmpv3, cache, stats, etc.)
-- Better help system with category-specific help
-- Improved error messages with suggestions
-- Full backward compatibility with legacy flags
+The current CLI is organized into subcommand categories:
+
+| Category | Purpose | Example |
+|----------|---------|---------|
+| `daemon` | Service control | `trapninja daemon start` |
+| `filter` | IP/OID blocking and redirection | `trapninja filter block-ip 10.0.0.1` |
+| `ha` | High Availability | `trapninja ha status` |
+| `snmpv3` | SNMPv3 credential management | `trapninja snmpv3 add-user` |
+| `cache` | Trap caching and replay | `trapninja cache replay` |
+| `stats` | Statistics and monitoring | `trapninja stats summary` |
+| `metrics` | Prometheus metrics config | `trapninja metrics config` |
+| `shadow` | Shadow/mirror mode | `trapninja shadow status` |
+| `failover` | Failover replay | `trapninja failover status` |
+| `sync` | Config synchronization | `trapninja sync status` |
 
 ### Documentation Updates Required
 
@@ -120,6 +133,9 @@ When CLI changes occur:
 - Trap Caching → [CACHE.md](CACHE.md)
 - SNMPv3 Decryption → [SNMPV3_CREDENTIALS.md](SNMPV3_CREDENTIALS.md)
 - Monitoring → [METRICS.md](METRICS.md) and [GRANULAR_STATS.md](GRANULAR_STATS.md)
+- Testing/Shadow Mode → [SHADOW_MODE.md](SHADOW_MODE.md)
+- Failover Replay → [FAILOVER_REPLAY.md](FAILOVER_REPLAY.md)
+- Config Sync → [CONFIG_SYNC.md](CONFIG_SYNC.md)
 - Problems → [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
 ### For Developers
@@ -293,4 +309,4 @@ For documentation improvements:
 
 ---
 
-*Documentation Index Version: 1.0.0*
+*Documentation Index Version: 1.1.0*

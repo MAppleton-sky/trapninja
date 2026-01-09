@@ -1,11 +1,11 @@
 # TrapNinja CLI Module
 
-**Version:** 2.1.0  
-**Last Updated:** December 31, 2025
+**Version:** 3.0.0  
+**Last Updated:** January 2025
 
 ## Overview
 
-The CLI module provides a clean, modular command-line interface for TrapNinja. The code is organized by functional concern for better maintainability, testability, and extensibility.
+The CLI module provides a clean, modular command-line interface for TrapNinja using a **subcommand-based structure** for better discoverability. The code is organized by functional concern for maintainability, testability, and extensibility.
 
 ## Architecture
 
@@ -14,7 +14,7 @@ The CLI module provides a clean, modular command-line interface for TrapNinja. T
 ```
 trapninja/cli/
 ├── __init__.py              # Public API exports
-├── parser.py                # Argument parsing configuration
+├── parser.py                # Subcommand-based argument parsing
 ├── validation.py            # Input validation and sanitization
 ├── executor.py              # Command orchestration and execution
 ├── output.py                # Output formatting utilities
@@ -27,7 +27,8 @@ trapninja/cli/
 ├── shadow_commands.py       # Shadow/mirror mode commands
 ├── snmpv3_commands.py       # SNMPv3 credential management
 ├── sync_commands.py         # Config sync commands
-└── failover_commands.py     # Failover replay commands
+├── failover_commands.py     # Failover replay commands
+└── metrics_commands.py      # Prometheus metrics configuration
 ```
 
 ### Design Principles
@@ -41,16 +42,17 @@ trapninja/cli/
 ## Module Descriptions
 
 ### `parser.py`
-**Purpose**: Configure all command-line arguments and options
+**Purpose**: Configure all command-line arguments and subcommands
 
 **Key Functions**:
 - `create_argument_parser()`: Returns configured ArgumentParser instance
 
 **Features**:
+- Subcommand-based structure (e.g., `trapninja daemon start`)
+- Backward compatibility with legacy flat-style arguments
 - Comprehensive argument definitions with help text
 - Built-in type validation using custom validators
-- Mutually exclusive command groups
-- Hidden internal arguments
+- Clear, actionable error messages
 
 **Example**:
 ```python
@@ -132,13 +134,16 @@ if valid_oid:
 - `status()`: Check daemon status
 - `run_foreground()`: Run in foreground with optional debug mode
 
-**CLI Options**:
-- `--start`: Start as daemon
-- `--stop`: Stop daemon
-- `--restart`: Restart daemon
-- `--status`: Show status
-- `--foreground`: Run in foreground
-- `--debug`: Enable debug logging
+**CLI Commands**:
+```bash
+trapninja daemon start              # Start as daemon
+trapninja daemon stop               # Stop daemon
+trapninja daemon restart            # Restart daemon
+trapninja daemon status             # Show status
+trapninja daemon foreground         # Run in foreground
+trapninja daemon foreground --debug # Run with debug logging
+trapninja daemon config             # Show configuration
+```
 
 ### `filtering_commands.py`
 **Purpose**: Manage IP and OID filtering rules
@@ -154,13 +159,15 @@ if valid_oid:
 - `unblock_oid()`: Remove OID from blocked list
 - `list_blocked_oids()`: Display all blocked OIDs
 
-**CLI Options**:
-- `--block-ip IP`: Block an IP address
-- `--unblock-ip IP`: Unblock an IP address
-- `--list-blocked-ips`: List all blocked IPs
-- `--block-oid OID`: Block a trap OID
-- `--unblock-oid OID`: Unblock a trap OID
-- `--list-blocked-oids`: List all blocked OIDs
+**CLI Commands**:
+```bash
+trapninja filter block-ip 10.0.1.50      # Block an IP
+trapninja filter unblock-ip 10.0.1.50    # Unblock an IP
+trapninja filter list-blocked-ips        # List blocked IPs
+trapninja filter block-oid 1.3.6.1...    # Block an OID
+trapninja filter unblock-oid 1.3.6.1...  # Unblock an OID
+trapninja filter list-blocked-oids       # List blocked OIDs
+```
 
 **Features**:
 - Atomic file operations (write to temp, then rename)
@@ -176,19 +183,20 @@ if valid_oid:
 - `disable_ha()`: Disable HA functionality
 - `show_ha_status()`: Display detailed HA status
 - `force_failover()`: Manually trigger failover (maintenance)
-- `promote()`: Promote to PRIMARY
-- `demote()`: Demote to SECONDARY
+- `promote_to_primary()`: Promote to PRIMARY
+- `demote_to_secondary()`: Demote to SECONDARY
 
-**CLI Options**:
-- `--ha-status`: Show HA status
-- `--ha-help`: Show HA help
-- `--promote`: Promote to PRIMARY
-- `--demote`: Demote to SECONDARY
-- `--force-failover`: Force immediate failover
-- `--configure-ha`: Configure HA settings
-- `--ha-mode MODE`: Set HA mode (primary/secondary)
-- `--ha-peer-host HOST`: Set peer hostname/IP
-- `--ha-priority N`: Set election priority
+**CLI Commands**:
+```bash
+trapninja ha status                      # Show HA status
+trapninja ha help                        # Show HA help
+trapninja ha promote                     # Promote to PRIMARY
+trapninja ha promote --force             # Force promote
+trapninja ha demote                      # Demote to SECONDARY
+trapninja ha force-failover              # Force failover
+trapninja ha configure --mode primary --peer 192.168.1.102 --priority 150
+trapninja ha disable                     # Disable HA
+```
 
 ### `cache_commands.py`
 **Purpose**: Redis cache operations
@@ -199,17 +207,15 @@ if valid_oid:
 - `cache_replay()`: Replay cached traps with rate limiting
 - `cache_clear()`: Clear cached entries
 
-**CLI Options**:
-- `--cache-status`: Show cache status
-- `--cache-help`: Show cache help
-- `--cache-query`: Query cached traps
-- `--cache-replay`: Replay cached traps
-- `--cache-clear`: Clear cache
-- `--destination DEST`: Target destination for cache operations
-- `--from TIME`: Start time for query/replay
-- `--to TIME`: End time for query/replay
-- `--rate-limit N`: Rate limit for replay (traps/sec)
-- `--dry-run`: Preview without executing
+**CLI Commands**:
+```bash
+trapninja cache status                   # Show cache status
+trapninja cache help                     # Show cache help
+trapninja cache query --destination voice_noc --from "-2h" --to "-1h"
+trapninja cache replay --destination voice_noc --from "14:30" --to "15:45"
+trapninja cache replay --destination default --dry-run
+trapninja cache clear --destination voice_noc
+```
 
 ### `stats_commands.py`
 **Purpose**: Display granular statistics
@@ -223,18 +229,18 @@ if valid_oid:
 - `stats_destinations()`: Per-destination statistics
 - `stats_export()`: Export statistics to file
 
-**CLI Options**:
-- `--stats-summary`: Show statistics summary
-- `--stats-help`: Show statistics help
-- `--stats-top-ips`: Show top source IPs
-- `--stats-top-oids`: Show top OIDs
-- `--stats-ip`: Show stats for specific IP
-- `--stats-oid`: Show stats for specific OID
-- `--stats-destinations`: Show destination stats
-- `--stats-export`: Export statistics
-- `-n, --count N`: Number of items to show
-- `-s, --sort FIELD`: Sort by field (total, rate, blocked, peak)
-- `-f, --format FMT`: Export format (json, prometheus)
+**CLI Commands**:
+```bash
+trapninja stats summary                  # Statistics summary
+trapninja stats help                     # Statistics help
+trapninja stats top-ips                  # Top source IPs
+trapninja stats top-ips -n 20 -s rate    # Top 20 by rate
+trapninja stats top-oids                 # Top OIDs
+trapninja stats ip --ip 10.0.0.1         # IP details
+trapninja stats oid --oid 1.3.6.1...     # OID details
+trapninja stats destinations             # Destination stats
+trapninja stats export -f json -o /tmp/stats.json
+```
 
 ### `stats.py`
 **Purpose**: Statistics CLI helper functions
@@ -254,10 +260,13 @@ if valid_oid:
 - `disable_shadow_mode()`: Disable shadow/mirror modes
 - `show_shadow_status()`: Display current mode status
 
-**CLI Options**:
-- `--shadow-mode`: Enable shadow mode
-- `--mirror-mode`: Enable mirror mode
-- `--parallel`: Run shadow in parallel
+**CLI Commands**:
+```bash
+trapninja shadow status                  # Show shadow status
+trapninja shadow export                  # Export shadow stats
+trapninja daemon start --shadow-mode     # Start in shadow mode
+trapninja daemon start --mirror-mode     # Start in mirror mode
+```
 
 ### `snmpv3_commands.py`
 **Purpose**: SNMPv3 credential management
@@ -268,28 +277,29 @@ if valid_oid:
 - `list_users()`: List configured users
 - `show_status()`: Show SNMPv3 decryption status
 
-**CLI Options**:
-- `--snmpv3-status`: Show SNMPv3 status
-- `--snmpv3-add-user`: Add SNMPv3 user
-- `--snmpv3-remove-user`: Remove SNMPv3 user
-- `--snmpv3-list-users`: List configured users
-- `--username USER`: Username for operations
-- `--engine-id ID`: SNMPv3 engine ID
-- `--auth-protocol PROTO`: Authentication protocol
-- `--auth-passphrase PASS`: Auth passphrase
-- `--priv-protocol PROTO`: Privacy protocol
-- `--priv-passphrase PASS`: Privacy passphrase
+**CLI Commands**:
+```bash
+trapninja snmpv3 status                  # Show SNMPv3 status
+trapninja snmpv3 add-user --username USER --engine-id ID --auth-protocol SHA
+trapninja snmpv3 remove-user --username USER --engine-id ID
+trapninja snmpv3 list-users              # List configured users
+trapninja snmpv3 test-decrypt --trap-file /tmp/trap.bin
+```
 
 ### `sync_commands.py`
 **Purpose**: Configuration synchronization between HA nodes
 
 **Key Functions**:
-- `sync_configs()`: Manually trigger config sync
+- `sync_now()`: Manually trigger config sync
 - `sync_status()`: Show sync status
 
-**CLI Options**:
-- `--ha-sync`: Trigger config synchronization
-- `--sync-status`: Show synchronization status
+**CLI Commands**:
+```bash
+trapninja sync status                    # Show sync status
+trapninja sync now                       # Trigger sync
+trapninja sync now --force               # Force sync
+trapninja sync help                      # Show sync help
+```
 
 ### `failover_commands.py`
 **Purpose**: Failover replay operations
@@ -297,12 +307,29 @@ if valid_oid:
 **Key Functions**:
 - `failover_status()`: Show failover replay status
 - `failover_replay()`: Manually trigger failover replay
-- `failover_gaps()`: Show detected gaps
+- `failover_detect()`: Show detected gaps
 
-**CLI Options**:
-- `--failover-status`: Show failover replay status
-- `--failover-replay`: Trigger failover replay
-- `--failover-gaps`: Show detected outage gaps
+**CLI Commands**:
+```bash
+trapninja failover status                # Show failover status
+trapninja failover detect                # Detect gaps
+trapninja failover replay                # Replay gaps
+trapninja failover replay --dry-run      # Preview replay
+trapninja failover help                  # Show failover help
+```
+
+### `metrics_commands.py`
+**Purpose**: Configure Prometheus metrics export
+
+**CLI Commands**:
+```bash
+trapninja metrics config                 # Show metrics config
+trapninja metrics set-dir /opt/metrics   # Set output directory
+trapninja metrics add-label --name env --value prod
+trapninja metrics remove-label env
+trapninja metrics set-interval 30        # Set export interval
+trapninja metrics help                   # Show metrics help
+```
 
 ## Usage Examples
 
@@ -310,27 +337,24 @@ if valid_oid:
 
 ```bash
 # Start daemon
-python -m trapninja.main --start
+trapninja daemon start
 
 # Configure High Availability
-python -m trapninja.main --configure-ha \
-    --ha-mode primary \
-    --ha-peer-host 192.168.1.102 \
-    --ha-priority 150
+trapninja ha configure --mode primary --peer 192.168.1.102 --priority 150
 
 # Block an IP
-python -m trapninja.main --block-ip 10.0.1.50
+trapninja filter block-ip 10.0.1.50
 
 # View statistics
-python -m trapninja.main --stats-summary
-python -m trapninja.main --stats-top-ips -n 20 -s rate
+trapninja stats summary
+trapninja stats top-ips -n 20 -s rate
 
 # Cache operations
-python -m trapninja.main --cache-status
-python -m trapninja.main --cache-replay --destination default --from "-2h" --to "-1h"
+trapninja cache status
+trapninja cache replay --destination default --from "-2h" --to "-1h"
 
 # Run in foreground with debug
-python -m trapninja.main --foreground --debug
+trapninja daemon foreground --debug
 ```
 
 ### Programmatic Usage
@@ -438,11 +462,10 @@ block_ip(user_input)  # UNSAFE!
        # Implementation
    ```
 
-2. **Add argument to parser**:
+2. **Add subcommand to parser**:
    ```python
-   # In parser.py
-   group.add_argument('--block-subnet', type=validated_subnet,
-                     help='Block entire subnet')
+   # In parser.py - add to filter subparser
+   filter_parser.add_parser('block-subnet', help='Block entire subnet')
    ```
 
 3. **Add validation if needed**:
@@ -456,8 +479,8 @@ block_ip(user_input)  # UNSAFE!
 4. **Route command in executor**:
    ```python
    # In executor.py
-   elif args.block_subnet:
-       return 0 if filtering_commands.block_subnet(args.block_subnet) else 1
+   elif args.command == 'block-subnet':
+       return 0 if filtering_commands.block_subnet(args.subnet) else 1
    ```
 
 ### Adding New Command Categories
@@ -466,22 +489,39 @@ For entirely new command categories:
 
 1. Create new module: `trapninja/cli/your_category_commands.py`
 2. Import in `__init__.py`
-3. Add commands to parser
+3. Add subparser in parser.py
 4. Route in executor
 
 ## Command Reference Summary
 
 | Category | Commands |
 |----------|----------|
-| **Daemon** | `--start`, `--stop`, `--restart`, `--status`, `--foreground` |
-| **Filtering** | `--block-ip`, `--unblock-ip`, `--block-oid`, `--unblock-oid`, `--list-blocked-*` |
-| **HA** | `--ha-status`, `--promote`, `--demote`, `--force-failover`, `--ha-sync` |
-| **Cache** | `--cache-status`, `--cache-query`, `--cache-replay`, `--cache-clear` |
-| **Statistics** | `--stats-summary`, `--stats-top-ips`, `--stats-top-oids`, `--stats-ip`, `--stats-oid` |
-| **SNMPv3** | `--snmpv3-status`, `--snmpv3-add-user`, `--snmpv3-remove-user`, `--snmpv3-list-users` |
-| **Shadow** | `--shadow-mode`, `--mirror-mode` |
-| **Failover** | `--failover-status`, `--failover-replay`, `--failover-gaps` |
-| **Help** | `--help`, `--ha-help`, `--cache-help`, `--stats-help` |
+| **daemon** | `start`, `stop`, `restart`, `status`, `foreground`, `config` |
+| **filter** | `block-ip`, `unblock-ip`, `block-oid`, `unblock-oid`, `redirect-ip`, `list-*` |
+| **ha** | `status`, `promote`, `demote`, `force-failover`, `configure`, `disable`, `help` |
+| **cache** | `status`, `query`, `replay`, `clear`, `help` |
+| **stats** | `summary`, `top-ips`, `top-oids`, `ip`, `oid`, `destinations`, `export`, `reset` |
+| **snmpv3** | `status`, `add-user`, `remove-user`, `list-users`, `test-decrypt` |
+| **shadow** | `status`, `export` |
+| **failover** | `status`, `detect`, `replay`, `help` |
+| **sync** | `status`, `now`, `help` |
+| **metrics** | `config`, `set-dir`, `add-label`, `remove-label`, `set-interval`, `help` |
+
+## Legacy Command Support
+
+For backward compatibility, flat-style arguments are still supported:
+
+```bash
+# Legacy (still works)
+trapninja --start
+trapninja --ha-status
+trapninja --block-ip 10.0.0.1
+
+# Modern subcommand style (recommended)
+trapninja daemon start
+trapninja ha status
+trapninja filter block-ip 10.0.0.1
+```
 
 ## Performance Considerations
 

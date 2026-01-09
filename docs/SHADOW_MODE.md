@@ -22,7 +22,7 @@ Shadow mode captures and processes traps but **does NOT forward** them. Perfect 
 
 ```bash
 # Run in shadow mode (observe only, no forwarding)
-sudo python3 trapninja.py --foreground --shadow-mode --debug
+sudo trapninja daemon foreground --shadow-mode --debug
 ```
 
 **Characteristics:**
@@ -38,7 +38,7 @@ Mirror mode captures traps using sniff mode AND forwards them, running in parall
 
 ```bash
 # Run in mirror mode (parallel capture and forward)
-sudo python3 trapninja.py --foreground --mirror-mode --debug
+sudo trapninja daemon foreground --mirror-mode --debug
 ```
 
 **Characteristics:**
@@ -54,7 +54,7 @@ Simply forces sniff capture mode without changing forwarding behavior. Use when 
 
 ```bash
 # Enable parallel capture
-sudo python3 trapninja.py --foreground --parallel
+sudo trapninja daemon foreground --parallel
 ```
 
 ## Running Modes
@@ -65,13 +65,13 @@ Run in foreground for testing and debugging:
 
 ```bash
 # Shadow mode - observe only
-sudo python3 trapninja.py --foreground --shadow-mode --debug
+sudo trapninja daemon foreground --shadow-mode --debug
 
 # Mirror mode - parallel forwarding
-sudo python3 trapninja.py --foreground --mirror-mode --debug
+sudo trapninja daemon foreground --mirror-mode --debug
 
 # Parallel capture
-sudo python3 trapninja.py --foreground --parallel
+sudo trapninja daemon foreground --parallel
 ```
 
 ### Background Daemon Mode
@@ -80,30 +80,22 @@ Run as a background daemon for production use:
 
 ```bash
 # Start daemon in shadow mode (observe only)
-sudo python3 trapninja.py daemon start --shadow-mode
+sudo trapninja daemon start --shadow-mode
 
 # Start daemon in mirror mode (parallel capture and forward)
-sudo python3 trapninja.py daemon start --mirror-mode
+sudo trapninja daemon start --mirror-mode
 
 # Start daemon with parallel capture
-sudo python3 trapninja.py daemon start --parallel
+sudo trapninja daemon start --parallel
 
 # Restart with shadow mode
-sudo python3 trapninja.py daemon restart --shadow-mode
+sudo trapninja daemon restart --shadow-mode
 
 # Check status
-sudo python3 trapninja.py daemon status
+sudo trapninja daemon status
 
 # Stop daemon
-sudo python3 trapninja.py daemon stop
-```
-
-**Legacy command style (also supported):**
-
-```bash
-sudo python3 trapninja.py --start --shadow-mode
-sudo python3 trapninja.py --restart --mirror-mode
-sudo python3 trapninja.py --start --parallel
+sudo trapninja daemon stop
 ```
 
 ## Command Line Options
@@ -168,7 +160,7 @@ Run TrapNinja in shadow mode to verify it receives all expected traps and makes 
 # Terminal 1: Existing trap receiver (e.g., snmptrapd) is running
 
 # Terminal 2: Run TrapNinja in shadow mode
-sudo python3 trapninja.py --foreground --shadow-mode --debug
+sudo trapninja daemon foreground --shadow-mode --debug
 
 # Watch the output to verify:
 # - All expected sources are sending traps
@@ -183,7 +175,7 @@ Use shadow mode to collect parallel statistics:
 
 ```bash
 # Run for a period to collect stats
-sudo python3 trapninja.py --foreground --shadow-mode --log-traps /tmp/trapninja_test.log
+sudo trapninja daemon foreground --shadow-mode --log-traps /tmp/trapninja_test.log
 
 # After testing, compare:
 # - Total trap counts
@@ -198,7 +190,7 @@ Test your routing configuration without affecting production:
 ```bash
 # Configure routing rules in config files
 # Then run in shadow mode to verify
-sudo python3 trapninja.py --foreground --shadow-mode --debug 2>&1 | grep -E "(FORWARD|BLOCK|REDIRECT)"
+sudo trapninja daemon foreground --shadow-mode --debug 2>&1 | grep -E "(FORWARD|BLOCK|REDIRECT)"
 ```
 
 ### 4. Performance Testing
@@ -207,7 +199,7 @@ Compare TrapNinja's performance with your current solution:
 
 ```bash
 # Run in mirror mode
-sudo python3 trapninja.py --foreground --mirror-mode --debug
+sudo trapninja daemon foreground --mirror-mode --debug
 
 # Both systems forward traps - compare:
 # - Processing latency
@@ -221,13 +213,13 @@ sudo python3 trapninja.py --foreground --mirror-mode --debug
 ### Check Shadow Status
 
 ```bash
-python3 trapninja.py --shadow-status
+trapninja shadow status
 ```
 
 ### Export Shadow Statistics
 
 ```bash
-python3 trapninja.py --shadow-export
+trapninja shadow export
 ```
 
 ## Requirements
@@ -258,7 +250,7 @@ Shadow and parallel modes require:
 
 Run with sudo or configure appropriate capabilities:
 ```bash
-sudo python3 trapninja.py --foreground --shadow-mode
+sudo trapninja daemon foreground --shadow-mode
 ```
 
 ### No traps received
@@ -280,7 +272,7 @@ Increase buffer size or reduce worker count:
 ## Example Session
 
 ```bash
-$ sudo python3 trapninja.py --foreground --shadow-mode --debug
+$ sudo trapninja daemon foreground --shadow-mode --debug
 Running TrapNinja in foreground with HA support...
 Shadow mode: ENABLED (observe only, no forwarding)
 Using sniff capture to run alongside existing trap receivers
@@ -307,3 +299,7 @@ Debug mode enabled
 [2024-01-15 10:35:00] [INFO] Total traps forwarded: 0  # Shadow mode - none forwarded
 [2024-01-15 10:35:00] [INFO] Total traps blocked: 56
 ```
+
+---
+
+**Last Updated**: 2025-01-09

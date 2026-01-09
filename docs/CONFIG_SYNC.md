@@ -67,21 +67,20 @@ These configurations are specific to each node and should NOT be synchronized:
 
 ### Enable Config Sync on Both Nodes
 
-```bash
-# On PRIMARY
-python trapninja.py --enable-sync
+Config sync is enabled automatically when HA is configured. Verify status:
 
-# On SECONDARY  
-python trapninja.py --enable-sync
+```bash
+# Check sync status
+trapninja sync status
 
 # Restart services
-python trapninja.py --restart
+trapninja daemon restart
 ```
 
 ### Verify Sync Status
 
 ```bash
-python trapninja.py --sync-status
+trapninja sync status
 ```
 
 Expected output:
@@ -184,45 +183,20 @@ Version mismatches trigger synchronization.
 
 ```bash
 # Show sync status
-python trapninja.py --sync-status
-
-# Show config differences between nodes
-python trapninja.py --sync-diff
+trapninja sync status
 
 # Show sync help
-python trapninja.py --sync-help
-```
-
-### Configuration Commands
-
-```bash
-# Enable sync
-python trapninja.py --enable-sync
-
-# Disable sync
-python trapninja.py --disable-sync
-
-# Configure sync settings
-python trapninja.py --configure-sync \
-  --sync-on-startup \
-  --push-on-file-change \
-  --version-check-interval 60
+trapninja sync help
 ```
 
 ### Manual Sync Commands
 
 ```bash
-# Push all configs to peer (PRIMARY only)
-python trapninja.py --sync-push
+# Trigger sync now
+trapninja sync now
 
-# Push specific config
-python trapninja.py --sync-push --config destinations
-
-# Pull all configs from peer (SECONDARY)
-python trapninja.py --sync-pull
-
-# Force push (bypass authority check)
-python trapninja.py --sync-push --force
+# Force sync (ignore checksums)
+trapninja sync now --force
 ```
 
 ## Integration with HA
@@ -275,8 +249,8 @@ During split-brain:
 Use `--force` flag to bypass authority checks:
 
 ```bash
-# Force push from SECONDARY (emergency use)
-python trapninja.py --sync-push --force
+# Force sync from SECONDARY (emergency use)
+trapninja sync now --force
 ```
 
 ## Troubleshooting
@@ -285,12 +259,12 @@ python trapninja.py --sync-push --force
 
 1. Check sync is enabled:
    ```bash
-   python trapninja.py --sync-status
+   trapninja sync status
    ```
 
 2. Verify HA connectivity:
    ```bash
-   python trapninja.py --ha-status
+   trapninja ha status
    ```
 
 3. Check logs:
@@ -308,7 +282,7 @@ python trapninja.py --sync-push --force
 2. Force a full sync:
    ```bash
    # On SECONDARY
-   python trapninja.py --sync-pull --force
+   trapninja sync now --force
    ```
 
 ### Push Rejected
@@ -317,7 +291,7 @@ If PRIMARY's push is rejected:
 
 1. Check peer is SECONDARY:
    ```bash
-   ssh peer "python trapninja.py --ha-status"
+   ssh peer "trapninja ha status"
    ```
 
 2. Check for split-brain condition
@@ -329,13 +303,13 @@ If PRIMARY's push is rejected:
 ### Configuration Changes
 
 1. **Always make changes on PRIMARY**: Edit configs on the PRIMARY node
-2. **Verify sync**: Check `--sync-status` after changes
+2. **Verify sync**: Check `trapninja sync status` after changes
 3. **Document changes**: Use version control for config files
 
 ### Failover Procedures
 
 1. Before planned failover:
-   - Verify configs are in sync: `--sync-diff`
+   - Verify configs are in sync: `trapninja sync status`
    
 2. After failover:
    - Check new PRIMARY's configs are pushed
@@ -367,43 +341,43 @@ vi /opt/trapninja/config/destinations.json
 
 # Config is auto-pushed to SECONDARY (if push_on_file_change=true)
 # Or manually push:
-python trapninja.py --sync-push --config destinations
+trapninja sync now
 
 # Verify on SECONDARY
-ssh secondary "python trapninja.py --sync-status"
+ssh secondary "trapninja sync status"
 ```
 
 ### Scenario 2: Initial Setup with Existing Configs
 
 ```bash
-# Configure sync on both nodes
+# Configure HA on both nodes first
 # On PRIMARY:
-python trapninja.py --configure-sync --enabled
+trapninja ha configure --mode primary --peer 192.168.1.102 --priority 150
 
 # On SECONDARY:
-python trapninja.py --configure-sync --enabled
+trapninja ha configure --mode secondary --peer 192.168.1.101 --priority 100
 
 # Start PRIMARY first
-python trapninja.py --start
+trapninja daemon start
 
 # Start SECONDARY - will pull configs automatically
-python trapninja.py --start
+trapninja daemon start
 ```
 
 ### Scenario 3: Recover from Split-Brain
 
 ```bash
 # After split-brain is resolved, check configs
-python trapninja.py --sync-diff
+trapninja sync status
 
 # If configs differ, force sync from authoritative node
 # On PRIMARY:
-python trapninja.py --sync-push
+trapninja sync now
 
 # Or on SECONDARY if PRIMARY had wrong config:
-python trapninja.py --sync-push --force
+trapninja sync now --force
 ```
 
 ---
 
-**Last Updated**: 2025-01-15
+**Last Updated**: 2025-01-09

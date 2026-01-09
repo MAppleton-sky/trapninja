@@ -42,7 +42,7 @@ pip3 install --break-system-packages cryptography pysnmp pyasn1 pycryptodome
 Verify dependencies are installed:
 
 ```bash
-python3.9 -O trapninja.py --snmpv3-status
+trapninja snmpv3 status
 ```
 
 If dependencies are missing, you'll see:
@@ -69,7 +69,7 @@ Credentials are stored in `config/snmpv3_credentials.json` with restrictive file
 The safest method prompts for passphrases without echoing them to the terminal:
 
 ```bash
-python3.9 -O trapninja.py --snmpv3-add-user \
+trapninja snmpv3 add-user \
     --username myuser \
     --engine-id 80001f888056565656565656 \
     --auth-protocol SHA \
@@ -93,7 +93,7 @@ Passphrases must be at least 8 characters and will not be displayed as you type.
 For scripted deployments, passphrases can be provided directly. **Use with caution** - passphrases may be visible in process listings and shell history.
 
 ```bash
-python3.9 -O trapninja.py --snmpv3-add-user \
+trapninja snmpv3 add-user \
     --username myuser \
     --engine-id 80001f888056565656565656 \
     --auth-protocol SHA \
@@ -116,7 +116,7 @@ For automation without exposing secrets:
 export SNMPV3_AUTH_PASS="MyAuthPassword123"
 export SNMPV3_PRIV_PASS="MyPrivPassword456"
 
-python3.9 -O trapninja.py --snmpv3-add-user \
+trapninja snmpv3 add-user \
     --username myuser \
     --engine-id 80001f888056565656565656 \
     --auth-protocol SHA \
@@ -165,7 +165,7 @@ SNMPv3 supports three security levels:
 Example for authNoPriv (authentication only):
 
 ```bash
-python3.9 -O trapninja.py --snmpv3-add-user \
+trapninja snmpv3 add-user \
     --username authonly_user \
     --engine-id 80001f888056565656565656 \
     --auth-protocol SHA256 \
@@ -222,7 +222,7 @@ Use Wireshark to capture an SNMPv3 trap, then examine the `msgAuthoritativeEngin
 ### List All Users
 
 ```bash
-python3.9 -O trapninja.py --snmpv3-list-users
+trapninja snmpv3 list-users
 ```
 
 Output:
@@ -239,7 +239,7 @@ Engine ID                                Username             Auth       Priv
 ### Show User Details
 
 ```bash
-python3.9 -O trapninja.py --snmpv3-show-user \
+trapninja snmpv3 show-user \
     --engine-id 80001f888056565656565656 \
     --username cisco_user
 ```
@@ -262,7 +262,7 @@ SNMPv3 User Details:
 To update credentials, add the user again with the same engine-id and username:
 
 ```bash
-python3.9 -O trapninja.py --snmpv3-add-user \
+trapninja snmpv3 add-user \
     --username cisco_user \
     --engine-id 80001f888056565656565656 \
     --auth-protocol SHA256 \
@@ -282,7 +282,7 @@ Confirm privacy passphrase:
 ### Remove User
 
 ```bash
-python3.9 -O trapninja.py --snmpv3-remove-user \
+trapninja snmpv3 remove-user \
     --engine-id 80001f888056565656565656 \
     --username cisco_user
 ```
@@ -297,7 +297,7 @@ Remove user 'cisco_user' for engine '80001f888056565656565656'? (yes/no): yes
 Skip confirmation with `-y`:
 
 ```bash
-python3.9 -O trapninja.py --snmpv3-remove-user \
+trapninja snmpv3 remove-user \
     --engine-id 80001f888056565656565656 \
     --username cisco_user \
     -y
@@ -310,7 +310,7 @@ python3.9 -O trapninja.py --snmpv3-remove-user \
 Check the overall SNMPv3 subsystem status:
 
 ```bash
-python3.9 -O trapninja.py --snmpv3-status
+trapninja snmpv3 status
 ```
 
 Output:
@@ -334,18 +334,18 @@ Test that credentials work with a captured SNMPv3 trap:
 
 ```bash
 # Basic test
-python3.9 -O trapninja.py --snmpv3-test-decrypt \
+trapninja snmpv3 test-decrypt \
     --trap-file /tmp/captured_trap.bin \
     --engine-id 80001f888056565656565656
 
 # Verbose output showing varbinds
-python3.9 -O trapninja.py --snmpv3-test-decrypt \
+trapninja snmpv3 test-decrypt \
     --trap-file /tmp/captured_trap.bin \
     --engine-id 80001f888056565656565656 \
     --verbose
 
 # Test conversion to SNMPv2c
-python3.9 -O trapninja.py --snmpv3-test-decrypt \
+trapninja snmpv3 test-decrypt \
     --trap-file /tmp/captured_trap.bin \
     --convert \
     --community public \
@@ -379,7 +379,7 @@ nc -u -l 162 > /tmp/trap.bin
 
 ```bash
 # Typical Cisco SNMPv3 configuration
-python3.9 -O trapninja.py --snmpv3-add-user \
+trapninja snmpv3 add-user \
     --username trap_user \
     --engine-id 80001f888056565656565656 \
     --auth-protocol SHA \
@@ -397,7 +397,7 @@ snmp-server host 10.234.83.133 traps version 3 priv trap_user
 
 ```bash
 # Nokia typically uses SHA256/AES256
-python3.9 -O trapninja.py --snmpv3-add-user \
+trapninja snmpv3 add-user \
     --username nokia_trap \
     --engine-id 800000c20300001234 \
     --auth-protocol SHA256 \
@@ -418,14 +418,14 @@ Some deployments use different users for different trap types:
 
 ```bash
 # Critical alarms user
-python3.9 -O trapninja.py --snmpv3-add-user \
+trapninja snmpv3 add-user \
     --username critical_traps \
     --engine-id 80001f888056565656565656 \
     --auth-protocol SHA256 \
     --priv-protocol AES256
 
 # Info/debug user
-python3.9 -O trapninja.py --snmpv3-add-user \
+trapninja snmpv3 add-user \
     --username debug_traps \
     --engine-id 80001f888056565656565656 \
     --auth-protocol SHA \
@@ -480,7 +480,7 @@ SNMPv3 processing records these action types in granular statistics:
 Use granular statistics to monitor SNMPv3 processing:
 
 ```bash
-python3.9 -O trapninja.py --stats --summary
+trapninja stats summary
 ```
 
 Look for:
@@ -497,7 +497,7 @@ Look for:
 The trap's Engine ID doesn't match any configured user.
 
 1. Verify the Engine ID from the network element
-2. Check configured Engine IDs: `--snmpv3-list-users`
+2. Check configured Engine IDs: `trapninja snmpv3 list-users`
 3. Engine IDs are case-insensitive but stored lowercase
 
 ### "Failed to decrypt SNMPv3 trap"
@@ -526,7 +526,7 @@ Different Engine IDs may be seen when:
 Use verbose logging to see actual Engine IDs:
 
 ```bash
-python3.9 -O trapninja.py --foreground --debug 2>&1 | grep "Engine ID"
+trapninja daemon foreground --debug 2>&1 | grep "Engine ID"
 ```
 
 ### Password Policy Issues
@@ -557,12 +557,12 @@ SNMPv3 passphrases must be at least 8 characters. If your network element requir
 
 | Command | Description |
 |---------|-------------|
-| `--snmpv3-status` | Show SNMPv3 subsystem status |
-| `--snmpv3-add-user` | Add or update user credentials |
-| `--snmpv3-remove-user` | Remove user credentials |
-| `--snmpv3-list-users` | List all configured users |
-| `--snmpv3-show-user` | Show details for specific user |
-| `--snmpv3-test-decrypt` | Test decryption with captured trap |
+| `trapninja snmpv3 status` | Show SNMPv3 subsystem status |
+| `trapninja snmpv3 add-user` | Add or update user credentials |
+| `trapninja snmpv3 remove-user` | Remove user credentials |
+| `trapninja snmpv3 list-users` | List all configured users |
+| `trapninja snmpv3 show-user` | Show details for specific user |
+| `trapninja snmpv3 test-decrypt` | Test decryption with captured trap |
 
 ### Add User Options
 
