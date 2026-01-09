@@ -4,7 +4,17 @@ The TrapNinja cache system provides Redis-based trap buffering with rolling rete
 
 ## Overview
 
-The cache system acts as a rolling buffer that captures all forwarded SNMP traps in Redis Streams. When a monitoring system outage occurs, operators can replay the cached traps for a specific time window to backfill any data loss.
+The cache system acts as a rolling buffer that **automatically captures all forwarded SNMP traps** in Redis Streams. When a monitoring system outage occurs, operators can replay the cached traps for a specific time window to backfill any data loss.
+
+### Automatic Caching
+
+Traps are automatically cached during normal packet processing:
+
+- **All forwarded traps** are cached (default destinations and redirected)
+- **All SNMP versions** are supported (v1, v2c, v3)
+- **HA secondary nodes** cache traps even when not forwarding (for gap-fill)
+- **Caching is non-blocking** - cache failures don't affect forwarding
+- **Destination-based streams** - traps are stored by destination for targeted replay
 
 ```
 Normal Operation:

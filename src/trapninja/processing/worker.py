@@ -33,6 +33,17 @@ except ImportError:
     def get_granular_stats():
         return None
 
+# Import cache module for trap buffering
+try:
+    from ..cache import get_cache
+    import base64
+    from datetime import datetime
+    CACHE_AVAILABLE = True
+except ImportError:
+    CACHE_AVAILABLE = False
+    def get_cache():
+        return None
+
 # Import HA functions for forwarding control
 # CRITICAL: These functions control whether this node should forward traps
 try:
@@ -185,6 +196,8 @@ class PacketWorker:
         self._granular_collector = None  # Cached reference to granular stats
         self._granular_retries = 0       # Track retries for deferred warning
         self._granular_max_retries = 10  # Only warn after this many retries
+        self._cache = None               # Cached reference to trap cache
+        self._cache_checked = False      # Track if we've checked for cache
     
     def _record_granular_stats(self, source_ip: str, oid: str = None,
                                 action: str = 'forwarded', destination: str = None):
@@ -238,6 +251,54 @@ class PacketWorker:
             except Exception as e:
                 # Don't let stats recording errors affect packet processing
                 logger.debug(f"Error recording granular stats: {e}")
+    
+    def _store_trap_in_cache(self, source_ip: str, payload: bytes, 
+                              trap_oid: str = None, destination: str = 'default'):
+        """
+        Store trap in Redis cache for replay capability.
+        
+        This enables trap replay during monitoring system outages.
+        Caching is non-blocking - failures don't affect forwarding.
+        
+        Args:
+            source_ip: Source IP address of the trap
+            payload: Raw SNMP PDU bytes
+            trap_oid: Extracted trap OID (if available)
+            destination: Destination tag/name for stream organization
+        """
+        if not CACHE_AVAILABLE:
+            return
+        
+        # Lazy initialization of cache reference
+        if not self._cache_checked:
+            self._cache = get_cache()
+            self._cache_checked = True
+            if self._cache and self._cache.available:
+                logger.debug(f"Worker {self.worker_id}: Cache connected")
+            elif self._cache:
+                logger.debug(f"Worker {self.worker_id}: Cache not available")
+        
+        if not self._cache or not self._cache.available:
+            return
+        
+        try:
+            trap_data = {
+                'timestamp': datetime.now().isoformat(),
+                'source_ip': source_ip,
+                'trap_oid': trap_oid or '',
+                'pdu_base64': base64.b64encode(payload).decode('ascii'),
+            }
+            
+            # Store in destination-specific stream
+            entry_id = self._cache.store(destination, trap_data)
+            
+            if entry_id:
+                logger.debug(
+                    f"Cached trap from {source_ip} to stream '{destination}': {entry_id}"
+                )
+        except Exception as e:
+            # Non-blocking - don't let cache errors affect forwarding
+            logger.debug(f"Cache store failed: {e}")
     
     def start(self) -> threading.Thread:
         """
@@ -331,13 +392,20 @@ class PacketWorker:
             
             # CRITICAL: Check HA state before forwarding
             # Only the PRIMARY node should forward traps
-            # But ALWAYS record stats so we can see what's arriving
-            if not is_forwarding_enabled():
+            # But ALWAYS record stats and cache so we can see what's arriving
+            # and replay if we become PRIMARY
+            ha_forwarding_enabled = is_forwarding_enabled()
+            
+            if not ha_forwarding_enabled:
                 # Track blocked packets for monitoring
                 self.stats.increment_ha_blocked()
                 
                 # Record in granular stats as 'ha_blocked' so it shows up in reports
                 self._record_granular_stats(source_ip, None, 'ha_blocked')
+                
+                # IMPORTANT: Still cache the trap even on secondary
+                # This enables gap-fill replay when we become primary
+                self._store_trap_in_cache(source_ip, payload, None, 'default')
                 
                 # Log periodically to help diagnose issues without flooding
                 if self.stats.ha_blocked_count % 1000 == 1:  # First and every 1000th
@@ -414,6 +482,7 @@ class PacketWorker:
                             )
                             self.stats.increment_redirected()
                             self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
+                            self._store_trap_in_cache(source_ip, payload, trap_oid, tag)
                             notify_trap_processed()  # Notify HA system of activity
                             return
                     
@@ -427,6 +496,7 @@ class PacketWorker:
                             )
                             self.stats.increment_redirected()
                             self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
+                            self._store_trap_in_cache(source_ip, payload, trap_oid, tag)
                             notify_trap_processed()  # Notify HA system of activity
                             return
                     
@@ -435,6 +505,7 @@ class PacketWorker:
                         forward_packet(source_ip, payload, config['destinations'])
                         self.stats.increment_forwarded()
                         self._record_granular_stats(source_ip, trap_oid, 'forwarded', 'default')
+                        self._store_trap_in_cache(source_ip, payload, trap_oid, 'default')
                         notify_trap_processed()  # Notify HA system of activity
                     
                     return
@@ -468,6 +539,7 @@ class PacketWorker:
                 forward_packet(source_ip, payload, config['destinations'])
                 self.stats.increment_forwarded()
                 self._record_granular_stats(source_ip, None, 'forwarded', 'default')
+                self._store_trap_in_cache(source_ip, payload, None, 'default')
                 notify_trap_processed()  # Notify HA system of activity
             return
         
@@ -484,6 +556,7 @@ class PacketWorker:
                 forward_packet(source_ip, payload, config['destinations'])
                 self.stats.increment_forwarded()
                 self._record_granular_stats(source_ip, None, 'forwarded', 'default')
+                self._store_trap_in_cache(source_ip, payload, None, 'default')
                 notify_trap_processed()  # Notify HA system of activity
             return
         
@@ -505,6 +578,7 @@ class PacketWorker:
                 )
                 self.stats.increment_redirected()
                 self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
+                self._store_trap_in_cache(source_ip, payload, trap_oid, tag)
                 notify_trap_processed()  # Notify HA system of activity
                 return
         
@@ -517,6 +591,7 @@ class PacketWorker:
                 )
                 self.stats.increment_redirected()
                 self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
+                self._store_trap_in_cache(source_ip, payload, trap_oid, tag)
                 notify_trap_processed()  # Notify HA system of activity
                 return
         
@@ -525,6 +600,7 @@ class PacketWorker:
             forward_packet(source_ip, payload, config['destinations'])
             self.stats.increment_forwarded()
             self._record_granular_stats(source_ip, trap_oid, 'forwarded', 'default')
+            self._store_trap_in_cache(source_ip, payload, trap_oid, 'default')
             notify_trap_processed()  # Notify HA system of activity
     
     def _process_v2c_payload(
@@ -575,6 +651,7 @@ class PacketWorker:
                 forward_packet(source_ip, payload, dest_list)
                 self.stats.increment_redirected()
                 self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
+                self._store_trap_in_cache(source_ip, payload, trap_oid, tag)
                 notify_trap_processed()
                 if is_decrypted_v3:
                     logger.info(
@@ -591,6 +668,7 @@ class PacketWorker:
                 forward_packet(source_ip, payload, dest_list)
                 self.stats.increment_redirected()
                 self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
+                self._store_trap_in_cache(source_ip, payload, trap_oid, tag)
                 notify_trap_processed()
                 if is_decrypted_v3:
                     logger.info(
@@ -604,6 +682,7 @@ class PacketWorker:
             forward_packet(source_ip, payload, config['destinations'])
             self.stats.increment_forwarded()
             self._record_granular_stats(source_ip, trap_oid, 'forwarded', 'default')
+            self._store_trap_in_cache(source_ip, payload, trap_oid, 'default')
             notify_trap_processed()
             if is_decrypted_v3:
                 logger.info(
@@ -785,6 +864,7 @@ class PacketWorker:
             self.stats.increment_forwarded()
             # Use 'forwarded' action for proper stats counting
             self._record_granular_stats(source_ip, None, 'forwarded', 'default')
+            self._store_trap_in_cache(source_ip, payload, None, 'default')
             notify_trap_processed()
 
 
