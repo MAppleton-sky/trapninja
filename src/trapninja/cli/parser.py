@@ -4,13 +4,13 @@ TrapNinja Argument Parser Module
 
 Provides a clean, well-organized command-line interface with:
 - Subcommand-based structure (e.g., `trapninja daemon start`)
-- Backward compatibility with flat-style arguments (e.g., `trapninja --start`)
 - Clear, actionable error messages
 - Category-organized help output
 
 Usage:
-    trapninja daemon start              # Subcommand style
-    trapninja --start                   # Legacy flat style (still supported)
+    trapninja daemon start              # Start the daemon
+    trapninja filter block-ip 10.0.0.1  # Block an IP
+    trapninja stats summary             # View statistics
     trapninja --help                    # Show command categories
     trapninja daemon --help             # Show daemon commands
 """
@@ -144,10 +144,6 @@ def create_argument_parser() -> argparse.ArgumentParser:
     """
     Create and configure the argument parser with all TrapNinja commands.
     
-    Supports both:
-    - Subcommand style: trapninja daemon start
-    - Legacy flat style: trapninja --start
-    
     Returns:
         Configured ArgumentParser instance
     """
@@ -162,28 +158,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         '''),
         formatter_class=TrapNinjaRootHelpFormatter,
         epilog=textwrap.dedent('''
-            \033[1mCommand Categories:\033[0m
-            
-              \033[93mdaemon\033[0m      Service control (start, stop, restart, status)
-              \033[93mfilter\033[0m      IP and OID blocking/redirection
-              \033[93mha\033[0m          High Availability configuration
-              \033[93msnmpv3\033[0m      SNMPv3 credential management
-              \033[93mcache\033[0m       Trap caching and replay
-              \033[93mstats\033[0m       Granular statistics and monitoring
-              \033[93mmetrics\033[0m     Prometheus metrics configuration
-              \033[93mshadow\033[0m      Shadow/mirror mode for testing
-            
             \033[1mQuick Start:\033[0m
-            
-              trapninja daemon start            Start the service
-              trapninja daemon status           Check service status
-              trapninja filter block-ip 10.0.0.1    Block an IP
-              trapninja ha status               Check HA status
-            
-            \033[1mLegacy Commands:\033[0m
-            
-              Flat-style arguments (--start, --block-ip, etc.) are still supported
-              for backward compatibility.
+              trapninja daemon start              Start the service
+              trapninja daemon status             Check service status
+              trapninja filter block-ip 10.0.0.1  Block an IP
+              trapninja stats summary             View statistics
             
             Use \033[93mtrapninja <category> --help\033[0m for detailed command help.
         ''')
@@ -211,7 +190,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     _add_failover_subcommands(subparsers)
     _add_sync_subcommands(subparsers)
     
-    # Add legacy flat-style arguments for backward compatibility
+    # Add legacy flat-style arguments (hidden, for backward compatibility)
     _add_legacy_arguments(parser)
     
     return parser
@@ -825,7 +804,7 @@ def _add_sync_subcommands(subparsers):
 
 
 # =============================================================================
-# Legacy Arguments (Backward Compatibility)
+# Legacy Arguments (Hidden - Backward Compatibility Only)
 # =============================================================================
 
 def _add_legacy_arguments(parser: argparse.ArgumentParser):
@@ -834,56 +813,48 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser):
     
     These arguments (--start, --stop, --block-ip, etc.) are deprecated
     but still supported for scripts that depend on them.
+    
+    All arguments are suppressed from help output.
     """
-    # Create a mutually exclusive group for legacy commands
-    legacy_group = parser.add_argument_group(
-        'Legacy Commands (Deprecated)',
-        'These flat-style arguments are still supported but deprecated. '
-        'Use subcommands instead (e.g., "trapninja daemon start").'
-    )
-    
-    # We use a different approach for legacy commands:
-    # They're optional and we detect them in the executor
-    
     # Daemon control (legacy)
-    legacy_group.add_argument('--start', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--stop', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--restart', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--status', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--foreground', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--foreground-daemon', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--show-config', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--validate-config', action='store_true',
-                              help=argparse.SUPPRESS)
+    parser.add_argument('--start', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--stop', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--restart', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--status', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--foreground', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--foreground-daemon', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--show-config', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--validate-config', action='store_true',
+                        help=argparse.SUPPRESS)
     
     # HA commands (legacy)
-    legacy_group.add_argument('--configure-ha', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--disable-ha', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--ha-status', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--promote', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--demote', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--force-failover', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--ha-help', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--ha-sync', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--sync-status', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--sync-help', action='store_true',
-                              help=argparse.SUPPRESS)
+    parser.add_argument('--configure-ha', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--disable-ha', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--ha-status', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--promote', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--demote', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--force-failover', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--ha-help', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--ha-sync', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--sync-status', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--sync-help', action='store_true',
+                        help=argparse.SUPPRESS)
     
     # HA parameters (legacy)
     parser.add_argument('--ha-mode', choices=['primary', 'secondary'],
@@ -900,40 +871,40 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser):
                         help=argparse.SUPPRESS)
     
     # Filtering commands (legacy)
-    legacy_group.add_argument('--block-ip', type=validated_ip, metavar='IP',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--unblock-ip', type=validated_ip, metavar='IP',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--list-blocked-ips', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--block-oid', type=validated_oid, metavar='OID',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--unblock-oid', type=validated_oid, metavar='OID',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--list-blocked-oids', action='store_true',
-                              help=argparse.SUPPRESS)
+    parser.add_argument('--block-ip', type=validated_ip, metavar='IP',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--unblock-ip', type=validated_ip, metavar='IP',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--list-blocked-ips', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--block-oid', type=validated_oid, metavar='OID',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--unblock-oid', type=validated_oid, metavar='OID',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--list-blocked-oids', action='store_true',
+                        help=argparse.SUPPRESS)
     
     # Redirection commands (legacy)
-    legacy_group.add_argument('--redirect-ip', type=validated_ip, metavar='IP',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--unredirect-ip', type=validated_ip, metavar='IP',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--list-redirected-ips', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--redirect-oid', type=validated_oid, metavar='OID',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--unredirect-oid', type=validated_oid, metavar='OID',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--list-redirected-oids', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--add-redirect-dest', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--remove-redirect-dest', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--list-redirect-dests', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--redirection-help', action='store_true',
-                              help=argparse.SUPPRESS)
+    parser.add_argument('--redirect-ip', type=validated_ip, metavar='IP',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--unredirect-ip', type=validated_ip, metavar='IP',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--list-redirected-ips', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--redirect-oid', type=validated_oid, metavar='OID',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--unredirect-oid', type=validated_oid, metavar='OID',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--list-redirected-oids', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--add-redirect-dest', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--remove-redirect-dest', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--list-redirect-dests', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--redirection-help', action='store_true',
+                        help=argparse.SUPPRESS)
     
     # Redirection parameters (legacy)
     parser.add_argument('--tag', type=validated_tag, help=argparse.SUPPRESS)
@@ -941,18 +912,18 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser):
     parser.add_argument('--port', type=validated_port, help=argparse.SUPPRESS)
     
     # SNMPv3 commands (legacy)
-    legacy_group.add_argument('--snmpv3-add-user', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--snmpv3-remove-user', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--snmpv3-list-users', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--snmpv3-show-user', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--snmpv3-status', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--snmpv3-test-decrypt', action='store_true',
-                              help=argparse.SUPPRESS)
+    parser.add_argument('--snmpv3-add-user', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--snmpv3-remove-user', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--snmpv3-list-users', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--snmpv3-show-user', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--snmpv3-status', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--snmpv3-test-decrypt', action='store_true',
+                        help=argparse.SUPPRESS)
     
     # SNMPv3 parameters (legacy)
     parser.add_argument('--username', type=str, help=argparse.SUPPRESS)
@@ -971,18 +942,18 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser):
     parser.add_argument('--output', type=str, help=argparse.SUPPRESS)
     
     # Cache commands (legacy)
-    legacy_group.add_argument('--cache-status', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--cache-query', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--cache-replay', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--cache-clear', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--cache-trim', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--cache-help', action='store_true',
-                              help=argparse.SUPPRESS)
+    parser.add_argument('--cache-status', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--cache-query', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--cache-replay', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--cache-clear', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--cache-trim', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--cache-help', action='store_true',
+                        help=argparse.SUPPRESS)
     
     # Cache parameters (legacy)
     parser.add_argument('--destination', type=str, help=argparse.SUPPRESS)
@@ -997,42 +968,42 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser):
     parser.add_argument('--limit', type=int, default=20, help=argparse.SUPPRESS)
     
     # Failover commands (legacy)
-    legacy_group.add_argument('--failover-status', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--failover-detect', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--failover-replay', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--failover-help', action='store_true',
-                              help=argparse.SUPPRESS)
+    parser.add_argument('--failover-status', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--failover-detect', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--failover-replay', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--failover-help', action='store_true',
+                        help=argparse.SUPPRESS)
     
     # Queue stats (legacy)
-    legacy_group.add_argument('--queue-stats', action='store_true',
-                              help=argparse.SUPPRESS)
+    parser.add_argument('--queue-stats', action='store_true',
+                        help=argparse.SUPPRESS)
     
     # Stats commands (legacy)
-    legacy_group.add_argument('--stats-summary', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--stats-top-ips', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--stats-top-oids', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--stats-ip', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--stats-oid', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--stats-destinations', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--stats-dashboard', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--stats-export', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--stats-reset', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--stats-debug', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--stats-help', action='store_true',
-                              help=argparse.SUPPRESS)
+    parser.add_argument('--stats-summary', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--stats-top-ips', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--stats-top-oids', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--stats-ip', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--stats-oid', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--stats-destinations', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--stats-dashboard', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--stats-export', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--stats-reset', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--stats-debug', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--stats-help', action='store_true',
+                        help=argparse.SUPPRESS)
     
     # Stats parameters (legacy)
     parser.add_argument('--oid', type=str, help=argparse.SUPPRESS)
@@ -1047,10 +1018,10 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser):
     parser.add_argument('--pretty', action='store_true', help=argparse.SUPPRESS)
     
     # Shadow mode commands (legacy)
-    legacy_group.add_argument('--shadow-status', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--shadow-export', action='store_true',
-                              help=argparse.SUPPRESS)
+    parser.add_argument('--shadow-status', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--shadow-export', action='store_true',
+                        help=argparse.SUPPRESS)
     
     # Shadow mode parameters (legacy)
     parser.add_argument('--shadow-mode', action='store_true', help=argparse.SUPPRESS)
@@ -1061,18 +1032,18 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser):
                         help=argparse.SUPPRESS)
     
     # Metrics commands (legacy)
-    legacy_group.add_argument('--metrics-config', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--metrics-set-dir', type=str, metavar='DIRECTORY',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--metrics-add-label', action='store_true',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--metrics-remove-label', type=str, metavar='NAME',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--metrics-set-interval', type=int, metavar='SECONDS',
-                              help=argparse.SUPPRESS)
-    legacy_group.add_argument('--metrics-help', action='store_true',
-                              help=argparse.SUPPRESS)
+    parser.add_argument('--metrics-config', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--metrics-set-dir', type=str, metavar='DIRECTORY',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--metrics-add-label', action='store_true',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--metrics-remove-label', type=str, metavar='NAME',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--metrics-set-interval', type=int, metavar='SECONDS',
+                        help=argparse.SUPPRESS)
+    parser.add_argument('--metrics-help', action='store_true',
+                        help=argparse.SUPPRESS)
     
     # Metrics parameters (legacy)
     parser.add_argument('--label-name', type=str, help=argparse.SUPPRESS)
