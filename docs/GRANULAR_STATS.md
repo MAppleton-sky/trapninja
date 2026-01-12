@@ -159,13 +159,13 @@ trapninja stats top-oids -n 50 -s rate
 
 ```bash
 # Detailed stats for specific IP (shows top 10 OIDs by default)
-trapninja stats ip --ip 10.0.0.1
+trapninja stats ip 10.0.0.1
 
 # Show top 50 OIDs from this IP
-trapninja stats ip --ip 10.0.0.1 --oids 50
+trapninja stats ip 10.0.0.1 --oids 50
 
 # Export as JSON for further analysis
-trapninja stats ip --ip 10.0.0.1 --oids 100 --json --pretty
+trapninja stats ip 10.0.0.1 --oids 100 --json --pretty
 ```
 
 Shows comprehensive details:
@@ -177,17 +177,17 @@ Shows comprehensive details:
 
 ### OID Details
 
-> **Note:** The `--oid` query searches **all tracked OIDs** (up to 5,000), not just the top 100 shown by `stats top-oids`. If an OID has been seen but isn't in the top list, it can still be queried directly.
+> **Note:** The OID query searches **all tracked OIDs** (up to 5,000), not just the top 100 shown by `stats top-oids`. If an OID has been seen but isn't in the top list, it can still be queried directly.
 
 ```bash
 # Detailed stats for specific OID (shows top 10 sources by default)
-trapninja stats oid --oid 1.3.6.1.4.1.9.9.41.2.0.1
+trapninja stats oid 1.3.6.1.4.1.9.9.41.2.0.1
 
 # Show top 30 source IPs for this OID
-trapninja stats oid --oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 30
+trapninja stats oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 30
 
 # Export as JSON for further analysis
-trapninja stats oid --oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 100 --json --pretty
+trapninja stats oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 100 --json --pretty
 ```
 
 Shows comprehensive details:

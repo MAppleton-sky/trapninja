@@ -337,6 +337,215 @@ curl -s http://localhost:8080/metrics | grep processing_seconds
 
 ---
 
+## tcpdump Shows Higher Volume Than TrapNinja Reports
+
+### Symptom: Massive Packet Volume in tcpdump, Reasonable Volume in TrapNinja
+
+**Example scenario**:
+```
+TrapNinja reports: ~65 traps/sec
+tcpdump shows: Thousands of packets/sec with many duplicates
+tcpdump filter used: 'udp port 162 and dst host 1.2.3.4'
+```
+
+This is a very common point of confusion when Samplicator or any UDP forwarder is running.
+
+### Root Cause: tcpdump Sees Both Ingress AND Egress Packets
+
+When you run `tcpdump -i any 'udp port 162 and dst host 1.2.3.4'`, you're capturing:
+
+1. **Incoming traps** - Packets from network devices TO your server (port 162)
+2. **Outgoing forwarded traps** - Packets FROM your server (Samplicator/TrapNinja) TO destination 1.2.3.4
+
+If Samplicator is configured with 10 destinations, each incoming trap generates 10 outgoing packets.
+
+**The Math**:
+```
+Real incoming rate: ~65 traps/sec
+Destinations: 10
+Total egress to ONE destination: ~65/sec
+Total traffic tcpdump sees: 65 (ingress) + 650 (egress) = ~715/sec
+If tcpdump captures all egress: 65 + 650 = massive volume
+```
+
+### Quick Diagnosis
+
+Run this on your server:
+```bash
+# Download and run diagnostic
+cd /opt/trapninja/dev/tools
+sudo bash quick_packet_diagnostic.sh 1.2.3.4
+```
+
+Or manually:
+```bash
+# Get your server's IP
+SERVER_IP=$(hostname -I | awk '{print $1}')
+
+# Count ONLY incoming traps (real volume)
+timeout 10 tcpdump -i any -nn "udp port 162 and not src $SERVER_IP" 2>/dev/null | wc -l
+
+# Count ONLY outgoing forwarded traps
+timeout 10 tcpdump -i any -nn "udp port 162 and src $SERVER_IP" 2>/dev/null | wc -l
+```
+
+### Solution: Use Correct tcpdump Filters
+
+**To see ONLY incoming traps (actual trap rate)**:
+```bash
+tcpdump -i any 'udp dst port 162 and not src <your_server_ip>'
+```
+
+**To see traps forwarded TO a specific destination**:
+```bash
+tcpdump -i any 'udp and src <your_server_ip> and dst host 1.2.3.4'
+```
+
+**To see all traffic involving a destination (both directions)**:
+```bash
+tcpdump -i any 'udp port 162 and host 1.2.3.4'
+```
+
+### Verifying the Numbers Add Up
+
+1. **Check Samplicator destinations**:
+   ```bash
+   cat /etc/samplicator.conf | grep -v '^#' | grep -v '^$'
+   # Count the destinations
+   ```
+
+2. **Calculate expected amplification**:
+   ```
+   Incoming rate × Number of destinations = Expected egress rate
+   65/sec × 10 destinations = 650/sec egress
+   ```
+
+3. **TrapNinja reports ingress** - so ~65/sec is the real unique trap volume
+
+### Common Confusion Points
+
+| Observation | Explanation |
+|-------------|-------------|
+| "Identical packets" in tcpdump | You're seeing the same trap forwarded to multiple destinations |
+| Huge packet counts | tcpdump captures both directions by default |
+| TrapNinja rate seems low | TrapNinja reports unique incoming traps, not forwarded copies |
+| Samplicator multiplies traffic | That's its job - forwarding to multiple destinations |
+
+### When Running Both Samplicator AND TrapNinja
+
+If both are active:
+- Ensure they listen on DIFFERENT ports, OR
+- Disable one of them
+
+**Check for conflicts**:
+```bash
+# See what's listening on port 162
+ss -tulnp | grep ':162'
+
+# Should show ONLY ONE process
+```
+
+### Diagnostic Tools
+
+TrapNinja includes diagnostic tools:
+
+```bash
+# Full Python diagnostic
+sudo python3 dev/tools/packet_duplication_diagnostic.py --dest 1.2.3.4
+
+# Quick bash diagnostic  
+sudo bash dev/tools/quick_packet_diagnostic.sh 1.2.3.4
+```
+
+### tcpdump Diagnostics With Spoofed Traffic
+
+When **source IP spoofing** is enabled (Samplicator `-S` flag, `spoof` config directive, or TrapNinja's `preserve_source` option), standard ingress/egress filtering breaks down because both directions have the same source IP.
+
+**The Problem With Spoofing**:
+
+Without spoofing:
+```
+Device (10.1.1.1) → Server (10.2.2.2) → Destination (1.2.3.4)
+                    Ingress src: 10.1.1.1    Egress src: 10.2.2.2
+```
+
+With spoofing:
+```
+Device (10.1.1.1) → Server (10.2.2.2) → Destination (1.2.3.4)
+                    Ingress src: 10.1.1.1    Egress src: 10.1.1.1 (spoofed!)
+```
+
+With spoofing enabled, **both ingress and egress packets have the original device's IP as source** - so the filter `not src $SERVER_IP` captures BOTH.
+
+**Detecting If Spoofing Is Enabled**:
+```bash
+# Check Samplicator command line for -S flag
+pgrep -a samplicator | grep -o '\-S'
+
+# Check Samplicator config for spoof directive
+grep -i 'spoof' /etc/samplicator.conf
+
+# Check TrapNinja config
+grep -i 'preserve_source\|spoof' config/config.json
+```
+
+**Alternative Methods for Spoofed Traffic**:
+
+1. **TTL Analysis** - Forwarded packets have TTL decremented:
+   ```bash
+   # Capture with verbose mode to see TTL
+   tcpdump -i eth0 -v 'udp port 162' 2>/dev/null | grep -oP 'ttl \K[0-9]+' | sort | uniq -c
+   
+   # Example output:
+   #   1500 64   <- Original packets (Linux default TTL)
+   #   1500 63   <- Forwarded packets (TTL decremented)
+   ```
+
+2. **Source Port Analysis** - Forwarders often use different source ports:
+   ```bash
+   # See source port distribution
+   tcpdump -i eth0 -nn 'udp port 162' | awk '{print $3}' | grep -oP '\.[0-9]+$' | sort | uniq -c
+   
+   # Port 162 = device traps, high ports = forwarder
+   ```
+
+3. **Interface-Specific Capture** - If ingress/egress use different NICs:
+   ```bash
+   # Capture only on external interface (ingress)
+   tcpdump -i eth0 'udp port 162'
+   
+   # Capture only on internal interface (egress)
+   tcpdump -i eth1 'udp port 162'
+   ```
+
+4. **iptables/nflog Marking** - Most reliable method:
+   ```bash
+   # Mark incoming packets in PREROUTING (before local processing)
+   iptables -t mangle -A PREROUTING -p udp --dport 162 -j NFLOG --nflog-group 1
+   
+   # Mark outgoing packets in POSTROUTING (after forwarding)
+   iptables -t mangle -A POSTROUTING -p udp --dport 162 -j NFLOG --nflog-group 2
+   
+   # Capture ONLY ingress:
+   tcpdump -i nflog:1 -nn
+   
+   # Capture ONLY egress:
+   tcpdump -i nflog:2 -nn
+   
+   # Clean up when done:
+   iptables -t mangle -D PREROUTING -p udp --dport 162 -j NFLOG --nflog-group 1
+   iptables -t mangle -D POSTROUTING -p udp --dport 162 -j NFLOG --nflog-group 2
+   ```
+
+**Diagnostic Tool for Spoofed Traffic**:
+```bash
+# Use the spoofed traffic diagnostic script
+cd /opt/trapninja/dev/tools
+sudo bash spoofed_traffic_diagnostic.sh eth0
+```
+
+---
+
 ## Network Issues
 
 ### Symptom: No Traps Being Received
@@ -783,4 +992,4 @@ See `documentation/METRICS.md` for full metrics reference.
 
 ---
 
-**Last Updated**: 2025-12-31
+**Last Updated**: 2025-01-09

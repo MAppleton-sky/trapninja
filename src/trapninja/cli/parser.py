@@ -609,7 +609,8 @@ def _add_stats_subcommands(subparsers):
               trapninja stats summary               Overview of all statistics
               trapninja stats top-ips -n 20         Top 20 source IPs
               trapninja stats top-oids -s rate      Top OIDs by rate
-              trapninja stats ip --ip 10.0.0.1      Details for specific IP
+              trapninja stats ip 10.0.0.1           Details for specific IP
+              trapninja stats oid 1.3.6.1.4.1.9     Details for specific OID
               trapninja stats export -f prometheus  Export for Prometheus
         ''')
     )
@@ -630,13 +631,13 @@ def _add_stats_subcommands(subparsers):
     
     # ip
     ip_detail = stats_cmds.add_parser('ip', help='Show details for IP')
-    ip_detail.add_argument('--ip', type=validated_ip, required=True, help='IP address')
-    ip_detail.add_argument('--oids', type=int, default=10, help='Top OIDs to show')
+    ip_detail.add_argument('ip', type=validated_ip, help='IP address to query')
+    ip_detail.add_argument('--oids', type=int, default=10, help='Top OIDs to show (default: 10, max: 500)')
     
     # oid
     oid_detail = stats_cmds.add_parser('oid', help='Show details for OID')
-    oid_detail.add_argument('--oid', required=True, help='OID')
-    oid_detail.add_argument('--sources', type=int, default=10, help='Top sources to show')
+    oid_detail.add_argument('oid', type=validated_oid, help='OID to query')
+    oid_detail.add_argument('--sources', type=int, default=10, help='Top sources to show (default: 10, max: 500)')
     
     # destinations
     stats_cmds.add_parser('destinations', help='Show destination statistics')

@@ -423,15 +423,11 @@ def handle_stats_top_oids(args: Namespace) -> int:
 
 
 def handle_stats_ip_detail(args: Namespace) -> int:
-    """Handle --stats-ip command."""
+    """Handle stats ip command - show detailed stats for a specific IP."""
     ip_address = args.ip
     use_json = getattr(args, 'json', False)
     pretty = getattr(args, 'pretty', False)
     top_n_oids = min(getattr(args, 'oids', 10), 500)  # Use --oids parameter
-    
-    if not ip_address:
-        print("Error: IP address required. Use --ip <address>")
-        return 1
     
     # Query daemon for real-time data - returns IP data dict directly on success
     ip_data = _query_daemon_stats({
@@ -501,15 +497,11 @@ def handle_stats_ip_detail(args: Namespace) -> int:
 
 
 def handle_stats_oid_detail(args: Namespace) -> int:
-    """Handle --stats-oid command."""
+    """Handle stats oid command - show detailed stats for a specific OID."""
     oid = args.oid
     use_json = getattr(args, 'json', False)
     pretty = getattr(args, 'pretty', False)
     top_n_sources = min(getattr(args, 'sources', 10), 500)  # Use --sources parameter
-    
-    if not oid:
-        print("Error: OID required. Use --oid <oid>")
-        return 1
     
     # Query daemon for real-time data - returns OID data dict directly on success
     oid_data = _query_daemon_stats({

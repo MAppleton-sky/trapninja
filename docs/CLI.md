@@ -461,16 +461,16 @@ trapninja stats top-oids -n 20 -s rate
 
 ```bash
 # Details for specific IP
-trapninja stats ip --ip 10.0.0.1
+trapninja stats ip 10.0.0.1
 
 # Details with more OIDs
-trapninja stats ip --ip 10.0.0.1 --oids 20
+trapninja stats ip 10.0.0.1 --oids 20
 
 # Details for specific OID
-trapninja stats oid --oid 1.3.6.1.4.1.9.9.41.2.0.1
+trapninja stats oid 1.3.6.1.4.1.9.9.41.2.0.1
 
 # Details with more sources
-trapninja stats oid --oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 20
+trapninja stats oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 20
 
 # Destination statistics
 trapninja stats destinations
