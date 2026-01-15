@@ -1,0 +1,1051 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0 -- /Library/Developer/CommandLineTools/usr/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/man78/GitHub/trapninja
+configfile: pytest.ini
+plugins: mock-3.15.1, xdist-3.8.0, timeout-2.4.0, cov-7.0.0
+collecting ... collected 487 items
+
+dev/tests/test_config.py::TestGetConfigDir::test_env_var_takes_priority PASSED [  0%]
+dev/tests/test_config.py::TestGetConfigDir::test_etc_trapninja_if_exists PASSED [  0%]
+dev/tests/test_config.py::TestGetConfigDir::test_falls_back_to_default PASSED [  0%]
+dev/tests/test_config.py::TestSafeLoadJson::test_loads_valid_json PASSED [  0%]
+dev/tests/test_config.py::TestSafeLoadJson::test_returns_fallback_for_missing_file PASSED [  1%]
+dev/tests/test_config.py::TestSafeLoadJson::test_returns_fallback_for_invalid_json PASSED [  1%]
+dev/tests/test_config.py::TestSafeLoadJson::test_returns_fallback_on_permission_error PASSED [  1%]
+dev/tests/test_config.py::TestSafeLoadJson::test_loads_list_data PASSED  [  1%]
+dev/tests/test_config.py::TestSafeLoadJson::test_loads_empty_json PASSED [  1%]
+dev/tests/test_config.py::TestLoadConfig::test_loads_destinations PASSED [  2%]
+dev/tests/test_config.py::TestLoadConfig::test_loads_blocked_traps_as_set PASSED [  2%]
+dev/tests/test_config.py::TestLoadConfig::test_loads_blocked_ips_as_set PASSED [  2%]
+dev/tests/test_config.py::TestLoadConfig::test_validates_listen_ports PASSED [  2%]
+dev/tests/test_config.py::TestLoadConfig::test_flattens_nested_port_arrays PASSED [  2%]
+dev/tests/test_config.py::TestLoadConfig::test_only_reloads_if_mtime_changed PASSED [  3%]
+dev/tests/test_config.py::TestLoadConfig::test_returns_true_if_config_changed PASSED [  3%]
+dev/tests/test_config.py::TestLoadConfig::test_calls_restart_callback_on_port_change PASSED [  3%]
+dev/tests/test_config.py::TestLoadRedirectionConfig::test_loads_redirected_ips PASSED [  3%]
+dev/tests/test_config.py::TestLoadRedirectionConfig::test_loads_redirected_oids PASSED [  3%]
+dev/tests/test_config.py::TestLoadRedirectionConfig::test_loads_redirected_destinations PASSED [  4%]
+dev/tests/test_config.py::TestLoadRedirectionConfig::test_validates_destination_ports PASSED [  4%]
+dev/tests/test_config.py::TestEnsureConfigDir::test_creates_config_directory PASSED [  4%]
+dev/tests/test_config.py::TestEnsureConfigDir::test_creates_example_files PASSED [  4%]
+dev/tests/test_config.py::TestEnsureConfigDir::test_does_not_overwrite_existing_files PASSED [  4%]
+dev/tests/test_config.py::TestLoadMainConfig::test_loads_main_config_file PASSED [  5%]
+dev/tests/test_config.py::TestLoadMainConfig::test_returns_empty_dict_if_missing PASSED [  5%]
+dev/tests/test_config.py::TestAutoDetectInterface::test_selects_interface_with_ip PASSED [  5%]
+dev/tests/test_config.py::TestAutoDetectInterface::test_falls_back_to_common_names PASSED [  5%]
+dev/tests/test_config.py::TestAutoDetectInterface::test_falls_back_to_eth0 PASSED [  5%]
+dev/tests/test_config.py::TestCacheConfig::test_load_cache_config_from_file PASSED [  6%]
+dev/tests/test_config.py::TestCacheConfig::test_save_cache_config PASSED [  6%]
+dev/tests/test_config.py::TestConfigDefaults::test_default_listen_port PASSED [  6%]
+dev/tests/test_config.py::TestConfigDefaults::test_default_log_settings PASSED [  6%]
+dev/tests/test_config.py::TestConfigDefaults::test_default_cache_settings PASSED [  6%]
+dev/tests/test_config.py::TestConfigDefaults::test_default_blocked_dest PASSED [  7%]
+dev/tests/test_config.py::TestStopEvent::test_stop_event_exists PASSED   [  7%]
+dev/tests/test_config.py::TestStopEvent::test_stop_event_initially_not_set PASSED [  7%]
+dev/tests/test_core_constants.py::TestSNMPVersionConstants::test_snmp_version_values PASSED [  7%]
+dev/tests/test_core_constants.py::TestSNMPVersionConstants::test_snmp_version_map_completeness PASSED [  8%]
+dev/tests/test_core_constants.py::TestSNMPVersionConstants::test_snmp_version_map_values PASSED [  8%]
+dev/tests/test_core_constants.py::TestSNMPVersionConstants::test_snmp_version_reverse_map_bidirectional PASSED [  8%]
+dev/tests/test_core_constants.py::TestASN1TagConstants::test_universal_tags_are_bytes PASSED [  8%]
+dev/tests/test_core_constants.py::TestASN1TagConstants::test_context_specific_tags PASSED [  8%]
+dev/tests/test_core_constants.py::TestASN1TagConstants::test_application_tags PASSED [  9%]
+dev/tests/test_core_constants.py::TestSNMPOIDConstants::test_snmptrapoid_format PASSED [  9%]
+dev/tests/test_core_constants.py::TestSNMPOIDConstants::test_snmptrapoid_bytes_match_string PASSED [  9%]
+dev/tests/test_core_constants.py::TestSNMPOIDConstants::test_sysuptime_oid_format PASSED [  9%]
+dev/tests/test_core_constants.py::TestSNMPOIDConstants::test_enterprise_prefix PASSED [  9%]
+dev/tests/test_core_constants.py::TestNetworkConstants::test_default_ports_in_valid_range PASSED [ 10%]
+dev/tests/test_core_constants.py::TestNetworkConstants::test_default_trap_port_is_standard PASSED [ 10%]
+dev/tests/test_core_constants.py::TestNetworkConstants::test_forward_source_port_differs_from_trap_port PASSED [ 10%]
+dev/tests/test_core_constants.py::TestNetworkConstants::test_max_udp_packet_size PASSED [ 10%]
+dev/tests/test_core_constants.py::TestNetworkConstants::test_socket_buffer_sizes PASSED [ 10%]
+dev/tests/test_core_constants.py::TestPerformanceConstants::test_queue_sizes_are_positive PASSED [ 11%]
+dev/tests/test_core_constants.py::TestPerformanceConstants::test_batch_size_reasonable PASSED [ 11%]
+dev/tests/test_core_constants.py::TestPerformanceConstants::test_timeout_positive PASSED [ 11%]
+dev/tests/test_core_constants.py::TestPerformanceConstants::test_cache_ttl_positive PASSED [ 11%]
+dev/tests/test_core_constants.py::TestPerformanceConstants::test_stats_log_interval_reasonable PASSED [ 11%]
+dev/tests/test_core_constants.py::TestHAConstants::test_heartbeat_interval_positive PASSED [ 12%]
+dev/tests/test_core_constants.py::TestHAConstants::test_heartbeat_timeout_greater_than_interval PASSED [ 12%]
+dev/tests/test_core_constants.py::TestHAConstants::test_failover_delay_reasonable PASSED [ 12%]
+dev/tests/test_core_constants.py::TestHAConstants::test_ha_port_valid PASSED [ 12%]
+dev/tests/test_core_constants.py::TestHAConstants::test_ha_priority_positive PASSED [ 12%]
+dev/tests/test_core_constants.py::TestSNMPv3Constants::test_security_levels PASSED [ 13%]
+dev/tests/test_core_constants.py::TestSNMPv3Constants::test_auth_protocols_defined PASSED [ 13%]
+dev/tests/test_core_constants.py::TestSNMPv3Constants::test_priv_protocols_defined PASSED [ 13%]
+dev/tests/test_core_constants.py::TestFilePathConstants::test_default_paths_are_absolute PASSED [ 13%]
+dev/tests/test_core_constants.py::TestFilePathConstants::test_default_config_dir PASSED [ 13%]
+dev/tests/test_core_constants.py::TestFilePathConstants::test_default_log_dir PASSED [ 14%]
+dev/tests/test_core_constants.py::TestLoggingConstants::test_default_log_level PASSED [ 14%]
+dev/tests/test_core_constants.py::TestLoggingConstants::test_log_file_size_reasonable PASSED [ 14%]
+dev/tests/test_core_constants.py::TestLoggingConstants::test_backup_count_reasonable PASSED [ 14%]
+dev/tests/test_core_constants.py::TestConstantsImmutability::test_snmptrapoid_bytes_is_bytes PASSED [ 14%]
+dev/tests/test_core_constants.py::TestConstantsImmutability::test_version_maps_are_dicts PASSED [ 15%]
+dev/tests/test_core_exceptions.py::TestTrapNinjaError::test_basic_instantiation PASSED [ 15%]
+dev/tests/test_core_exceptions.py::TestTrapNinjaError::test_instantiation_with_details PASSED [ 15%]
+dev/tests/test_core_exceptions.py::TestTrapNinjaError::test_str_without_details PASSED [ 15%]
+dev/tests/test_core_exceptions.py::TestTrapNinjaError::test_str_with_details PASSED [ 16%]
+dev/tests/test_core_exceptions.py::TestTrapNinjaError::test_is_exception PASSED [ 16%]
+dev/tests/test_core_exceptions.py::TestConfigurationExceptions::test_configuration_error_inheritance PASSED [ 16%]
+dev/tests/test_core_exceptions.py::TestConfigurationExceptions::test_config_file_not_found_error PASSED [ 16%]
+dev/tests/test_core_exceptions.py::TestConfigurationExceptions::test_config_parse_error PASSED [ 16%]
+dev/tests/test_core_exceptions.py::TestConfigurationExceptions::test_config_validation_error PASSED [ 17%]
+dev/tests/test_core_exceptions.py::TestParsingExceptions::test_parsing_error_inheritance PASSED [ 17%]
+dev/tests/test_core_exceptions.py::TestParsingExceptions::test_invalid_snmp_packet PASSED [ 17%]
+dev/tests/test_core_exceptions.py::TestParsingExceptions::test_invalid_snmp_packet_with_source_ip PASSED [ 17%]
+dev/tests/test_core_exceptions.py::TestParsingExceptions::test_unsupported_snmp_version PASSED [ 17%]
+dev/tests/test_core_exceptions.py::TestParsingExceptions::test_oid_extraction_error PASSED [ 18%]
+dev/tests/test_core_exceptions.py::TestForwardingExceptions::test_forwarding_error_inheritance PASSED [ 18%]
+dev/tests/test_core_exceptions.py::TestForwardingExceptions::test_no_destinations_error PASSED [ 18%]
+dev/tests/test_core_exceptions.py::TestForwardingExceptions::test_socket_error PASSED [ 18%]
+dev/tests/test_core_exceptions.py::TestForwardingExceptions::test_destination_unreachable PASSED [ 18%]
+dev/tests/test_core_exceptions.py::TestHAExceptions::test_ha_error_inheritance PASSED [ 19%]
+dev/tests/test_core_exceptions.py::TestHAExceptions::test_ha_initialization_error PASSED [ 19%]
+dev/tests/test_core_exceptions.py::TestHAExceptions::test_ha_peer_communication_error PASSED [ 19%]
+dev/tests/test_core_exceptions.py::TestHAExceptions::test_ha_split_brain_error PASSED [ 19%]
+dev/tests/test_core_exceptions.py::TestHAExceptions::test_ha_state_transition_error PASSED [ 19%]
+dev/tests/test_core_exceptions.py::TestSecurityExceptions::test_security_error_inheritance PASSED [ 20%]
+dev/tests/test_core_exceptions.py::TestSecurityExceptions::test_snmpv3_decryption_error PASSED [ 20%]
+dev/tests/test_core_exceptions.py::TestSecurityExceptions::test_snmpv3_decryption_error_with_engine_id PASSED [ 20%]
+dev/tests/test_core_exceptions.py::TestSecurityExceptions::test_credential_not_found_error PASSED [ 20%]
+dev/tests/test_core_exceptions.py::TestSecurityExceptions::test_credential_not_found_error_with_engine_id PASSED [ 20%]
+dev/tests/test_core_exceptions.py::TestSecurityExceptions::test_authentication_error PASSED [ 21%]
+dev/tests/test_core_exceptions.py::TestSecurityExceptions::test_invalid_credentials_error PASSED [ 21%]
+dev/tests/test_core_exceptions.py::TestCaptureExceptions::test_capture_error_inheritance PASSED [ 21%]
+dev/tests/test_core_exceptions.py::TestCaptureExceptions::test_interface_not_found_error PASSED [ 21%]
+dev/tests/test_core_exceptions.py::TestCaptureExceptions::test_capture_permission_error PASSED [ 21%]
+dev/tests/test_core_exceptions.py::TestCaptureExceptions::test_ebpf_error PASSED [ 22%]
+dev/tests/test_core_exceptions.py::TestExceptionHierarchy::test_all_exceptions_inherit_from_base PASSED [ 22%]
+dev/tests/test_core_exceptions.py::TestExceptionHierarchy::test_exception_categories PASSED [ 22%]
+dev/tests/test_core_exceptions.py::TestExceptionCatching::test_catch_by_category PASSED [ 22%]
+dev/tests/test_core_exceptions.py::TestExceptionCatching::test_catch_by_base PASSED [ 22%]
+dev/tests/test_core_exceptions.py::TestExceptionCatching::test_catch_specific_exception PASSED [ 23%]
+dev/tests/test_core_types.py::TestTypeAliases::test_destination_alias PASSED [ 23%]
+dev/tests/test_core_types.py::TestTypeAliases::test_destination_list_alias PASSED [ 23%]
+dev/tests/test_core_types.py::TestTypeAliases::test_oid_alias PASSED     [ 23%]
+dev/tests/test_core_types.py::TestTypeAliases::test_ip_address_alias PASSED [ 24%]
+dev/tests/test_core_types.py::TestPacketData::test_basic_creation PASSED [ 24%]
+dev/tests/test_core_types.py::TestPacketData::test_timestamp_default PASSED [ 24%]
+dev/tests/test_core_types.py::TestPacketData::test_explicit_timestamp PASSED [ 24%]
+dev/tests/test_core_types.py::TestPacketData::test_is_frozen PASSED      [ 24%]
+dev/tests/test_core_types.py::TestPacketData::test_is_hashable PASSED    [ 25%]
+dev/tests/test_core_types.py::TestPacketData::test_same_data_same_hash PASSED [ 25%]
+dev/tests/test_core_types.py::TestPacketData::test_usable_in_set PASSED  [ 25%]
+dev/tests/test_core_types.py::TestParsedTrap::test_basic_creation PASSED [ 25%]
+dev/tests/test_core_types.py::TestParsedTrap::test_optional_fields PASSED [ 25%]
+dev/tests/test_core_types.py::TestParsedTrap::test_with_all_fields PASSED [ 26%]
+dev/tests/test_core_types.py::TestForwardingResult::test_successful_result PASSED [ 26%]
+dev/tests/test_core_types.py::TestForwardingResult::test_failed_result PASSED [ 26%]
+dev/tests/test_core_types.py::TestForwardingResult::test_forwarding_time PASSED [ 26%]
+dev/tests/test_core_types.py::TestRedirectionRule::test_ip_rule PASSED   [ 26%]
+dev/tests/test_core_types.py::TestRedirectionRule::test_oid_rule PASSED  [ 27%]
+dev/tests/test_core_types.py::TestRedirectionMatch::test_no_redirection PASSED [ 27%]
+dev/tests/test_core_types.py::TestRedirectionMatch::test_ip_redirect PASSED [ 27%]
+dev/tests/test_core_types.py::TestFilterAction::test_filter_actions_exist PASSED [ 27%]
+dev/tests/test_core_types.py::TestFilterAction::test_filter_actions_are_distinct PASSED [ 27%]
+dev/tests/test_core_types.py::TestFilterResult::test_allow_result PASSED [ 28%]
+dev/tests/test_core_types.py::TestFilterResult::test_block_result PASSED [ 28%]
+dev/tests/test_core_types.py::TestFilterResult::test_redirect_result PASSED [ 28%]
+dev/tests/test_core_types.py::TestProcessingStats::test_default_values PASSED [ 28%]
+dev/tests/test_core_types.py::TestProcessingStats::test_to_dict PASSED   [ 28%]
+dev/tests/test_core_types.py::TestProcessingStats::test_fast_path_ratio_calculation PASSED [ 29%]
+dev/tests/test_core_types.py::TestProcessingStats::test_fast_path_ratio_zero_division PASSED [ 29%]
+dev/tests/test_core_types.py::TestQueueStats::test_default_values PASSED [ 29%]
+dev/tests/test_core_types.py::TestQueueStats::test_utilization_calculation PASSED [ 29%]
+dev/tests/test_core_types.py::TestQueueStats::test_utilization_zero_capacity PASSED [ 29%]
+dev/tests/test_core_types.py::TestHAStateEnum::test_all_states_defined PASSED [ 30%]
+dev/tests/test_core_types.py::TestHAStateEnum::test_state_values PASSED  [ 30%]
+dev/tests/test_core_types.py::TestHAStatus::test_basic_creation PASSED   [ 30%]
+dev/tests/test_core_types.py::TestHAStatus::test_to_dict PASSED          [ 30%]
+dev/tests/test_core_types.py::TestHAStatus::test_to_dict_with_none_peer_state PASSED [ 31%]
+dev/tests/test_core_types.py::TestServiceConfig::test_default_values PASSED [ 31%]
+dev/tests/test_core_types.py::TestServiceConfig::test_custom_values PASSED [ 31%]
+dev/tests/test_core_types.py::TestSNMPv3Credentials::test_minimal_credentials PASSED [ 31%]
+dev/tests/test_core_types.py::TestSNMPv3Credentials::test_auth_credentials PASSED [ 31%]
+dev/tests/test_core_types.py::TestSNMPv3Credentials::test_full_credentials PASSED [ 32%]
+dev/tests/test_diagnostics.py::TestAnalyzePacketStructure::test_empty_payload PASSED [ 32%]
+dev/tests/test_diagnostics.py::TestAnalyzePacketStructure::test_short_payload_hex_dump PASSED [ 32%]
+dev/tests/test_diagnostics.py::TestAnalyzePacketStructure::test_full_payload_hex_dump PASSED [ 32%]
+dev/tests/test_diagnostics.py::TestAnalyzePacketStructure::test_detects_missing_sequence_tag PASSED [ 32%]
+dev/tests/test_diagnostics.py::TestAnalyzePacketStructure::test_detects_short_form_length PASSED [ 33%]
+dev/tests/test_diagnostics.py::TestAnalyzePacketStructure::test_detects_long_form_length PASSED [ 33%]
+dev/tests/test_diagnostics.py::TestAnalyzePacketStructure::test_detects_length_mismatch PASSED [ 33%]
+dev/tests/test_diagnostics.py::TestAnalyzePacketStructure::test_detects_snmp_version_field PASSED [ 33%]
+dev/tests/test_diagnostics.py::TestAnalyzePacketStructure::test_detects_snmp_versions[0-v1] PASSED [ 33%]
+dev/tests/test_diagnostics.py::TestAnalyzePacketStructure::test_detects_snmp_versions[1-v2c] PASSED [ 34%]
+dev/tests/test_diagnostics.py::TestAnalyzePacketStructure::test_detects_snmp_versions[2-v2] PASSED [ 34%]
+dev/tests/test_diagnostics.py::TestAnalyzePacketStructure::test_detects_snmp_versions[3-v3] PASSED [ 34%]
+dev/tests/test_diagnostics.py::TestAnalyzePacketStructure::test_detects_community_string PASSED [ 34%]
+dev/tests/test_diagnostics.py::TestAnalyzePacketStructure::test_detects_null_byte_sequence PASSED [ 34%]
+dev/tests/test_diagnostics.py::TestAnalyzePacketStructure::test_detects_short_payload PASSED [ 35%]
+dev/tests/test_diagnostics.py::TestLogParsingFailure::test_logs_failure_info PASSED [ 35%]
+dev/tests/test_diagnostics.py::TestLogParsingFailure::test_logs_without_version PASSED [ 35%]
+dev/tests/test_diagnostics.py::TestDumpPacketToFile::test_creates_dump_directory PASSED [ 35%]
+dev/tests/test_diagnostics.py::TestDumpPacketToFile::test_creates_binary_dump PASSED [ 35%]
+dev/tests/test_diagnostics.py::TestDumpPacketToFile::test_creates_analysis_file PASSED [ 36%]
+dev/tests/test_diagnostics.py::TestDumpPacketToFile::test_analysis_contains_source_ip PASSED [ 36%]
+dev/tests/test_diagnostics.py::TestDumpPacketToFile::test_filename_includes_ip PASSED [ 36%]
+dev/tests/test_diagnostics.py::TestValidateSnmpBasicStructure::test_valid_snmpv1_packet PASSED [ 36%]
+dev/tests/test_diagnostics.py::TestValidateSnmpBasicStructure::test_valid_snmpv2c_packet PASSED [ 36%]
+dev/tests/test_diagnostics.py::TestValidateSnmpBasicStructure::test_valid_snmpv3_packet FAILED [ 37%]
+dev/tests/test_diagnostics.py::TestValidateSnmpBasicStructure::test_rejects_too_short_payload PASSED [ 37%]
+dev/tests/test_diagnostics.py::TestValidateSnmpBasicStructure::test_rejects_invalid_sequence_tag PASSED [ 37%]
+dev/tests/test_diagnostics.py::TestValidateSnmpBasicStructure::test_rejects_invalid_integer_tag PASSED [ 37%]
+dev/tests/test_diagnostics.py::TestValidateSnmpBasicStructure::test_rejects_invalid_version_length PASSED [ 37%]
+dev/tests/test_diagnostics.py::TestValidateSnmpBasicStructure::test_rejects_invalid_snmp_version PASSED [ 38%]
+dev/tests/test_diagnostics.py::TestValidateSnmpBasicStructure::test_rejects_missing_community_string FAILED [ 38%]
+dev/tests/test_diagnostics.py::TestValidateSnmpBasicStructure::test_rejects_truncated_community PASSED [ 38%]
+dev/tests/test_diagnostics.py::TestSuggestParserImprovements::test_detects_enterprise_oid PASSED [ 38%]
+dev/tests/test_diagnostics.py::TestSuggestParserImprovements::test_detects_snmpv2_trap_pdu PASSED [ 39%]
+dev/tests/test_diagnostics.py::TestSuggestParserImprovements::test_detects_snmpv1_trap_pdu PASSED [ 39%]
+dev/tests/test_diagnostics.py::TestSuggestParserImprovements::test_detects_snmpv3_encryption PASSED [ 39%]
+dev/tests/test_diagnostics.py::TestSuggestParserImprovements::test_detects_length_mismatch_issue PASSED [ 39%]
+dev/tests/test_diagnostics.py::TestSuggestParserImprovements::test_empty_suggestions_for_normal_packet PASSED [ 39%]
+dev/tests/test_diagnostics.py::TestLongFormLengthParsing::test_one_byte_long_form PASSED [ 40%]
+dev/tests/test_diagnostics.py::TestLongFormLengthParsing::test_two_byte_long_form PASSED [ 40%]
+dev/tests/test_logger.py::TestCompressedRotatingFileHandler::test_init_with_compression_disabled PASSED [ 40%]
+dev/tests/test_logger.py::TestCompressedRotatingFileHandler::test_init_with_compression_enabled PASSED [ 40%]
+dev/tests/test_logger.py::TestCompressedRotatingFileHandler::test_compressed_files_tracking PASSED [ 40%]
+dev/tests/test_logger.py::TestCompressedRotatingFileHandler::test_rollover_starts_compression_thread PASSED [ 41%]
+dev/tests/test_logger.py::TestCompressedRotatingFileHandler::test_rollover_skips_compression_when_disabled PASSED [ 41%]
+dev/tests/test_logger.py::TestCompressedRotatingFileHandler::test_compress_logs_creates_gzip_file PASSED [ 41%]
+dev/tests/test_logger.py::TestCompressedRotatingFileHandler::test_compress_logs_skips_already_compressed PASSED [ 41%]
+dev/tests/test_logger.py::TestCompressedRotatingFileHandler::test_compress_logs_skips_if_gz_exists PASSED [ 41%]
+dev/tests/test_logger.py::TestCompressedRotatingFileHandler::test_compress_logs_handles_multiple_backups PASSED [ 42%]
+dev/tests/test_logger.py::TestCompressedRotatingFileHandler::test_compress_logs_handles_missing_file PASSED [ 42%]
+dev/tests/test_logger.py::TestThreadLocalAdapter::test_adapter_creation PASSED [ 42%]
+dev/tests/test_logger.py::TestThreadLocalAdapter::test_process_caches_message PASSED [ 42%]
+dev/tests/test_logger.py::TestThreadLocalAdapter::test_process_returns_cached_message PASSED [ 42%]
+dev/tests/test_logger.py::TestThreadLocalAdapter::test_process_preserves_kwargs PASSED [ 43%]
+dev/tests/test_logger.py::TestThreadLocalAdapter::test_cache_size_limit PASSED [ 43%]
+dev/tests/test_logger.py::TestThreadLocalAdapter::test_cache_eviction_removes_oldest PASSED [ 43%]
+dev/tests/test_logger.py::TestThreadLocalAdapter::test_thread_isolation PASSED [ 43%]
+dev/tests/test_logger.py::TestSetupLogging::test_setup_with_defaults PASSED [ 43%]
+dev/tests/test_logger.py::TestSetupLogging::test_setup_creates_log_directory PASSED [ 44%]
+dev/tests/test_logger.py::TestSetupLogging::test_log_level_mapping[DEBUG-10] PASSED [ 44%]
+dev/tests/test_logger.py::TestSetupLogging::test_log_level_mapping[INFO-20] PASSED [ 44%]
+dev/tests/test_logger.py::TestSetupLogging::test_log_level_mapping[WARNING-30] PASSED [ 44%]
+dev/tests/test_logger.py::TestSetupLogging::test_log_level_mapping[ERROR-40] PASSED [ 44%]
+dev/tests/test_logger.py::TestSetupLogging::test_log_level_mapping[CRITICAL-50] PASSED [ 45%]
+dev/tests/test_logger.py::TestSetupLogging::test_log_level_mapping[debug-10] PASSED [ 45%]
+dev/tests/test_logger.py::TestSetupLogging::test_log_level_mapping[Info-20] PASSED [ 45%]
+dev/tests/test_logger.py::TestSetupLogging::test_invalid_log_level_defaults_to_info PASSED [ 45%]
+dev/tests/test_logger.py::TestSetupLogging::test_console_handler_added_when_enabled PASSED [ 45%]
+dev/tests/test_logger.py::TestSetupLogging::test_console_handler_not_added_when_disabled PASSED [ 46%]
+dev/tests/test_logger.py::TestSetupLogging::test_compression_handler_when_compress_true PASSED [ 46%]
+dev/tests/test_logger.py::TestSetupLogging::test_standard_handler_when_compress_false PASSED [ 46%]
+dev/tests/test_logger.py::TestSetupLogging::test_explicit_log_file_parameter PASSED [ 46%]
+dev/tests/test_logger.py::TestSetupLogging::test_explicit_log_level_parameter PASSED [ 47%]
+dev/tests/test_logger.py::TestSetupLogging::test_max_size_and_backup_count PASSED [ 47%]
+dev/tests/test_logger.py::TestSetupLogging::test_clears_existing_handlers PASSED [ 47%]
+dev/tests/test_logger.py::TestSetupLogging::test_returns_adapter PASSED  [ 47%]
+dev/tests/test_logger.py::TestFormatter::test_formatter_format PASSED    [ 47%]
+dev/tests/test_logger.py::TestFormatter::test_formatter_datefmt PASSED   [ 48%]
+dev/tests/test_logger.py::TestModuleLevelLogger::test_logger_name PASSED [ 48%]
+dev/tests/test_logger.py::TestModuleLevelLogger::test_logger_is_logging_logger PASSED [ 48%]
+dev/tests/test_network.py::TestQueueConstants::test_queue_max_size PASSED [ 48%]
+dev/tests/test_network.py::TestQueueConstants::test_packet_queue_created PASSED [ 48%]
+dev/tests/test_network.py::TestQueueStats::test_stats_initialization PASSED [ 49%]
+dev/tests/test_network.py::TestQueueStats::test_record_queued PASSED     [ 49%]
+dev/tests/test_network.py::TestQueueStats::test_record_dropped FAILED    [ 49%]
+dev/tests/test_network.py::TestQueueStats::test_record_dropped_rate_limits_logging PASSED [ 49%]
+dev/tests/test_network.py::TestQueueStats::test_update_depth PASSED      [ 49%]
+dev/tests/test_network.py::TestQueueStats::test_get_stats PASSED         [ 50%]
+dev/tests/test_network.py::TestQueueStats::test_get_stats_utilization PASSED [ 50%]
+dev/tests/test_network.py::TestBufferPool::test_pool_initialization PASSED [ 50%]
+dev/tests/test_network.py::TestBufferPool::test_get_returns_buffer PASSED [ 50%]
+dev/tests/test_network.py::TestBufferPool::test_put_returns_buffer_to_pool PASSED [ 50%]
+dev/tests/test_network.py::TestBufferPool::test_pool_max_size_limit PASSED [ 51%]
+dev/tests/test_network.py::TestBufferPool::test_pool_thread_safety PASSED [ 51%]
+dev/tests/test_network.py::TestUDPListenerManagement::test_set_ebpf_mode PASSED [ 51%]
+dev/tests/test_network.py::TestUDPListenerManagement::test_start_udp_listener_binds_socket PASSED [ 51%]
+dev/tests/test_network.py::TestUDPListenerManagement::test_start_udp_listener_sets_large_buffer PASSED [ 51%]
+dev/tests/test_network.py::TestUDPListenerManagement::test_start_udp_listener_skips_in_ebpf_mode PASSED [ 52%]
+dev/tests/test_network.py::TestUDPListenerManagement::test_start_udp_listener_skips_existing PASSED [ 52%]
+dev/tests/test_network.py::TestUDPListenerManagement::test_start_udp_listener_handles_bind_error PASSED [ 52%]
+dev/tests/test_network.py::TestUDPListenerManagement::test_cleanup_udp_sockets PASSED [ 52%]
+dev/tests/test_network.py::TestForwardTrap::test_queues_valid_packet PASSED [ 52%]
+dev/tests/test_network.py::TestForwardTrap::test_skips_packet_without_ip_layer PASSED [ 53%]
+dev/tests/test_network.py::TestForwardTrap::test_skips_packet_from_forward_port PASSED [ 53%]
+dev/tests/test_network.py::TestForwardPacket::test_empty_destinations PASSED [ 53%]
+dev/tests/test_network.py::TestForwardPacket::test_uses_scapy_fallback FAILED [ 53%]
+dev/tests/test_network.py::TestGetQueueStats::test_returns_stats_dict PASSED [ 54%]
+dev/tests/test_network.py::TestStartPacketProcessors::test_falls_back_to_legacy FAILED [ 54%]
+dev/tests/test_network.py::TestStartQueueMonitor::test_starts_monitor_thread PASSED [ 54%]
+dev/tests/test_network.py::TestStartQueueMonitor::test_monitor_logs_high_utilization PASSED [ 54%]
+dev/tests/test_network.py::TestHAIntegration::test_ha_module_fallback PASSED [ 54%]
+dev/tests/test_network.py::TestHAIntegration::test_is_forwarding_enabled_fallback PASSED [ 55%]
+dev/tests/test_network.py::TestRestartUDPListeners::test_restart_calls_cleanup_and_start PASSED [ 55%]
+dev/tests/test_network.py::TestRestartUDPListeners::test_restart_in_ebpf_mode PASSED [ 55%]
+dev/tests/test_network.py::TestStartAllUDPListeners::test_starts_all_configured_ports PASSED [ 55%]
+dev/tests/test_network.py::TestStartAllUDPListeners::test_returns_false_on_failure PASSED [ 55%]
+dev/tests/test_network.py::TestStartAllUDPListeners::test_skips_in_ebpf_mode PASSED [ 56%]
+dev/tests/test_redirection.py::TestValidateIp::test_valid_ipv4_addresses[192.168.1.1-192.168.1.1] PASSED [ 56%]
+dev/tests/test_redirection.py::TestValidateIp::test_valid_ipv4_addresses[10.0.0.1-10.0.0.1] PASSED [ 56%]
+dev/tests/test_redirection.py::TestValidateIp::test_valid_ipv4_addresses[172.16.0.1-172.16.0.1] PASSED [ 56%]
+dev/tests/test_redirection.py::TestValidateIp::test_valid_ipv4_addresses[255.255.255.255-255.255.255.255] PASSED [ 56%]
+dev/tests/test_redirection.py::TestValidateIp::test_valid_ipv4_addresses[0.0.0.0-0.0.0.0] PASSED [ 57%]
+dev/tests/test_redirection.py::TestValidateIp::test_valid_ipv4_addresses[127.0.0.1-127.0.0.1] PASSED [ 57%]
+dev/tests/test_redirection.py::TestValidateIp::test_invalid_ipv4_addresses[256.1.1.1] PASSED [ 57%]
+dev/tests/test_redirection.py::TestValidateIp::test_invalid_ipv4_addresses[192.168.1] PASSED [ 57%]
+dev/tests/test_redirection.py::TestValidateIp::test_invalid_ipv4_addresses[192.168.1.1.1] PASSED [ 57%]
+dev/tests/test_redirection.py::TestValidateIp::test_invalid_ipv4_addresses[192.168.1.a] PASSED [ 58%]
+dev/tests/test_redirection.py::TestValidateIp::test_invalid_ipv4_addresses[abc.def.ghi.jkl] PASSED [ 58%]
+dev/tests/test_redirection.py::TestValidateIp::test_invalid_ipv4_addresses[] PASSED [ 58%]
+dev/tests/test_redirection.py::TestValidateIp::test_invalid_ipv4_addresses[192.168.1.1/24] PASSED [ 58%]
+dev/tests/test_redirection.py::TestValidateIp::test_invalid_ipv4_addresses[192.168.1.-1] PASSED [ 58%]
+dev/tests/test_redirection.py::TestValidateIp::test_ipv6_address PASSED  [ 59%]
+dev/tests/test_redirection.py::TestValidateOid::test_valid_oids[1.3.6.1.4.1.8072.2.3.0.1-1.3.6.1.4.1.8072.2.3.0.1] PASSED [ 59%]
+dev/tests/test_redirection.py::TestValidateOid::test_valid_oids[1.3.6.1.2.1.1.3.0-1.3.6.1.2.1.1.3.0] PASSED [ 59%]
+dev/tests/test_redirection.py::TestValidateOid::test_valid_oids[1.3-1.3] PASSED [ 59%]
+dev/tests/test_redirection.py::TestValidateOid::test_valid_oids[0.0-0.0] PASSED [ 59%]
+dev/tests/test_redirection.py::TestValidateOid::test_valid_oids[1.3.6.1.4.1.9.9.1.1.1-1.3.6.1.4.1.9.9.1.1.1] PASSED [ 60%]
+dev/tests/test_redirection.py::TestValidateOid::test_invalid_oids[invalid.oid] PASSED [ 60%]
+dev/tests/test_redirection.py::TestValidateOid::test_invalid_oids[1.3.6.1.abc] PASSED [ 60%]
+dev/tests/test_redirection.py::TestValidateOid::test_invalid_oids[] PASSED [ 60%]
+dev/tests/test_redirection.py::TestValidateOid::test_invalid_oids[1] PASSED [ 60%]
+dev/tests/test_redirection.py::TestValidateOid::test_invalid_oids[1.3.6.1.] PASSED [ 61%]
+dev/tests/test_redirection.py::TestValidateOid::test_invalid_oids[.1.3.6.1] PASSED [ 61%]
+dev/tests/test_redirection.py::TestValidateOid::test_invalid_oids[1..3.6.1] PASSED [ 61%]
+dev/tests/test_redirection.py::TestValidateOid::test_invalid_oids[1.3.6.1.4.1.-1] PASSED [ 61%]
+dev/tests/test_redirection.py::TestGetConfigPath::test_returns_full_path PASSED [ 62%]
+dev/tests/test_redirection.py::TestSafeLoadJson::test_loads_valid_json PASSED [ 62%]
+dev/tests/test_redirection.py::TestSafeLoadJson::test_returns_fallback_on_missing PASSED [ 62%]
+dev/tests/test_redirection.py::TestSafeLoadJson::test_returns_fallback_on_invalid_json PASSED [ 62%]
+dev/tests/test_redirection.py::TestLoadRedirectedIps::test_loads_ip_redirections PASSED [ 62%]
+dev/tests/test_redirection.py::TestLoadRedirectedIps::test_validates_ip_entries PASSED [ 63%]
+dev/tests/test_redirection.py::TestLoadRedirectedIps::test_validates_tag_is_string PASSED [ 63%]
+dev/tests/test_redirection.py::TestLoadRedirectedIps::test_only_reloads_on_mtime_change PASSED [ 63%]
+dev/tests/test_redirection.py::TestLoadRedirectedOids::test_loads_oid_redirections PASSED [ 63%]
+dev/tests/test_redirection.py::TestLoadRedirectedOids::test_validates_oid_entries PASSED [ 63%]
+dev/tests/test_redirection.py::TestLoadRedirectedDestinations::test_loads_destination_groups PASSED [ 64%]
+dev/tests/test_redirection.py::TestLoadRedirectedDestinations::test_validates_destination_ports PASSED [ 64%]
+dev/tests/test_redirection.py::TestLoadRedirectedDestinations::test_validates_destination_ips PASSED [ 64%]
+dev/tests/test_redirection.py::TestLoadRedirectedDestinations::test_converts_to_tuples PASSED [ 64%]
+dev/tests/test_redirection.py::TestLookupRedirectionTag::test_finds_ip_based_tag PASSED [ 64%]
+dev/tests/test_redirection.py::TestLookupRedirectionTag::test_finds_oid_based_tag PASSED [ 65%]
+dev/tests/test_redirection.py::TestLookupRedirectionTag::test_ip_takes_priority_over_oid PASSED [ 65%]
+dev/tests/test_redirection.py::TestLookupRedirectionTag::test_returns_empty_string_when_not_found PASSED [ 65%]
+dev/tests/test_redirection.py::TestLookupRedirectionTag::test_caches_results PASSED [ 65%]
+dev/tests/test_redirection.py::TestCheckForRedirection::test_returns_redirected_with_destinations PASSED [ 65%]
+dev/tests/test_redirection.py::TestCheckForRedirection::test_returns_not_redirected_when_no_match PASSED [ 66%]
+dev/tests/test_redirection.py::TestCheckForRedirection::test_returns_not_redirected_when_tag_has_no_destinations PASSED [ 66%]
+dev/tests/test_redirection.py::TestCheckForRedirection::test_multiple_destinations PASSED [ 66%]
+dev/tests/test_redirection.py::TestClearRedirectionCaches::test_clears_lru_cache PASSED [ 66%]
+dev/tests/test_redirection.py::TestLoadRedirectionConfig::test_loads_all_configs PASSED [ 66%]
+dev/tests/test_redirection.py::TestScheduleConfigCheck::test_schedules_timer PASSED [ 67%]
+dev/tests/test_redirection.py::TestScheduleConfigCheck::test_does_not_schedule_when_stopping PASSED [ 67%]
+dev/tests/test_snmp.py::TestSNMPVersionConstants::test_snmp_version_map FAILED [ 67%]
+dev/tests/test_snmp.py::TestSNMPVersionConstants::test_snmptrapoid_marker FAILED [ 67%]
+dev/tests/test_snmp.py::TestConfigCache::test_cache_initialization FAILED [ 67%]
+dev/tests/test_snmp.py::TestConfigCache::test_cache_custom_ttl FAILED    [ 68%]
+dev/tests/test_snmp.py::TestConfigCache::test_cache_get_loads_config FAILED [ 68%]
+dev/tests/test_snmp.py::TestConfigCache::test_cache_returns_cached_value_within_ttl FAILED [ 68%]
+dev/tests/test_snmp.py::TestConfigCache::test_cache_invalidate FAILED    [ 68%]
+dev/tests/test_snmp.py::TestConfigCache::test_cache_thread_safety FAILED [ 68%]
+dev/tests/test_snmp.py::TestProcessingStats::test_stats_initialization FAILED [ 69%]
+dev/tests/test_snmp.py::TestProcessingStats::test_stats_should_log_respects_interval FAILED [ 69%]
+dev/tests/test_snmp.py::TestProcessingStats::test_stats_should_log_after_interval FAILED [ 69%]
+dev/tests/test_snmp.py::TestProcessingStats::test_stats_log_summary FAILED [ 69%]
+dev/tests/test_snmp.py::TestIsSnmpv2c::test_valid_snmpv2c_packet FAILED  [ 70%]
+dev/tests/test_snmp.py::TestIsSnmpv2c::test_snmpv1_packet FAILED         [ 70%]
+dev/tests/test_snmp.py::TestIsSnmpv2c::test_snmpv3_packet FAILED         [ 70%]
+dev/tests/test_snmp.py::TestIsSnmpv2c::test_short_payload FAILED         [ 70%]
+dev/tests/test_snmp.py::TestIsSnmpv2c::test_invalid_sequence_tag FAILED  [ 70%]
+dev/tests/test_snmp.py::TestDecodeOid::test_decode_simple_oid FAILED     [ 71%]
+dev/tests/test_snmp.py::TestDecodeOid::test_decode_enterprise_oid FAILED [ 71%]
+dev/tests/test_snmp.py::TestDecodeOid::test_decode_multibyte_component FAILED [ 71%]
+dev/tests/test_snmp.py::TestDecodeOid::test_decode_empty_oid FAILED      [ 71%]
+dev/tests/test_snmp.py::TestExtractTrapOidFast::test_extract_oid_from_valid_trap FAILED [ 71%]
+dev/tests/test_snmp.py::TestExtractTrapOidFast::test_returns_none_when_marker_not_found FAILED [ 72%]
+dev/tests/test_snmp.py::TestExtractTrapOidFast::test_returns_none_for_invalid_oid_tag FAILED [ 72%]
+dev/tests/test_snmp.py::TestExtractTrapOidFast::test_returns_none_for_truncated_packet FAILED [ 72%]
+dev/tests/test_snmp.py::TestTryParseSnmp::test_parse_valid_snmpv2c FAILED [ 72%]
+dev/tests/test_snmp.py::TestTryParseSnmp::test_parse_snmpv1 FAILED       [ 72%]
+dev/tests/test_snmp.py::TestTryParseSnmp::test_parse_snmpv3 FAILED       [ 73%]
+dev/tests/test_snmp.py::TestTryParseSnmp::test_parse_failure_returns_none FAILED [ 73%]
+dev/tests/test_snmp.py::TestRawSocketForwarding::test_checksum_calculation FAILED [ 73%]
+dev/tests/test_snmp.py::TestRawSocketForwarding::test_checksum_odd_length FAILED [ 73%]
+dev/tests/test_snmp.py::TestRawSocketForwarding::test_build_packet_structure FAILED [ 73%]
+dev/tests/test_snmp.py::TestRawSocketForwarding::test_build_packet_source_ip FAILED [ 74%]
+dev/tests/test_snmp.py::TestRawSocketForwarding::test_build_packet_dest_ip FAILED [ 74%]
+dev/tests/test_snmp.py::TestRawSocketForwarding::test_build_packet_ports FAILED [ 74%]
+dev/tests/test_snmp.py::TestForwardPacket::test_forward_to_empty_destinations FAILED [ 74%]
+dev/tests/test_snmp.py::TestForwardPacket::test_falls_back_to_scapy FAILED [ 74%]
+dev/tests/test_snmp.py::TestForwardPacket::test_uses_raw_socket_when_available FAILED [ 75%]
+dev/tests/test_snmp.py::TestProcessCapturedPacket::test_skips_when_ha_disabled FAILED [ 75%]
+dev/tests/test_snmp.py::TestProcessCapturedPacket::test_blocks_by_ip FAILED [ 75%]
+dev/tests/test_snmp.py::TestProcessCapturedPacket::test_blocks_by_oid FAILED [ 75%]
+dev/tests/test_snmp.py::TestGetVarbindDict::test_extracts_varbinds FAILED [ 75%]
+dev/tests/test_snmp.py::TestGetVarbindDict::test_empty_varbinds FAILED   [ 76%]
+dev/tests/test_snmp.py::TestGetVarbindDict::test_missing_varbindlist FAILED [ 76%]
+dev/tests/test_snmp.py::TestGetSnmptrapOid::test_extracts_snmptrapoid FAILED [ 76%]
+dev/tests/test_snmp.py::TestGetSnmptrapOid::test_returns_none_when_not_found FAILED [ 76%]
+dev/tests/test_snmp.py::TestGetSnmpEnterpriseSpecific::test_extracts_enterprise_oid FAILED [ 77%]
+dev/tests/test_snmp.py::TestGetSnmpEnterpriseSpecific::test_returns_none_when_missing_enterprise FAILED [ 77%]
+dev/tests/test_snmp.py::TestConvertAsn1Value::test_convert_integer FAILED [ 77%]
+dev/tests/test_snmp.py::TestConvertAsn1Value::test_convert_string FAILED [ 77%]
+dev/tests/test_snmp.py::TestConvertAsn1Value::test_convert_null FAILED   [ 77%]
+dev/tests/test_snmp.py::TestConvertAsn1Value::test_convert_timeticks FAILED [ 78%]
+dev/tests/test_snmp.py::TestGetProcessingStats::test_returns_stats_dict FAILED [ 78%]
+dev/tests/test_snmp.py::TestGetProcessingStats::test_fast_path_ratio_calculation FAILED [ 78%]
+dev/tests/test_snmp.py::TestGetProcessingStats::test_fast_path_ratio_no_division_by_zero FAILED [ 78%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3User::test_user_creation PASSED [ 78%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3User::test_user_to_dict PASSED [ 79%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3User::test_user_from_dict PASSED [ 79%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_valid_user PASSED [ 79%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_empty_username PASSED [ 79%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_username_too_long PASSED [ 79%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_valid_auth_protocols[MD5] PASSED [ 80%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_valid_auth_protocols[SHA] PASSED [ 80%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_valid_auth_protocols[SHA224] PASSED [ 80%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_valid_auth_protocols[SHA256] PASSED [ 80%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_valid_auth_protocols[SHA384] PASSED [ 80%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_valid_auth_protocols[SHA512] PASSED [ 81%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_valid_auth_protocols[NONE] PASSED [ 81%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_invalid_auth_protocol PASSED [ 81%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_valid_priv_protocols[DES] PASSED [ 81%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_valid_priv_protocols[3DES] PASSED [ 81%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_valid_priv_protocols[AES128] PASSED [ 82%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_valid_priv_protocols[AES192] PASSED [ 82%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_valid_priv_protocols[AES256] PASSED [ 82%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_valid_priv_protocols[NONE] PASSED [ 82%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_invalid_priv_protocol PASSED [ 82%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_auth_passphrase_too_short PASSED [ 83%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_priv_passphrase_too_short PASSED [ 83%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_empty_engine_id PASSED [ 83%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_invalid_engine_id_hex PASSED [ 83%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3UserValidation::test_noauth_allows_empty_passphrase PASSED [ 83%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3CredentialStore::test_store_initialization PASSED [ 84%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3CredentialStore::test_add_user_success PASSED [ 84%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3CredentialStore::test_add_user_stores_credentials PASSED [ 84%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3CredentialStore::test_add_user_normalizes_engine_id PASSED [ 84%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3CredentialStore::test_add_user_invalid_fails PASSED [ 85%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3CredentialStore::test_add_user_creates_file PASSED [ 85%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3CredentialStore::test_remove_user_success PASSED [ 85%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3CredentialStore::test_remove_user_not_found PASSED [ 85%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3CredentialStore::test_remove_user_cleans_empty_engine PASSED [ 85%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3CredentialStore::test_get_user_success PASSED [ 86%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3CredentialStore::test_get_user_not_found PASSED [ 86%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3CredentialStore::test_get_user_case_insensitive_engine PASSED [ 86%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3CredentialStore::test_get_users_for_engine PASSED [ 86%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3CredentialStore::test_get_users_for_engine_empty PASSED [ 86%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3CredentialStore::test_list_all_users PASSED [ 87%]
+dev/tests/test_snmpv3_credentials.py::TestSNMPv3CredentialStore::test_get_engine_ids PASSED [ 87%]
+dev/tests/test_snmpv3_credentials.py::TestCredentialEncryption::test_key_derivation_deterministic PASSED [ 87%]
+dev/tests/test_snmpv3_credentials.py::TestCredentialEncryption::test_key_derivation_different_for_different_engines PASSED [ 87%]
+dev/tests/test_snmpv3_credentials.py::TestCredentialEncryption::test_encrypt_decrypt_roundtrip PASSED [ 87%]
+dev/tests/test_snmpv3_credentials.py::TestCredentialEncryption::test_decrypt_with_wrong_engine_fails PASSED [ 88%]
+dev/tests/test_snmpv3_credentials.py::TestCredentialEncryption::test_decrypt_corrupted_data_returns_none PASSED [ 88%]
+dev/tests/test_snmpv3_credentials.py::TestCredentialPersistence::test_save_creates_file PASSED [ 88%]
+dev/tests/test_snmpv3_credentials.py::TestCredentialPersistence::test_save_sets_permissions PASSED [ 88%]
+dev/tests/test_snmpv3_credentials.py::TestCredentialPersistence::test_load_restores_credentials PASSED [ 88%]
+dev/tests/test_snmpv3_credentials.py::TestCredentialPersistence::test_load_missing_file_ok PASSED [ 89%]
+dev/tests/test_snmpv3_credentials.py::TestAuditLogging::test_log_audit_success PASSED [ 89%]
+dev/tests/test_snmpv3_credentials.py::TestAuditLogging::test_log_audit_failure PASSED [ 89%]
+dev/tests/test_snmpv3_credentials.py::TestAuditLogging::test_log_audit_strips_sensitive_data PASSED [ 89%]
+dev/tests/test_snmpv3_credentials.py::TestGlobalCredentialStore::test_get_credential_store_creates_instance PASSED [ 89%]
+dev/tests/test_snmpv3_credentials.py::TestGlobalCredentialStore::test_get_credential_store_returns_same_instance PASSED [ 90%]
+dev/tests/test_snmpv3_credentials.py::TestGlobalCredentialStore::test_initialize_credential_store PASSED [ 90%]
+dev/tests/test_snmpv3_credentials.py::TestAuditEvent::test_audit_event_constants PASSED [ 90%]
+dev/tests/test_snmpv3_decryption.py::TestExtractEngineIdFromBytes::test_extracts_valid_engine_id FAILED [ 90%]
+dev/tests/test_snmpv3_decryption.py::TestExtractEngineIdFromBytes::test_returns_none_for_short_message PASSED [ 90%]
+dev/tests/test_snmpv3_decryption.py::TestExtractEngineIdFromBytes::test_returns_none_for_invalid_sequence PASSED [ 91%]
+dev/tests/test_snmpv3_decryption.py::TestExtractEngineIdFromBytes::test_returns_none_for_non_v3_message PASSED [ 91%]
+dev/tests/test_snmpv3_decryption.py::TestExtractUsernameFromBytes::test_extracts_username FAILED [ 91%]
+dev/tests/test_snmpv3_decryption.py::TestExtractUsernameFromBytes::test_returns_none_for_invalid_message PASSED [ 91%]
+dev/tests/test_snmpv3_decryption.py::TestParseBerLength::test_short_form_length PASSED [ 91%]
+dev/tests/test_snmpv3_decryption.py::TestParseBerLength::test_long_form_one_byte PASSED [ 92%]
+dev/tests/test_snmpv3_decryption.py::TestParseBerLength::test_long_form_two_bytes PASSED [ 92%]
+dev/tests/test_snmpv3_decryption.py::TestLocalizeKey::test_key_derivation_md5 PASSED [ 92%]
+dev/tests/test_snmpv3_decryption.py::TestLocalizeKey::test_key_derivation_sha1 PASSED [ 92%]
+dev/tests/test_snmpv3_decryption.py::TestLocalizeKey::test_key_derivation_sha256 PASSED [ 93%]
+dev/tests/test_snmpv3_decryption.py::TestLocalizeKey::test_key_derivation_deterministic PASSED [ 93%]
+dev/tests/test_snmpv3_decryption.py::TestLocalizeKey::test_different_engines_produce_different_keys PASSED [ 93%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3Decryptor::test_initialization PASSED [ 93%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3Decryptor::test_decrypt_returns_none_without_pysnmp PASSED [ 93%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3Decryptor::test_decrypt_returns_none_for_no_credentials PASSED [ 94%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorOIDEncoding::test_encode_simple_oid PASSED [ 94%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorOIDEncoding::test_encode_enterprise_oid PASSED [ 94%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorOIDEncoding::test_encode_oid_with_large_component PASSED [ 94%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorOIDEncoding::test_decode_oid_roundtrip PASSED [ 94%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorValueEncoding::test_encode_integer PASSED [ 95%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorValueEncoding::test_encode_integer_zero PASSED [ 95%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorValueEncoding::test_encode_integer_negative PASSED [ 95%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorValueEncoding::test_encode_octet_string PASSED [ 95%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorValueEncoding::test_encode_ip_address PASSED [ 95%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorValueEncoding::test_encode_counter32 PASSED [ 96%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorValueEncoding::test_encode_gauge32 PASSED [ 96%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorValueEncoding::test_encode_timeticks PASSED [ 96%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorValueEncoding::test_encode_counter64 PASSED [ 96%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorValueEncoding::test_encode_null PASSED [ 96%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorLengthEncoding::test_encode_short_form_length PASSED [ 97%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorLengthEncoding::test_encode_length_127 PASSED [ 97%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorLengthEncoding::test_encode_long_form_one_byte PASSED [ 97%]
+dev/tests/test_snmpv3_decryption.py::TestSNMPv3DecryptorLengthEncoding::test_encode_long_form_two_bytes PASSED [ 97%]
+dev/tests/test_snmpv3_decryption.py::TestConvertToSNMPv2c::test_converts_empty_varbinds PASSED [ 97%]
+dev/tests/test_snmpv3_decryption.py::TestConvertToSNMPv2c::test_converts_with_varbinds PASSED [ 98%]
+dev/tests/test_snmpv3_decryption.py::TestConvertToSNMPv2c::test_sets_correct_version PASSED [ 98%]
+dev/tests/test_snmpv3_decryption.py::TestConvertToSNMPv2c::test_sets_custom_community PASSED [ 98%]
+dev/tests/test_snmpv3_decryption.py::TestConvertToSNMPv2c::test_validates_output_message PASSED [ 98%]
+dev/tests/test_snmpv3_decryption.py::TestGlobalDecryptor::test_get_decryptor_returns_none_before_init PASSED [ 98%]
+dev/tests/test_snmpv3_decryption.py::TestGlobalDecryptor::test_initialize_creates_decryptor PASSED [ 99%]
+dev/tests/test_snmpv3_decryption.py::TestDecryptAndConvertTrap::test_returns_none_without_decryptor PASSED [ 99%]
+dev/tests/test_snmpv3_decryption.py::TestModuleAvailabilityFlags::test_pysnmp_available_flag_exists PASSED [ 99%]
+dev/tests/test_snmpv3_decryption.py::TestModuleAvailabilityFlags::test_crypto_available_flag_exists PASSED [ 99%]
+dev/tests/test_snmpv3_decryption.py::TestModuleAvailabilityFlags::test_pysnmp_version_exists PASSED [100%]
+
+=================================== FAILURES ===================================
+___________ TestValidateSnmpBasicStructure.test_valid_snmpv3_packet ____________
+dev/tests/test_diagnostics.py:310: in test_valid_snmpv3_packet
+    assert is_valid is True
+E   assert False is True
+_____ TestValidateSnmpBasicStructure.test_rejects_missing_community_string _____
+dev/tests/test_diagnostics.py:376: in test_rejects_missing_community_string
+    assert "community" in error.lower()
+E   AssertionError: assert 'community' in 'payload too short: 7 bytes (minimum 8 required)'
+E    +  where 'payload too short: 7 bytes (minimum 8 required)' = <built-in method lower of str object at 0x106dd6e10>()
+E    +    where <built-in method lower of str object at 0x106dd6e10> = 'Payload too short: 7 bytes (minimum 8 required)'.lower
+______________________ TestQueueStats.test_record_dropped ______________________
+dev/tests/test_network.py:77: in test_record_dropped
+    assert stats.drops_since_last_log == 1
+E   assert 0 == 1
+E    +  where 0 = <trapninja.network.QueueStats object at 0x106cfc400>.drops_since_last_log
+------------------------------ Captured log call -------------------------------
+WARNING  trapninja:network.py:96 Queue full: 1 packets dropped
+__________________ TestForwardPacket.test_uses_scapy_fallback __________________
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:886: in assert_called_once
+    raise AssertionError(msg)
+E   AssertionError: Expected '_forward_packet_scapy' to have been called once. Called 0 times.
+
+During handling of the above exception, another exception occurred:
+dev/tests/test_network.py:414: in test_uses_scapy_fallback
+    mock_scapy.assert_called_once()
+E   AssertionError: Expected '_forward_packet_scapy' to have been called once. Called 0 times.
+------------------------------ Captured log call -------------------------------
+INFO     trapninja:forwarder.py:99 Raw sockets unavailable, will use Scapy fallback
+_____________ TestStartPacketProcessors.test_falls_back_to_legacy ______________
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1334: in patched
+    with self.decoration_helper(patched,
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py:117: in __enter__
+    return next(self.gen)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1316: in decoration_helper
+    arg = exit_stack.enter_context(patching)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py:429: in enter_context
+    result = _cm_type.__enter__(cm)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1405: in __enter__
+    original, local = self.get_original()
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1378: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'trapninja.network' from '/Users/man78/GitHub/trapninja/src/trapninja/network.py'> does not have the attribute 'start_workers'
+________________ TestSNMPVersionConstants.test_snmp_version_map ________________
+dev/tests/test_snmp.py:31: in test_snmp_version_map
+    from trapninja.snmp import SNMP_VERSION_MAP
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_______________ TestSNMPVersionConstants.test_snmptrapoid_marker _______________
+dev/tests/test_snmp.py:40: in test_snmptrapoid_marker
+    from trapninja.snmp import _SNMPTRAPOID_MARKER
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+__________________ TestConfigCache.test_cache_initialization ___________________
+dev/tests/test_snmp.py:53: in test_cache_initialization
+    from trapninja.snmp import ConfigCache
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+____________________ TestConfigCache.test_cache_custom_ttl _____________________
+dev/tests/test_snmp.py:63: in test_cache_custom_ttl
+    from trapninja.snmp import ConfigCache
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_________________ TestConfigCache.test_cache_get_loads_config __________________
+dev/tests/test_snmp.py:71: in test_cache_get_loads_config
+    from trapninja.snmp import ConfigCache
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+__________ TestConfigCache.test_cache_returns_cached_value_within_ttl __________
+dev/tests/test_snmp.py:90: in test_cache_returns_cached_value_within_ttl
+    from trapninja.snmp import ConfigCache
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+____________________ TestConfigCache.test_cache_invalidate _____________________
+dev/tests/test_snmp.py:102: in test_cache_invalidate
+    from trapninja.snmp import ConfigCache
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+___________________ TestConfigCache.test_cache_thread_safety ___________________
+dev/tests/test_snmp.py:114: in test_cache_thread_safety
+    from trapninja.snmp import ConfigCache
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+________________ TestProcessingStats.test_stats_initialization _________________
+dev/tests/test_snmp.py:145: in test_stats_initialization
+    from trapninja.snmp import ProcessingStats
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_________ TestProcessingStats.test_stats_should_log_respects_interval __________
+dev/tests/test_snmp.py:159: in test_stats_should_log_respects_interval
+    from trapninja.snmp import ProcessingStats
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+___________ TestProcessingStats.test_stats_should_log_after_interval ___________
+dev/tests/test_snmp.py:169: in test_stats_should_log_after_interval
+    from trapninja.snmp import ProcessingStats
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+__________________ TestProcessingStats.test_stats_log_summary __________________
+dev/tests/test_snmp.py:179: in test_stats_log_summary
+    from trapninja.snmp import ProcessingStats
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+___________________ TestIsSnmpv2c.test_valid_snmpv2c_packet ____________________
+dev/tests/test_snmp.py:198: in test_valid_snmpv2c_packet
+    from trapninja.snmp import is_snmpv2c
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_______________________ TestIsSnmpv2c.test_snmpv1_packet _______________________
+dev/tests/test_snmp.py:213: in test_snmpv1_packet
+    from trapninja.snmp import is_snmpv2c
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_______________________ TestIsSnmpv2c.test_snmpv3_packet _______________________
+dev/tests/test_snmp.py:222: in test_snmpv3_packet
+    from trapninja.snmp import is_snmpv2c
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_______________________ TestIsSnmpv2c.test_short_payload _______________________
+dev/tests/test_snmp.py:231: in test_short_payload
+    from trapninja.snmp import is_snmpv2c
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+___________________ TestIsSnmpv2c.test_invalid_sequence_tag ____________________
+dev/tests/test_snmp.py:238: in test_invalid_sequence_tag
+    from trapninja.snmp import is_snmpv2c
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_____________________ TestDecodeOid.test_decode_simple_oid _____________________
+dev/tests/test_snmp.py:250: in test_decode_simple_oid
+    from trapninja.snmp import _decode_oid
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+___________________ TestDecodeOid.test_decode_enterprise_oid ___________________
+dev/tests/test_snmp.py:261: in test_decode_enterprise_oid
+    from trapninja.snmp import _decode_oid
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+________________ TestDecodeOid.test_decode_multibyte_component _________________
+dev/tests/test_snmp.py:272: in test_decode_multibyte_component
+    from trapninja.snmp import _decode_oid
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_____________________ TestDecodeOid.test_decode_empty_oid ______________________
+dev/tests/test_snmp.py:285: in test_decode_empty_oid
+    from trapninja.snmp import _decode_oid
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+___________ TestExtractTrapOidFast.test_extract_oid_from_valid_trap ____________
+dev/tests/test_snmp.py:297: in test_extract_oid_from_valid_trap
+    from trapninja.snmp import extract_trap_oid_fast, _SNMPTRAPOID_MARKER
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+________ TestExtractTrapOidFast.test_returns_none_when_marker_not_found ________
+dev/tests/test_snmp.py:315: in test_returns_none_when_marker_not_found
+    from trapninja.snmp import extract_trap_oid_fast
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_________ TestExtractTrapOidFast.test_returns_none_for_invalid_oid_tag _________
+dev/tests/test_snmp.py:325: in test_returns_none_for_invalid_oid_tag
+    from trapninja.snmp import extract_trap_oid_fast, _SNMPTRAPOID_MARKER
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+________ TestExtractTrapOidFast.test_returns_none_for_truncated_packet _________
+dev/tests/test_snmp.py:340: in test_returns_none_for_truncated_packet
+    from trapninja.snmp import extract_trap_oid_fast, _SNMPTRAPOID_MARKER
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+__________________ TestTryParseSnmp.test_parse_valid_snmpv2c ___________________
+dev/tests/test_snmp.py:358: in test_parse_valid_snmpv2c
+    from trapninja.snmp import try_parse_snmp
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+______________________ TestTryParseSnmp.test_parse_snmpv1 ______________________
+dev/tests/test_snmp.py:373: in test_parse_snmpv1
+    from trapninja.snmp import try_parse_snmp
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+______________________ TestTryParseSnmp.test_parse_snmpv3 ______________________
+dev/tests/test_snmp.py:386: in test_parse_snmpv3
+    from trapninja.snmp import try_parse_snmp
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_______________ TestTryParseSnmp.test_parse_failure_returns_none _______________
+dev/tests/test_snmp.py:399: in test_parse_failure_returns_none
+    from trapninja.snmp import try_parse_snmp
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+______________ TestRawSocketForwarding.test_checksum_calculation _______________
+dev/tests/test_snmp.py:413: in test_checksum_calculation
+    from trapninja.snmp import _checksum
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_______________ TestRawSocketForwarding.test_checksum_odd_length _______________
+dev/tests/test_snmp.py:427: in test_checksum_odd_length
+    from trapninja.snmp import _checksum
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_____________ TestRawSocketForwarding.test_build_packet_structure ______________
+dev/tests/test_snmp.py:438: in test_build_packet_structure
+    from trapninja.snmp import _build_packet
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_____________ TestRawSocketForwarding.test_build_packet_source_ip ______________
+dev/tests/test_snmp.py:459: in test_build_packet_source_ip
+    from trapninja.snmp import _build_packet
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+______________ TestRawSocketForwarding.test_build_packet_dest_ip _______________
+dev/tests/test_snmp.py:475: in test_build_packet_dest_ip
+    from trapninja.snmp import _build_packet
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_______________ TestRawSocketForwarding.test_build_packet_ports ________________
+dev/tests/test_snmp.py:491: in test_build_packet_ports
+    from trapninja.snmp import _build_packet
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_____________ TestForwardPacket.test_forward_to_empty_destinations _____________
+dev/tests/test_snmp.py:514: in test_forward_to_empty_destinations
+    from trapninja.snmp import forward_packet
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+__________________ TestForwardPacket.test_falls_back_to_scapy __________________
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1227: in _dot_lookup
+    return getattr(thing, comp)
+E   AttributeError: module 'trapninja' has no attribute 'snmp'
+
+During handling of the above exception, another exception occurred:
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1334: in patched
+    with self.decoration_helper(patched,
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py:117: in __enter__
+    return next(self.gen)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1316: in decoration_helper
+    arg = exit_stack.enter_context(patching)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py:429: in enter_context
+    result = _cm_type.__enter__(cm)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1389: in __enter__
+    self.target = self.getter()
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1564: in <lambda>
+    getter = lambda: _importer(target)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1240: in _importer
+    thing = _dot_lookup(thing, comp, import_path)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1229: in _dot_lookup
+    __import__(import_path)
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+____________ TestForwardPacket.test_uses_raw_socket_when_available _____________
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1227: in _dot_lookup
+    return getattr(thing, comp)
+E   AttributeError: module 'trapninja' has no attribute 'snmp'
+
+During handling of the above exception, another exception occurred:
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1334: in patched
+    with self.decoration_helper(patched,
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py:117: in __enter__
+    return next(self.gen)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1316: in decoration_helper
+    arg = exit_stack.enter_context(patching)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py:429: in enter_context
+    result = _cm_type.__enter__(cm)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1389: in __enter__
+    self.target = self.getter()
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1564: in <lambda>
+    getter = lambda: _importer(target)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1240: in _importer
+    thing = _dot_lookup(thing, comp, import_path)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1229: in _dot_lookup
+    __import__(import_path)
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+____________ TestProcessCapturedPacket.test_skips_when_ha_disabled _____________
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1227: in _dot_lookup
+    return getattr(thing, comp)
+E   AttributeError: module 'trapninja' has no attribute 'snmp'
+
+During handling of the above exception, another exception occurred:
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1334: in patched
+    with self.decoration_helper(patched,
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py:117: in __enter__
+    return next(self.gen)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1316: in decoration_helper
+    arg = exit_stack.enter_context(patching)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py:429: in enter_context
+    result = _cm_type.__enter__(cm)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1389: in __enter__
+    self.target = self.getter()
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1564: in <lambda>
+    getter = lambda: _importer(target)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1240: in _importer
+    thing = _dot_lookup(thing, comp, import_path)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1229: in _dot_lookup
+    __import__(import_path)
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_________________ TestProcessCapturedPacket.test_blocks_by_ip __________________
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1227: in _dot_lookup
+    return getattr(thing, comp)
+E   AttributeError: module 'trapninja' has no attribute 'snmp'
+
+During handling of the above exception, another exception occurred:
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1334: in patched
+    with self.decoration_helper(patched,
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py:117: in __enter__
+    return next(self.gen)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1316: in decoration_helper
+    arg = exit_stack.enter_context(patching)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py:429: in enter_context
+    result = _cm_type.__enter__(cm)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1389: in __enter__
+    self.target = self.getter()
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1564: in <lambda>
+    getter = lambda: _importer(target)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1240: in _importer
+    thing = _dot_lookup(thing, comp, import_path)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1229: in _dot_lookup
+    __import__(import_path)
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_________________ TestProcessCapturedPacket.test_blocks_by_oid _________________
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1227: in _dot_lookup
+    return getattr(thing, comp)
+E   AttributeError: module 'trapninja' has no attribute 'snmp'
+
+During handling of the above exception, another exception occurred:
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1334: in patched
+    with self.decoration_helper(patched,
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py:117: in __enter__
+    return next(self.gen)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1316: in decoration_helper
+    arg = exit_stack.enter_context(patching)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py:429: in enter_context
+    result = _cm_type.__enter__(cm)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1389: in __enter__
+    self.target = self.getter()
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1564: in <lambda>
+    getter = lambda: _importer(target)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1240: in _importer
+    thing = _dot_lookup(thing, comp, import_path)
+/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/unittest/mock.py:1229: in _dot_lookup
+    __import__(import_path)
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+__________________ TestGetVarbindDict.test_extracts_varbinds ___________________
+dev/tests/test_snmp.py:618: in test_extracts_varbinds
+    from trapninja.snmp import get_varbind_dict
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+____________________ TestGetVarbindDict.test_empty_varbinds ____________________
+dev/tests/test_snmp.py:641: in test_empty_varbinds
+    from trapninja.snmp import get_varbind_dict
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_________________ TestGetVarbindDict.test_missing_varbindlist __________________
+dev/tests/test_snmp.py:654: in test_missing_varbindlist
+    from trapninja.snmp import get_varbind_dict
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_________________ TestGetSnmptrapOid.test_extracts_snmptrapoid _________________
+dev/tests/test_snmp.py:670: in test_extracts_snmptrapoid
+    from trapninja.snmp import get_snmptrap_oid
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_____________ TestGetSnmptrapOid.test_returns_none_when_not_found ______________
+dev/tests/test_snmp.py:687: in test_returns_none_when_not_found
+    from trapninja.snmp import get_snmptrap_oid
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+__________ TestGetSnmpEnterpriseSpecific.test_extracts_enterprise_oid __________
+dev/tests/test_snmp.py:708: in test_extracts_enterprise_oid
+    from trapninja.snmp import get_snmp_enterprise_specific
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+___ TestGetSnmpEnterpriseSpecific.test_returns_none_when_missing_enterprise ____
+dev/tests/test_snmp.py:722: in test_returns_none_when_missing_enterprise
+    from trapninja.snmp import get_snmp_enterprise_specific
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+__________________ TestConvertAsn1Value.test_convert_integer ___________________
+dev/tests/test_snmp.py:738: in test_convert_integer
+    from trapninja.snmp import convert_asn1_value
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+___________________ TestConvertAsn1Value.test_convert_string ___________________
+dev/tests/test_snmp.py:750: in test_convert_string
+    from trapninja.snmp import convert_asn1_value
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+____________________ TestConvertAsn1Value.test_convert_null ____________________
+dev/tests/test_snmp.py:762: in test_convert_null
+    from trapninja.snmp import convert_asn1_value
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_________________ TestConvertAsn1Value.test_convert_timeticks __________________
+dev/tests/test_snmp.py:773: in test_convert_timeticks
+    from trapninja.snmp import convert_asn1_value
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+________________ TestGetProcessingStats.test_returns_stats_dict ________________
+dev/tests/test_snmp.py:789: in test_returns_stats_dict
+    from trapninja.snmp import get_processing_stats, _stats
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+___________ TestGetProcessingStats.test_fast_path_ratio_calculation ____________
+dev/tests/test_snmp.py:809: in test_fast_path_ratio_calculation
+    from trapninja.snmp import get_processing_stats, _stats
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+_______ TestGetProcessingStats.test_fast_path_ratio_no_division_by_zero ________
+dev/tests/test_snmp.py:820: in test_fast_path_ratio_no_division_by_zero
+    from trapninja.snmp import get_processing_stats, _stats
+src/trapninja/snmp.py:27: in <module>
+    from .metrics import (
+E   ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+__________ TestExtractEngineIdFromBytes.test_extracts_valid_engine_id __________
+dev/tests/test_snmpv3_decryption.py:54: in test_extracts_valid_engine_id
+    assert result == '80001234abcdef'
+E   AssertionError: assert None == '80001234abcdef'
+------------------------------ Captured log call -------------------------------
+WARNING  trapninja:snmpv3_decryption.py:47 pysnmp not available: No module named 'pysnmp'
+WARNING  trapninja:snmpv3_decryption.py:48 SNMPv3 decryption will not be available
+WARNING  trapninja:snmpv3_decryption.py:49 Install with: pip3 install --break-system-packages pysnmp pyasn1
+WARNING  trapninja:snmpv3_decryption.py:57 pycryptodome not available - encrypted SNMPv3 traps cannot be decrypted
+WARNING  trapninja:snmpv3_decryption.py:58 Install with: pip3 install --break-system-packages pycryptodome
+_____________ TestExtractUsernameFromBytes.test_extracts_username ______________
+dev/tests/test_snmpv3_decryption.py:118: in test_extracts_username
+    assert result == 'testuser'
+E   AssertionError: assert None == 'testuser'
+=============================== warnings summary ===============================
+dev/tests/test_network.py::TestForwardPacket::test_uses_scapy_fallback
+  /Users/man78/Library/Python/3.9/lib/python/site-packages/scapy/sendrecv.py:485: SyntaxWarning: 'iface' has no effect on L3 I/O send(). For multicast/link-local see https://scapy.readthedocs.io/en/latest/usage.html#multicast
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED dev/tests/test_diagnostics.py::TestValidateSnmpBasicStructure::test_valid_snmpv3_packet - assert False is True
+FAILED dev/tests/test_diagnostics.py::TestValidateSnmpBasicStructure::test_rejects_missing_community_string - AssertionError: assert 'community' in 'payload too short: 7 bytes (minimum 8 required)'
+ +  where 'payload too short: 7 bytes (minimum 8 required)' = <built-in method lower of str object at 0x106dd6e10>()
+ +    where <built-in method lower of str object at 0x106dd6e10> = 'Payload too short: 7 bytes (minimum 8 required)'.lower
+FAILED dev/tests/test_network.py::TestQueueStats::test_record_dropped - assert 0 == 1
+ +  where 0 = <trapninja.network.QueueStats object at 0x106cfc400>.drops_since_last_log
+FAILED dev/tests/test_network.py::TestForwardPacket::test_uses_scapy_fallback - AssertionError: Expected '_forward_packet_scapy' to have been called once. Called 0 times.
+FAILED dev/tests/test_network.py::TestStartPacketProcessors::test_falls_back_to_legacy - AttributeError: <module 'trapninja.network' from '/Users/man78/GitHub/trapninja/src/trapninja/network.py'> does not have the attribute 'start_workers'
+FAILED dev/tests/test_snmp.py::TestSNMPVersionConstants::test_snmp_version_map - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestSNMPVersionConstants::test_snmptrapoid_marker - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestConfigCache::test_cache_initialization - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestConfigCache::test_cache_custom_ttl - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestConfigCache::test_cache_get_loads_config - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestConfigCache::test_cache_returns_cached_value_within_ttl - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestConfigCache::test_cache_invalidate - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestConfigCache::test_cache_thread_safety - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestProcessingStats::test_stats_initialization - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestProcessingStats::test_stats_should_log_respects_interval - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestProcessingStats::test_stats_should_log_after_interval - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestProcessingStats::test_stats_log_summary - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestIsSnmpv2c::test_valid_snmpv2c_packet - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestIsSnmpv2c::test_snmpv1_packet - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestIsSnmpv2c::test_snmpv3_packet - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestIsSnmpv2c::test_short_payload - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestIsSnmpv2c::test_invalid_sequence_tag - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestDecodeOid::test_decode_simple_oid - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestDecodeOid::test_decode_enterprise_oid - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestDecodeOid::test_decode_multibyte_component - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestDecodeOid::test_decode_empty_oid - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestExtractTrapOidFast::test_extract_oid_from_valid_trap - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestExtractTrapOidFast::test_returns_none_when_marker_not_found - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestExtractTrapOidFast::test_returns_none_for_invalid_oid_tag - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestExtractTrapOidFast::test_returns_none_for_truncated_packet - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestTryParseSnmp::test_parse_valid_snmpv2c - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestTryParseSnmp::test_parse_snmpv1 - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestTryParseSnmp::test_parse_snmpv3 - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestTryParseSnmp::test_parse_failure_returns_none - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestRawSocketForwarding::test_checksum_calculation - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestRawSocketForwarding::test_checksum_odd_length - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestRawSocketForwarding::test_build_packet_structure - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestRawSocketForwarding::test_build_packet_source_ip - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestRawSocketForwarding::test_build_packet_dest_ip - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestRawSocketForwarding::test_build_packet_ports - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestForwardPacket::test_forward_to_empty_destinations - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestForwardPacket::test_falls_back_to_scapy - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestForwardPacket::test_uses_raw_socket_when_available - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestProcessCapturedPacket::test_skips_when_ha_disabled - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestProcessCapturedPacket::test_blocks_by_ip - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestProcessCapturedPacket::test_blocks_by_oid - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestGetVarbindDict::test_extracts_varbinds - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestGetVarbindDict::test_empty_varbinds - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestGetVarbindDict::test_missing_varbindlist - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestGetSnmptrapOid::test_extracts_snmptrapoid - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestGetSnmptrapOid::test_returns_none_when_not_found - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestGetSnmpEnterpriseSpecific::test_extracts_enterprise_oid - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestGetSnmpEnterpriseSpecific::test_returns_none_when_missing_enterprise - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestConvertAsn1Value::test_convert_integer - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestConvertAsn1Value::test_convert_string - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestConvertAsn1Value::test_convert_null - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestConvertAsn1Value::test_convert_timeticks - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestGetProcessingStats::test_returns_stats_dict - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestGetProcessingStats::test_fast_path_ratio_calculation - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmp.py::TestGetProcessingStats::test_fast_path_ratio_no_division_by_zero - ImportError: cannot import name 'increment_trap_received' from 'trapninja.metrics' (/Users/man78/GitHub/trapninja/src/trapninja/metrics/__init__.py)
+FAILED dev/tests/test_snmpv3_decryption.py::TestExtractEngineIdFromBytes::test_extracts_valid_engine_id - AssertionError: assert None == '80001234abcdef'
+FAILED dev/tests/test_snmpv3_decryption.py::TestExtractUsernameFromBytes::test_extracts_username - AssertionError: assert None == 'testuser'
+================== 62 failed, 425 passed, 1 warning in 5.12s ===================

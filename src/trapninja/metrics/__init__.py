@@ -37,6 +37,10 @@ from .collector import (
     increment_blocked_oid,
     increment_redirected_ip,
     increment_redirected_oid,
+    # Legacy compatibility functions
+    increment_trap_received,
+    increment_trap_forwarded,
+    reset_interval_counters,
 )
 
 from .exporter import (
@@ -60,6 +64,10 @@ __all__ = [
     'increment_blocked_oid',
     'increment_redirected_ip',
     'increment_redirected_oid',
+    # Legacy compatibility
+    'increment_trap_received',
+    'increment_trap_forwarded',
+    'reset_interval_counters',
     # Exporter
     'export_metrics',
     'format_prometheus',

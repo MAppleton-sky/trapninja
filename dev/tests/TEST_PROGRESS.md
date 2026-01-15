@@ -33,11 +33,11 @@ It enables work to continue across multiple sessions.
 
 | Module | Status | Test File | Notes |
 |--------|--------|-----------|-------|
-| `snmp.py` | ⏳ | `test_snmp.py` | OID extraction, forwarding |
-| `snmpv3_credentials.py` | ⏳ | `test_snmpv3_credentials.py` | Credential management |
-| `snmpv3_decryption.py` | ⏳ | `test_snmpv3_decryption.py` | Decryption logic |
-| `network.py` | ⏳ | `test_network.py` | Packet capture, forwarding |
-| `diagnostics.py` | ⏳ | `test_diagnostics.py` | Packet validation |
+| `snmp.py` | ✅ | `test_snmp.py` | OID extraction, fast/slow path, forwarding |
+| `snmpv3_credentials.py` | ✅ | `test_snmpv3_credentials.py` | Credential management, encryption, audit |
+| `snmpv3_decryption.py` | ✅ | `test_snmpv3_decryption.py` | Decryption, key localization, v2c conversion |
+| `network.py` | ✅ | `test_network.py` | Packet capture, queue management, forwarding |
+| `diagnostics.py` | ✅ | `test_diagnostics.py` | Packet validation, structure analysis |
 
 ## Phase 4: Metrics & Statistics
 
@@ -111,6 +111,9 @@ pytest dev/tests/test_core_*.py -v
 # Run Phase 2 tests
 pytest dev/tests/test_logger.py dev/tests/test_config.py dev/tests/test_redirection.py -v
 
+# Run Phase 3 tests
+pytest dev/tests/test_snmp.py dev/tests/test_snmpv3_*.py dev/tests/test_network.py dev/tests/test_diagnostics.py -v
+
 # Run with coverage
 pytest dev/tests/ --cov=src/trapninja --cov-report=html
 
@@ -124,23 +127,57 @@ pytest dev/tests/ -n auto
 |------|---------|-------------------|-------|
 | 2025-01-15 | 1 | core/constants, core/exceptions, core/types | Initial test suite setup - Phase 1 complete |
 | 2025-01-15 | 1 | logger, config, redirection | Phase 2 complete |
+| 2025-01-15 | 2 | snmp, snmpv3_credentials, snmpv3_decryption, network, diagnostics | Phase 3 complete |
+| 2025-01-15 | 2 | FIXES | Fixed metrics/__init__.py exports |
+| 2025-01-15 | 2 | FIXES | Fixed test_snmpv3_decryption.py message construction |
+| 2025-01-15 | 2 | FIXES | Fixed test_diagnostics.py SNMPv3 validation and payload length tests |
+| 2025-01-15 | 2 | FIXES | Fixed test_network.py QueueStats and forwarding tests |
+| 2025-01-15 | 2 | FIXES | Fixed test_snmp.py convert_asn1_value and cache tests |
+
+---
+
+## Bug Fixes Applied
+
+### 2025-01-15 Session 2
+
+1. **metrics/__init__.py** - Added missing exports:
+   - `increment_trap_received`
+   - `increment_trap_forwarded`
+   - `reset_interval_counters`
+
+2. **test_snmpv3_decryption.py** - Fixed test message construction:
+   - Added `_build_snmpv3_message()` helper function
+   - Corrected SNMPv3 message structure
+
+3. **test_diagnostics.py** - Fixed validation tests:
+   - `test_valid_snmpv3_packet` - Changed payload to be 8+ bytes
+   - `test_rejects_missing_community_string` - Renamed to `test_rejects_missing_community_string_v1` with correct payload
+
+4. **test_network.py** - Fixed QueueStats tests:
+   - `test_record_dropped_increments_counters` - Set `last_drop_log_time` to future to prevent immediate reset
+   - `test_record_dropped_logs_and_resets_after_interval` - New test for the logging behavior
+   - Removed tests for non-existent functions
+
+5. **test_snmp.py** - Fixed ASN.1 conversion tests:
+   - `test_convert_timeticks` - Fixed mock class name to include 'TIME' for correct branch detection
+   - `test_cache_get_loads_config` - Fixed to handle the actual import behavior
 
 ---
 
 ## Next Session Action Items
 
 When resuming, start with:
-1. Check this document for current status
-2. Run existing tests: `pytest dev/tests/ -v`
-3. Continue from Phase 3: `snmp.py` module
-4. Update this document after completing each module
+1. Run tests to verify fixes: `pytest dev/tests/ -v`
+2. If all pass, continue from Phase 4: `metrics/` modules
+3. Update this document after completing each module
 
-**Next modules to implement (Phase 3 - SNMP Processing):**
-- `test_snmp.py` - OID extraction, fast/slow path, forwarding
-- `test_snmpv3_credentials.py` - Credential storage and retrieval
-- `test_snmpv3_decryption.py` - Auth/Priv decryption
-- `test_network.py` - Packet capture and raw socket forwarding
-- `test_diagnostics.py` - SNMP packet validation
+**Next modules to implement (Phase 4 - Metrics & Statistics):**
+- `test_metrics_config.py` - Metrics configuration and defaults
+- `test_metrics_collector.py` - Counter management, thread safety
+- `test_metrics_exporter.py` - Prometheus metrics export
+- `test_stats_models.py` - Statistics data models
+- `test_stats_collector.py` - Stats collection and aggregation
+- `test_stats_api.py` - Statistics API endpoints
 
 ## Test Count Summary
 
@@ -148,10 +185,13 @@ When resuming, start with:
 |-------|-------|--------|
 | Phase 1: Core | ~120 tests | ✅ Complete |
 | Phase 2: Utility | ~150 tests | ✅ Complete |
-| Phase 3: SNMP | ~100 tests (est) | ⏳ Pending |
+| Phase 3: SNMP | ~200 tests | ✅ Complete |
 | Phase 4: Metrics | ~80 tests (est) | ⏳ Pending |
 | Phase 5: Cache | ~60 tests (est) | ⏳ Pending |
 | Phase 6: HA | ~100 tests (est) | ⏳ Pending |
 | Phase 7: CLI | ~120 tests (est) | ⏳ Pending |
 | Phase 8: Service | ~60 tests (est) | ⏳ Pending |
 | Phase 9: Integration | ~40 tests (est) | ⏳ Pending |
+
+**Current total: ~470 tests across 11 modules (Phases 1-3)**
+**Expected after fixes: 487 passing tests**
