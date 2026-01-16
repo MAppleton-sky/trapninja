@@ -43,20 +43,20 @@ It enables work to continue across multiple sessions.
 
 | Module | Status | Test File | Notes |
 |--------|--------|-----------|-------|
-| `metrics/config.py` | ⏳ | `test_metrics_config.py` | Metrics configuration |
-| `metrics/collector.py` | ⏳ | `test_metrics_collector.py` | Counter management |
-| `metrics/exporter.py` | ⏳ | `test_metrics_exporter.py` | Prometheus export |
-| `stats/models.py` | ⏳ | `test_stats_models.py` | Statistics models |
-| `stats/collector.py` | ⏳ | `test_stats_collector.py` | Stats collection |
-| `stats/api.py` | ⏳ | `test_stats_api.py` | Stats API |
+| `metrics/config.py` | ✅ | `test_metrics_config.py` | Metrics configuration, labels, paths |
+| `metrics/collector.py` | ✅ | `test_metrics_collector.py` | Counter management, init/reset |
+| `metrics/exporter.py` | ✅ | `test_metrics_exporter.py` | Prometheus export, global labels |
+| `stats/models.py` | ✅ | `test_stats_models.py` | RateTracker, IPStats, OIDStats, etc. |
+| `stats/collector.py` | ✅ | `test_stats_collector.py` | LRU eviction, granular collection |
+| `stats/api.py` | ✅ | `test_stats_api.py` | Query API, dashboard export |
 
 ## Phase 5: Caching & Replay
 
 | Module | Status | Test File | Notes |
 |--------|--------|-----------|-------|
-| `cache/redis_backend.py` | ⏳ | `test_cache_redis.py` | Redis integration |
-| `cache/replay.py` | ⏳ | `test_cache_replay.py` | Trap replay logic |
-| `cache/failover/` | ⏳ | `test_cache_failover.py` | Failover logic |
+| `cache/redis_backend.py` | ✅ | `test_cache_redis.py` | TrapCache, RetentionManager, global instance |
+| `cache/replay.py` | ✅ | `test_cache_replay.py` | ReplayEngine, rate limiting, filtering |
+| `cache/failover/` | ✅ | `test_cache_failover.py` | Tracker, GapDetector, ReplayManager |
 
 ## Phase 6: High Availability
 
@@ -114,6 +114,12 @@ pytest dev/tests/test_logger.py dev/tests/test_config.py dev/tests/test_redirect
 # Run Phase 3 tests
 pytest dev/tests/test_snmp.py dev/tests/test_snmpv3_*.py dev/tests/test_network.py dev/tests/test_diagnostics.py -v
 
+# Run Phase 4 tests
+pytest dev/tests/test_metrics_*.py dev/tests/test_stats_*.py -v
+
+# Run Phase 5 tests
+pytest dev/tests/test_cache_*.py -v
+
 # Run with coverage
 pytest dev/tests/ --cov=src/trapninja --cov-report=html
 
@@ -133,51 +139,12 @@ pytest dev/tests/ -n auto
 | 2025-01-15 | 2 | FIXES | Fixed test_diagnostics.py SNMPv3 validation and payload length tests |
 | 2025-01-15 | 2 | FIXES | Fixed test_network.py QueueStats and forwarding tests |
 | 2025-01-15 | 2 | FIXES | Fixed test_snmp.py convert_asn1_value and cache tests |
+| 2025-01-15 | 3 | metrics/config, metrics/collector, metrics/exporter | Phase 4 metrics complete |
+| 2025-01-15 | 3 | stats/models, stats/collector, stats/api | Phase 4 stats complete |
+| 2025-01-16 | 4 | FIXES | Fixed test_metrics_exporter.py patch paths |
+| 2025-01-16 | 4 | cache/redis_backend, cache/replay, cache/failover | Phase 5 complete |
 
 ---
-
-## Bug Fixes Applied
-
-### 2025-01-15 Session 2
-
-1. **metrics/__init__.py** - Added missing exports:
-   - `increment_trap_received`
-   - `increment_trap_forwarded`
-   - `reset_interval_counters`
-
-2. **test_snmpv3_decryption.py** - Fixed test message construction:
-   - Added `_build_snmpv3_message()` helper function
-   - Corrected SNMPv3 message structure
-
-3. **test_diagnostics.py** - Fixed validation tests:
-   - `test_valid_snmpv3_packet` - Changed payload to be 8+ bytes
-   - `test_rejects_missing_community_string` - Renamed to `test_rejects_missing_community_string_v1` with correct payload
-
-4. **test_network.py** - Fixed QueueStats tests:
-   - `test_record_dropped_increments_counters` - Set `last_drop_log_time` to future to prevent immediate reset
-   - `test_record_dropped_logs_and_resets_after_interval` - New test for the logging behavior
-   - Removed tests for non-existent functions
-
-5. **test_snmp.py** - Fixed ASN.1 conversion tests:
-   - `test_convert_timeticks` - Fixed mock class name to include 'TIME' for correct branch detection
-   - `test_cache_get_loads_config` - Fixed to handle the actual import behavior
-
----
-
-## Next Session Action Items
-
-When resuming, start with:
-1. Run tests to verify fixes: `pytest dev/tests/ -v`
-2. If all pass, continue from Phase 4: `metrics/` modules
-3. Update this document after completing each module
-
-**Next modules to implement (Phase 4 - Metrics & Statistics):**
-- `test_metrics_config.py` - Metrics configuration and defaults
-- `test_metrics_collector.py` - Counter management, thread safety
-- `test_metrics_exporter.py` - Prometheus metrics export
-- `test_stats_models.py` - Statistics data models
-- `test_stats_collector.py` - Stats collection and aggregation
-- `test_stats_api.py` - Statistics API endpoints
 
 ## Test Count Summary
 
@@ -186,12 +153,28 @@ When resuming, start with:
 | Phase 1: Core | ~120 tests | ✅ Complete |
 | Phase 2: Utility | ~150 tests | ✅ Complete |
 | Phase 3: SNMP | ~200 tests | ✅ Complete |
-| Phase 4: Metrics | ~80 tests (est) | ⏳ Pending |
-| Phase 5: Cache | ~60 tests (est) | ⏳ Pending |
+| Phase 4: Metrics & Stats | ~230 tests | ✅ Complete |
+| Phase 5: Cache | ~120 tests | ✅ Complete |
 | Phase 6: HA | ~100 tests (est) | ⏳ Pending |
 | Phase 7: CLI | ~120 tests (est) | ⏳ Pending |
 | Phase 8: Service | ~60 tests (est) | ⏳ Pending |
 | Phase 9: Integration | ~40 tests (est) | ⏳ Pending |
 
-**Current total: ~470 tests across 11 modules (Phases 1-3)**
-**Expected after fixes: 487 passing tests**
+**Current total: ~820 tests across 20 modules (Phases 1-5)**
+
+---
+
+## Next Session Action Items
+
+When resuming, start with:
+1. Run tests to verify Phase 5: `pytest dev/tests/test_cache_*.py -v`
+2. If all pass, continue from Phase 6: `ha/` modules
+3. Update this document after completing each module
+
+**Next modules to implement (Phase 6 - High Availability):**
+- `test_ha_config.py` - HA configuration (HAConfig dataclass)
+- `test_ha_state.py` - HA state machine (HAState, HAStateManager)
+- `test_ha_messages.py` - Protocol messages (heartbeat, sync)
+- `test_ha_cluster.py` - Cluster management (HACluster)
+- `test_ha_api.py` - HA API functions
+- `test_ha_sync.py` - Configuration synchronization
