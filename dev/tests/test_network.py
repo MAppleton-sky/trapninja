@@ -609,14 +609,18 @@ class TestStartAllUDPListeners:
     def test_starts_all_configured_ports(self, mock_start):
         """Test starts listener for each configured port."""
         from trapninja import network
-        from trapninja.config import LISTEN_PORTS
+        
+        # Use the LISTEN_PORTS that the network module actually uses
+        # (imported at module load time)
+        listen_ports = network.LISTEN_PORTS
         
         network.ebpf_mode_active = False
         mock_start.return_value = True
         
         result = network.start_all_udp_listeners()
         
-        assert mock_start.call_count == len(LISTEN_PORTS)
+        # Should start a listener for each port
+        assert mock_start.call_count == len(listen_ports)
         assert result is True
 
     @patch('trapninja.network.start_udp_listener')

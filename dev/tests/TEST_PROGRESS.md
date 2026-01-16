@@ -73,11 +73,11 @@ It enables work to continue across multiple sessions.
 
 | Module | Status | Test File | Notes |
 |--------|--------|-----------|-------|
-| `cli/parser.py` | ⏳ | `test_cli_parser.py` | Argument parsing |
-| `cli/validation.py` | ⏳ | `test_cli_validation.py` | Input validation |
-| `cli/output.py` | ⏳ | `test_cli_output.py` | Output formatting |
-| `cli/executor.py` | ⏳ | `test_cli_executor.py` | Command execution |
-| `cli/*_commands.py` | ⏳ | `test_cli_commands.py` | All command modules |
+| `cli/validation.py` | ✅ | `test_cli_validation.py` | InputValidator, parse_size, sanitization |
+| `cli/output.py` | ✅ | `test_cli_output.py` | CLIOutput, ExitCode, formatting |
+| `cli/parser.py` | ✅ | `test_cli_parser.py` | Argument parsing, type converters |
+| `cli/executor.py` | ✅ | `test_cli_executor.py` | Command routing, execution |
+| `cli/*_commands.py` | ⏳ | (various) | Individual command modules |
 
 ## Phase 8: Service & Daemon
 
@@ -108,20 +108,8 @@ pytest dev/tests/ -v
 # Run specific phase
 pytest dev/tests/test_core_*.py -v
 
-# Run Phase 2 tests
-pytest dev/tests/test_logger.py dev/tests/test_config.py dev/tests/test_redirection.py -v
-
-# Run Phase 3 tests
-pytest dev/tests/test_snmp.py dev/tests/test_snmpv3_*.py dev/tests/test_network.py dev/tests/test_diagnostics.py -v
-
-# Run Phase 4 tests
-pytest dev/tests/test_metrics_*.py dev/tests/test_stats_*.py -v
-
-# Run Phase 5 tests
-pytest dev/tests/test_cache_*.py -v
-
-# Run Phase 6 tests
-pytest dev/tests/test_ha_*.py -v
+# Run Phase 7 tests (CLI)
+pytest dev/tests/test_cli_*.py -v
 
 # Run with coverage
 pytest dev/tests/ --cov=src/trapninja --cov-report=html
@@ -150,6 +138,7 @@ pytest dev/tests/ -n auto
 | 2025-01-16 | 4 | FIXES | Fixed test_cache_failover.py batch flush timing |
 | 2025-01-16 | 5 | ha/config, ha/state, ha/messages, ha/api | Phase 6 HA core complete |
 | 2025-01-16 | 5 | ha/cluster, ha/sync | Phase 6 complete |
+| 2025-01-16 | 6 | cli/validation, cli/output, cli/parser, cli/executor | Phase 7 core complete |
 
 ---
 
@@ -163,24 +152,28 @@ pytest dev/tests/ -n auto
 | Phase 4: Metrics & Stats | ~230 tests | ✅ Complete |
 | Phase 5: Cache | ~120 tests | ✅ Complete |
 | Phase 6: HA | ~180 tests | ✅ Complete |
-| Phase 7: CLI | ~120 tests (est) | ⏳ Pending |
+| Phase 7: CLI (core) | ~150 tests | ✅ Complete |
+| Phase 7: CLI (commands) | ~80 tests (est) | ⏳ Pending |
 | Phase 8: Service | ~60 tests (est) | ⏳ Pending |
 | Phase 9: Integration | ~40 tests (est) | ⏳ Pending |
 
-**Current total: ~1,000 tests across 26 modules (Phases 1-6)**
+**Current total: ~1,150 tests across 30 modules (Phases 1-7 core)**
 
 ---
 
 ## Next Session Action Items
 
 When resuming, start with:
-1. Run tests to verify Phase 6: `pytest dev/tests/test_ha_*.py -v`
-2. If all pass, continue from Phase 7: `cli/` modules
+1. Run tests to verify Phase 7: `pytest dev/tests/test_cli_*.py -v`
+2. If all pass, continue with CLI command modules or Phase 8
 3. Update this document after completing each module
 
-**Next modules to implement (Phase 7 - CLI):**
-- `test_cli_parser.py` - Argument parsing
-- `test_cli_validation.py` - Input validation
-- `test_cli_output.py` - Output formatting
-- `test_cli_executor.py` - Command execution
-- `test_cli_commands.py` - All command modules
+**Next modules to implement (Phase 7 remaining - CLI commands):**
+- Individual command module tests (daemon_commands, filtering_commands, etc.)
+- These are optional as they mainly call other tested modules
+
+**Next modules to implement (Phase 8 - Service):**
+- `test_daemon.py` - Daemon management
+- `test_service.py` - Service lifecycle
+- `test_control.py` - Control socket
+- `test_main.py` - Entry point
