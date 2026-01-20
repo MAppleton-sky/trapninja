@@ -389,13 +389,16 @@ def encode_oid(oid_str: str) -> bytes:
             result.append(0)
         else:
             # 7-bit encoding with continuation bit
+            # Build octets from LSB to MSB
             octets = []
             while num:
                 octets.append(num & 0x7F)
                 num >>= 7
             
-            # Set continuation bit on all but last
-            for i in range(len(octets) - 1):
+            # Set continuation bit on all but the LAST byte emitted
+            # Since we reverse at the end, the last emitted is octets[0]
+            # So set continuation on indices 1 and higher
+            for i in range(1, len(octets)):
                 octets[i] |= 0x80
             
             result.extend(reversed(octets))
