@@ -209,6 +209,7 @@ def test_something(mock_config, sample_payload):
 | 2026-01-21 | 10 | impl_filters | Phase 10C complete - ~50 tests |
 | 2026-01-21 | 10 | conftest.py | Created shared fixtures/utilities, refactored test files |
 | 2026-01-21 | 10 | fixtures/ | Restructured: packets.py, sample_data.py, configs.py |
+| 2026-01-21 | 10 | impl_snmpv3 | Phase 10D complete - ~55 tests |
 
 ---
 
@@ -227,7 +228,9 @@ def test_something(mock_config, sample_payload):
 | Phase 8: Service & Daemon | ~170 tests | ✅ Complete |
 | Phase 9: Integration | ~90 tests | ✅ Complete |
 
-**Current total: ~1,410 tests across 37 modules (Phases 1-9 complete)**
+| Phase 10: Implementation | ~200 tests | ✅ Complete |
+
+**Current total: ~1,610 tests across 41 modules (Phases 1-10 complete)**
 
 ---
 
@@ -285,7 +288,24 @@ def test_something(mock_config, sample_payload):
 | 10A: Trap Lifecycle | ✅ Complete | `test_impl_trap_lifecycle.py` | Version detection, OID extraction, blocking, redirection, HA, queue |
 | 10B: Multi-Destination Routing | ✅ Complete | `test_impl_routing.py` | Multi-dest forwarding, routing priority, socket pool, batch forwarding |
 | 10C: Filter Chain Processing | ✅ Complete | `test_impl_filters.py` | IP/OID validation, blocking, redirection, config loading, caching |
-| 10D: SNMPv3 Pipeline | ⏳ Pending | `test_impl_snmpv3.py` | Decryption, v2c conversion, credentials |
+| 10D: SNMPv3 Pipeline | ✅ Complete | `test_impl_snmpv3.py` | Engine ID extraction, key localization, USM parsing, decryption, v2c conversion |
+
+### test_impl_snmpv3.py (~55 tests)
+- `TestEngineIDExtraction` - Valid/invalid message parsing, short/long engine IDs
+- `TestUsernameExtraction` - Username extraction from USM params
+- `TestKeyLocalization` - SHA1/MD5/SHA256 key derivation, determinism, engine-specific keys
+- `TestUSMParameterParsing` - Complete USM params, zero boots/time, auth/priv params
+- `TestScopedPDUParsing` - Varbind extraction, value type decoding
+- `TestSNMPv2cConversion` - Basic conversion, varbind preservation, custom community
+- `TestSNMPv2cMessageValidation` - Structure validation, version check
+- `TestDecryptorInitialization` - Credential store integration, global instance
+- `TestCredentialStoreIntegration` - User lookup, username matching priority
+- `TestBEREncoding` - Length encoding, integer encoding, OID encoding
+- `TestOIDDecoding` - Simple OIDs, large components, empty OIDs
+- `TestValueDecoding` - Integer, OctetString, IpAddress, Counter32/64, TimeTicks
+- `TestDecryptAndConvertFunction` - End-to-end convenience function
+- `TestErrorHandling` - Malformed messages, invalid USM, conversion failures
+- `TestDependencyAvailability` - PYSNMP_AVAILABLE, CRYPTO_AVAILABLE flags
 
 ## Phase 11: Cross-Component Behavioral Tests
 
@@ -309,9 +329,15 @@ def test_something(mock_config, sample_payload):
 ## Next Session Action Items
 
 When resuming, start with:
-1. Run Phase 10A tests: `pytest dev/tests/test_impl_trap_lifecycle.py -v`
+1. Run Phase 10 tests: `pytest dev/tests/test_impl_*.py -v`
 2. Fix any failing tests
-3. Continue with Phase 10B: Multi-Destination Routing
+3. Continue with Phase 11: Cross-Component Behavioral Tests
+
+**Phase 11 options:**
+- 11A: Stats + Forwarding - Stats accuracy during forwarding
+- 11B: HA + Cache Coordination - Cache on secondary, replay on failover
+- 11C: Config + Runtime Behavior - Hot reload effects
+- 11D: Metrics Consistency - Metrics match actual behavior
 
 **Optional (Phase 7 remaining - CLI commands):**
 - Individual command module tests (`daemon_commands`, `filtering_commands`, etc.)
