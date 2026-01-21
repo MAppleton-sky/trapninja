@@ -144,6 +144,7 @@ pytest dev/tests/ -n auto
 | 2026-01-19 | 7 | daemon, service, control, main | Phase 8 complete |
 | 2026-01-19 | 8 | integration_forwarding, integration_ha, integration_config | Phase 9 complete |
 | 2026-01-20 | 9 | impl_trap_lifecycle | Phase 10A started - ~50 tests |
+| 2026-01-21 | 10 | impl_routing | Phase 10B complete - ~45 tests |
 
 ---
 
@@ -217,8 +218,8 @@ pytest dev/tests/ -n auto
 
 | Test Area | Status | Test File | Notes |
 |-----------|--------|-----------|-------|
-| 10A: Trap Lifecycle | 🔄 In Progress | `test_impl_trap_lifecycle.py` | Version detection, OID extraction, blocking, redirection, HA, queue |
-| 10B: Multi-Destination Routing | ⏳ Pending | `test_impl_routing.py` | Multi-dest forwarding, failover |
+| 10A: Trap Lifecycle | ✅ Complete | `test_impl_trap_lifecycle.py` | Version detection, OID extraction, blocking, redirection, HA, queue |
+| 10B: Multi-Destination Routing | ✅ Complete | `test_impl_routing.py` | Multi-dest forwarding, routing priority, socket pool, batch forwarding |
 | 10C: Filter Chain Processing | ⏳ Pending | `test_impl_filters.py` | IP/OID filtering, redirection chains |
 | 10D: SNMPv3 Pipeline | ⏳ Pending | `test_impl_snmpv3.py` | Decryption, v2c conversion, credentials |
 
