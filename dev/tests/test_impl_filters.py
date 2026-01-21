@@ -30,81 +30,23 @@ from unittest.mock import MagicMock, patch, PropertyMock
 from typing import Dict, List, Any
 from collections import defaultdict
 
-# Add src directory to path
-TEST_DIR = Path(__file__).parent
-PROJECT_ROOT = TEST_DIR.parent.parent
-SRC_DIR = PROJECT_ROOT / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+# Shared fixtures and utilities from fixtures/ directory
+from fixtures import (
+    build_snmpv2c_trap,
+    SampleOIDs,
+    SampleIPs,
+    create_config,
+)
 
-
-# =============================================================================
-# FIXTURES
-# =============================================================================
-
-@pytest.fixture
-def temp_config_dir():
-    """Create a temporary config directory."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        yield tmpdir
-
-
-@pytest.fixture
-def sample_destinations():
-    """Sample destination list."""
-    return [
-        ['192.168.1.100', 162],
-        ['192.168.1.101', 162],
-    ]
-
-
-@pytest.fixture
-def sample_blocked_traps():
-    """Sample blocked OID list."""
-    return [
-        '1.3.6.1.4.1.9999.1',
-        '1.3.6.1.4.1.9999.2',
-        '1.3.6.1.4.1.9999.3',
-    ]
-
-
-@pytest.fixture
-def sample_blocked_ips():
-    """Sample blocked IP list."""
-    return [
-        '10.0.0.99',
-        '10.0.0.100',
-        '172.16.0.50',
-    ]
-
-
-@pytest.fixture
-def sample_redirected_ips():
-    """Sample IP redirection rules."""
-    return [
-        ['192.168.10.50', 'security'],
-        ['192.168.10.51', 'security'],
-        ['192.168.20.50', 'voice'],
-    ]
-
-
-@pytest.fixture
-def sample_redirected_oids():
-    """Sample OID redirection rules."""
-    return [
-        ['1.3.6.1.4.1.8072.2.3.0.99', 'voice'],
-        ['1.3.6.1.4.1.9.9.117.2.0.1', 'data'],
-    ]
-
-
-@pytest.fixture
-def sample_redirected_destinations():
-    """Sample destination groups."""
-    return {
-        'security': [['10.10.10.1', 162], ['10.10.10.2', 162]],
-        'voice': [['10.20.20.1', 162]],
-        'data': [['10.30.30.1', 162], ['10.30.30.2', 162]],
-    }
+# Note: Most fixtures are now provided by conftest.py:
+# - temp_config_dir
+# - sample_destinations, sample_destinations_json
+# - sample_blocked_traps, sample_blocked_traps_set
+# - sample_blocked_ips, sample_blocked_ips_set
+# - sample_redirected_ips, sample_redirected_ips_dict
+# - sample_redirected_oids, sample_redirected_oids_dict
+# - sample_redirected_destinations, sample_redirected_destinations_tuples
+# - mock_config
 
 
 # =============================================================================
@@ -426,17 +368,28 @@ class TestCheckForRedirection:
 class TestConfigFileLoading:
     """Test configuration file loading behavior."""
     
-    def test_destinations_loaded_as_list(self, temp_config_dir, sample_destinations):
-        """Destinations are loaded as list of tuples."""
+    def test_destinations_loaded_as_list(self, temp_config_dir):
+        """Destinations are loaded as list from JSON."""
+        # Create test data - JSON always stores as lists, not tuples
+        test_destinations = [
+            ['192.168.1.100', 162],
+            ['192.168.1.101', 162],
+        ]
+        
         dest_file = os.path.join(temp_config_dir, 'destinations.json')
         with open(dest_file, 'w') as f:
-            json.dump(sample_destinations, f)
+            json.dump(test_destinations, f)
         
         from trapninja.config import safe_load_json
         
         loaded = safe_load_json(dest_file, [])
         
-        assert loaded == sample_destinations
+        # Verify we got the same data back
+        assert len(loaded) == 2
+        assert loaded[0][0] == '192.168.1.100'
+        assert loaded[0][1] == 162
+        assert loaded[1][0] == '192.168.1.101'
+        assert loaded[1][1] == 162
     
     def test_blocked_traps_loaded_as_list(self, temp_config_dir, sample_blocked_traps):
         """Blocked traps are loaded as list (converted to set)."""
@@ -524,25 +477,34 @@ class TestMtimeBasedReload:
         # Restore original state
         redirection.redirected_ips_mtime = original_mtime
     
-    def test_config_change_triggers_reload(self, temp_config_dir, sample_redirected_ips):
+    def test_config_change_triggers_reload(self, temp_config_dir):
         """File modification triggers config reload."""
         from trapninja import redirection
+        
+        # Start with minimal data set - don't rely on fixtures
+        initial_data = [
+            ['192.168.1.1', 'tag1'],
+            ['192.168.1.2', 'tag2'],
+        ]
         
         # Create config file
         ip_file = os.path.join(temp_config_dir, 'redirected_ips.json')
         with open(ip_file, 'w') as f:
-            json.dump(sample_redirected_ips, f)
+            json.dump(initial_data, f)
         
         # Patch get_config_path
         with patch.object(redirection, 'get_config_path', return_value=ip_file):
+            # Clear any existing state
+            redirection.redirected_ips = defaultdict(str)
             redirection.redirected_ips_mtime = 0
             redirection.load_redirected_ips()
             
             loaded_count_1 = len(redirection.redirected_ips)
+            assert loaded_count_1 == 2, f"Expected 2 entries, got {loaded_count_1}"
             
-            # Wait and modify file
+            # Wait and modify file with more entries
             time.sleep(0.1)
-            new_data = sample_redirected_ips + [['192.168.30.50', 'new_tag']]
+            new_data = initial_data + [['192.168.1.3', 'tag3'], ['192.168.1.4', 'tag4']]
             with open(ip_file, 'w') as f:
                 json.dump(new_data, f)
             
@@ -551,6 +513,7 @@ class TestMtimeBasedReload:
             redirection.load_redirected_ips()
             
             loaded_count_2 = len(redirection.redirected_ips)
+            assert loaded_count_2 == 4, f"Expected 4 entries, got {loaded_count_2}"
         
         # Should have loaded more entries
         assert loaded_count_2 > loaded_count_1
@@ -659,7 +622,6 @@ class TestFilterChainOrder:
         worker = PacketWorker(0, pq, stop)
         
         # Build SNMPv2c packet with blocked OID
-        from test_impl_trap_lifecycle import build_snmpv2c_trap
         payload = build_snmpv2c_trap(trap_oid='1.3.6.1.4.1.9999.1')
         
         with patch.object(_config_cache, 'get', return_value=config), \
@@ -710,8 +672,7 @@ class TestFilterChainOrder:
         stop = threading.Event()
         worker = PacketWorker(0, pq, stop)
         
-        # Build packet with blocked OID
-        from test_impl_trap_lifecycle import build_snmpv2c_trap
+        # Build packet with blocked OID (build_snmpv2c_trap from conftest)
         payload = build_snmpv2c_trap(trap_oid='1.3.6.1.4.1.9999.1')
         
         with patch.object(_config_cache, 'get', return_value=config), \

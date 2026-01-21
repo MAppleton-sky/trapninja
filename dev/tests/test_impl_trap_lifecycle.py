@@ -33,202 +33,23 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 from typing import Dict, List, Any
 
-# Add src directory to path
-TEST_DIR = Path(__file__).parent
-PROJECT_ROOT = TEST_DIR.parent.parent
-SRC_DIR = PROJECT_ROOT / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+# Shared fixtures and utilities are automatically available from conftest.py
+# Actual implementations live in fixtures/ directory
+
+# Import packet builders and sample data for direct use in tests
+from fixtures import (
+    build_snmpv2c_trap,
+    build_snmpv1_trap,
+    build_snmpv3_packet,
+    SampleOIDs,
+    SampleIPs,
+    create_config,
+    create_packet_data,
+)
 
 
 # =============================================================================
-# TEST PACKET BUILDERS
-# =============================================================================
-
-def _encode_oid_component(num: int) -> bytes:
-    """
-    Encode a single OID component using ASN.1 BER encoding.
-    
-    Each component is encoded as a sequence of 7-bit values with
-    continuation bits. The high bit (0x80) is set on all bytes
-    EXCEPT the last one.
-    
-    Example: 8072 -> [0xBF, 0x08]
-    - 8072 = 63 * 128 + 8
-    - First byte: 63 | 0x80 = 0xBF (continuation bit set)
-    - Last byte: 8 = 0x08 (no continuation bit)
-    """
-    if num == 0:
-        return bytes([0])
-    
-    # Build 7-bit groups from LSB to MSB
-    octets = []
-    while num:
-        octets.append(num & 0x7F)
-        num >>= 7
-    
-    # Set continuation bit on all bytes EXCEPT the LSB (first in list)
-    # After reversing, LSB becomes last byte (which should have no continuation bit)
-    for i in range(1, len(octets)):
-        octets[i] |= 0x80
-    
-    # Reverse to get MSB first
-    return bytes(reversed(octets))
-
-
-def build_snmpv2c_trap(
-    community: str = "public",
-    trap_oid: str = "1.3.6.1.4.1.8072.2.3.0.1",
-    request_id: int = 1
-) -> bytes:
-    """
-    Build a valid SNMPv2c trap packet.
-    
-    Structure:
-    - SEQUENCE (outer)
-      - INTEGER version (1 = v2c)
-      - OCTET STRING community
-      - SNMPv2-Trap PDU (0xA7)
-        - INTEGER request-id
-        - INTEGER error-status (0)
-        - INTEGER error-index (0)
-        - SEQUENCE varbindlist
-          - SEQUENCE varbind (sysUpTime)
-          - SEQUENCE varbind (snmpTrapOID)
-    """
-    # Encode trap OID using correct ASN.1 BER encoding
-    oid_parts = [int(p) for p in trap_oid.split('.')]
-    # First two components encode as: first * 40 + second
-    oid_bytes = bytearray([oid_parts[0] * 40 + oid_parts[1]])
-    # Remaining components use 7-bit encoding with continuation bits
-    for num in oid_parts[2:]:
-        oid_bytes.extend(_encode_oid_component(num))
-    
-    # snmpTrapOID.0 = 1.3.6.1.6.3.1.1.4.1.0
-    snmptrapoid_marker = bytes([0x2b, 0x06, 0x01, 0x06, 0x03, 0x01, 0x01, 0x04, 0x01, 0x00])
-    
-    # Build varbind for snmpTrapOID
-    varbind_oid = bytes([
-        0x30, len(snmptrapoid_marker) + 2 + len(oid_bytes) + 2,  # SEQUENCE
-        0x06, len(snmptrapoid_marker),  # OID tag + length
-    ]) + snmptrapoid_marker + bytes([
-        0x06, len(oid_bytes)  # OID value tag + length
-    ]) + bytes(oid_bytes)
-    
-    # Build varbind for sysUpTime (dummy)
-    sysuptime_oid = bytes([0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x03, 0x00])  # 1.3.6.1.2.1.1.3.0
-    varbind_uptime = bytes([
-        0x30, len(sysuptime_oid) + 2 + 4 + 2,  # SEQUENCE
-        0x06, len(sysuptime_oid),  # OID tag + length
-    ]) + sysuptime_oid + bytes([
-        0x43, 0x04, 0x00, 0x00, 0x00, 0x01  # TimeTicks value
-    ])
-    
-    # Varbind list
-    varbindlist = bytes([0x30, len(varbind_uptime) + len(varbind_oid)]) + varbind_uptime + varbind_oid
-    
-    # PDU content
-    pdu_content = bytes([
-        0x02, 0x04,  # INTEGER request-id
-    ]) + struct.pack('>I', request_id) + bytes([
-        0x02, 0x01, 0x00,  # error-status = 0
-        0x02, 0x01, 0x00,  # error-index = 0
-    ]) + varbindlist
-    
-    # SNMPv2-Trap PDU
-    pdu = bytes([0xa7, len(pdu_content)]) + pdu_content
-    
-    # Community string
-    community_bytes = community.encode('ascii')
-    community_field = bytes([0x04, len(community_bytes)]) + community_bytes
-    
-    # Version
-    version_field = bytes([0x02, 0x01, 0x01])  # INTEGER 1 (v2c)
-    
-    # Full message
-    message_content = version_field + community_field + pdu
-    message = bytes([0x30, len(message_content)]) + message_content
-    
-    return message
-
-
-def build_snmpv1_trap(
-    community: str = "public",
-    enterprise: str = "1.3.6.1.4.1.9",
-    specific_trap: int = 1
-) -> bytes:
-    """Build a simple SNMPv1 trap packet."""
-    # Encode enterprise OID using the helper function
-    oid_parts = [int(p) for p in enterprise.split('.')]
-    oid_bytes = bytearray([oid_parts[0] * 40 + oid_parts[1]])
-    for num in oid_parts[2:]:
-        oid_bytes.extend(_encode_oid_component(num))
-    
-    # Build Trap-PDU (0xA4)
-    pdu_content = bytes([
-        0x06, len(oid_bytes)  # Enterprise OID
-    ]) + bytes(oid_bytes) + bytes([
-        0x40, 0x04, 0x0a, 0x00, 0x00, 0x01,  # Agent address (IpAddress)
-        0x02, 0x01, 0x06,  # Generic trap (enterprise-specific)
-        0x02, 0x01, specific_trap,  # Specific trap
-        0x43, 0x04, 0x00, 0x00, 0x00, 0x01,  # Timestamp
-        0x30, 0x00  # Empty varbind list
-    ])
-    
-    pdu = bytes([0xa4, len(pdu_content)]) + pdu_content
-    
-    # Community
-    community_bytes = community.encode('ascii')
-    community_field = bytes([0x04, len(community_bytes)]) + community_bytes
-    
-    # Version 0 (v1)
-    version_field = bytes([0x02, 0x01, 0x00])
-    
-    # Full message
-    message_content = version_field + community_field + pdu
-    message = bytes([0x30, len(message_content)]) + message_content
-    
-    return message
-
-
-def build_snmpv3_packet() -> bytes:
-    """
-    Build a minimal SNMPv3 packet structure.
-    
-    SNMPv3 structure:
-    - SEQUENCE
-      - INTEGER version (3)
-      - SEQUENCE msgGlobalData
-      - OCTET STRING msgSecurityParameters
-      - SEQUENCE msgData
-    """
-    # msgGlobalData (simplified)
-    msg_global = bytes([
-        0x30, 0x0e,  # SEQUENCE
-        0x02, 0x04, 0x00, 0x00, 0x00, 0x01,  # msgID
-        0x02, 0x03, 0x00, 0xff, 0xe3,  # msgMaxSize
-        0x04, 0x01, 0x04,  # msgFlags (reportable, auth, priv)
-        0x02, 0x01, 0x03  # msgSecurityModel (USM)
-    ])
-    
-    # msgSecurityParameters (placeholder)
-    msg_security = bytes([0x04, 0x10]) + bytes(16)  # OCTET STRING with dummy data
-    
-    # msgData (placeholder encrypted data)
-    msg_data = bytes([0x30, 0x10]) + bytes(16)  # SEQUENCE with dummy data
-    
-    # Version
-    version_field = bytes([0x02, 0x01, 0x03])  # INTEGER 3 (v3)
-    
-    # Full message
-    message_content = version_field + msg_global + msg_security + msg_data
-    message = bytes([0x30, len(message_content)]) + message_content
-    
-    return message
-
-
-# =============================================================================
-# FIXTURES
+# FIXTURES (supplement conftest.py with test-specific fixtures)
 # =============================================================================
 
 @pytest.fixture
@@ -244,27 +65,10 @@ def stop_event():
 
 
 @pytest.fixture
-def mock_config():
-    """Create mock configuration."""
-    return {
-        'destinations': [('192.168.1.100', 162), ('192.168.1.101', 162)],
-        'blocked_traps': {'1.3.6.1.4.1.9999.1', '1.3.6.1.4.1.9999.2'},
-        'blocked_dest': [],
-        'blocked_ips': {'10.0.0.99', '10.0.0.100'},
-        'redirected_ips': {'192.168.10.50': 'security'},
-        'redirected_oids': {'1.3.6.1.4.1.8072.2.3.0.99': 'voice'},
-        'redirected_destinations': {
-            'security': [('10.10.10.1', 162)],
-            'voice': [('10.10.10.2', 162)]
-        }
-    }
-
-
-@pytest.fixture
 def sample_packet_data():
     """Create sample packet data."""
     return {
-        'src_ip': '192.168.1.50',
+        'src_ip': SampleIPs.NORMAL_1,
         'dst_port': 162,
         'payload': build_snmpv2c_trap()
     }

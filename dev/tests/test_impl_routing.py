@@ -30,139 +30,23 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch, call, PropertyMock
 from typing import Dict, List, Any, Tuple
 
-# Add src directory to path
-TEST_DIR = Path(__file__).parent
-PROJECT_ROOT = TEST_DIR.parent.parent
-SRC_DIR = PROJECT_ROOT / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+# Shared fixtures and utilities from fixtures/ directory
+from fixtures import (
+    build_snmpv2c_trap,
+    SampleOIDs,
+    SampleIPs,
+    create_config,
+)
 
 
-# =============================================================================
-# TEST PACKET BUILDER (from Phase 10A)
-# =============================================================================
-
-def _encode_oid_component(num: int) -> bytes:
-    """Encode a single OID component using ASN.1 BER encoding."""
-    if num == 0:
-        return bytes([0])
-    
-    octets = []
-    while num:
-        octets.append(num & 0x7F)
-        num >>= 7
-    
-    for i in range(1, len(octets)):
-        octets[i] |= 0x80
-    
-    return bytes(reversed(octets))
+# Note: Most fixtures are now provided by conftest.py:
+# - sample_payload (alias for sample_snmpv2c_payload)
+# - single_destination
+# - multi_destinations
+# - destination_groups / sample_redirected_destinations_tuples
+# - mock_config
 
 
-def build_snmpv2c_trap(
-    community: str = "public",
-    trap_oid: str = "1.3.6.1.4.1.8072.2.3.0.1",
-    request_id: int = 1
-) -> bytes:
-    """Build a valid SNMPv2c trap packet."""
-    oid_parts = [int(p) for p in trap_oid.split('.')]
-    oid_bytes = bytearray([oid_parts[0] * 40 + oid_parts[1]])
-    for num in oid_parts[2:]:
-        oid_bytes.extend(_encode_oid_component(num))
-    
-    snmptrapoid_marker = bytes([0x2b, 0x06, 0x01, 0x06, 0x03, 0x01, 0x01, 0x04, 0x01, 0x00])
-    
-    varbind_oid = bytes([
-        0x30, len(snmptrapoid_marker) + 2 + len(oid_bytes) + 2,
-        0x06, len(snmptrapoid_marker),
-    ]) + snmptrapoid_marker + bytes([
-        0x06, len(oid_bytes)
-    ]) + bytes(oid_bytes)
-    
-    sysuptime_oid = bytes([0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x03, 0x00])
-    varbind_uptime = bytes([
-        0x30, len(sysuptime_oid) + 2 + 4 + 2,
-        0x06, len(sysuptime_oid),
-    ]) + sysuptime_oid + bytes([
-        0x43, 0x04, 0x00, 0x00, 0x00, 0x01
-    ])
-    
-    varbindlist = bytes([0x30, len(varbind_uptime) + len(varbind_oid)]) + varbind_uptime + varbind_oid
-    
-    pdu_content = bytes([
-        0x02, 0x04,
-    ]) + struct.pack('>I', request_id) + bytes([
-        0x02, 0x01, 0x00,
-        0x02, 0x01, 0x00,
-    ]) + varbindlist
-    
-    pdu = bytes([0xa7, len(pdu_content)]) + pdu_content
-    
-    community_bytes = community.encode('ascii')
-    community_field = bytes([0x04, len(community_bytes)]) + community_bytes
-    
-    version_field = bytes([0x02, 0x01, 0x01])
-    
-    message_content = version_field + community_field + pdu
-    message = bytes([0x30, len(message_content)]) + message_content
-    
-    return message
-
-
-# =============================================================================
-# FIXTURES
-# =============================================================================
-
-@pytest.fixture
-def sample_payload():
-    """Create a sample SNMP trap payload."""
-    return build_snmpv2c_trap()
-
-
-@pytest.fixture
-def single_destination():
-    """Single destination for basic tests."""
-    return [('192.168.1.100', 162)]
-
-
-@pytest.fixture
-def multi_destinations():
-    """Multiple destinations for fan-out tests."""
-    return [
-        ('192.168.1.100', 162),
-        ('192.168.1.101', 162),
-        ('192.168.1.102', 162),
-        ('10.0.0.50', 162),
-    ]
-
-
-@pytest.fixture
-def destination_groups():
-    """Redirected destination groups."""
-    return {
-        'voice': [('10.10.10.1', 162), ('10.10.10.2', 162)],
-        'data': [('10.20.20.1', 162)],
-        'security': [('10.30.30.1', 162), ('10.30.30.2', 162), ('10.30.30.3', 162)],
-        'blocked_archive': [('10.99.99.1', 1162)],
-    }
-
-
-@pytest.fixture
-def mock_config(multi_destinations, destination_groups):
-    """Complete mock configuration."""
-    return {
-        'destinations': multi_destinations,
-        'blocked_traps': {'1.3.6.1.4.1.9999.1'},
-        'blocked_dest': [('10.99.99.1', 1162)],
-        'blocked_ips': {'10.0.0.99'},
-        'redirected_ips': {
-            '192.168.10.50': 'voice',
-            '192.168.20.50': 'data',
-        },
-        'redirected_oids': {
-            '1.3.6.1.4.1.8072.2.3.0.99': 'security',
-        },
-        'redirected_destinations': destination_groups,
-    }
 
 
 # =============================================================================
@@ -270,9 +154,10 @@ class TestDestinationGroups:
     
     def test_redirected_destinations_have_multiple_targets(self, destination_groups):
         """Redirected groups can have multiple targets."""
-        assert len(destination_groups['voice']) == 2
-        assert len(destination_groups['security']) == 3
-        assert len(destination_groups['data']) == 1
+        # security has 2 destinations, voice has 1, data has 2
+        assert len(destination_groups['security']) == 2
+        assert len(destination_groups['voice']) == 1
+        assert len(destination_groups['data']) == 2
     
     def test_ip_redirection_uses_correct_group(self, sample_payload, mock_config):
         """IP redirection forwards to correct destination group."""
@@ -296,7 +181,8 @@ class TestDestinationGroups:
              patch('trapninja.processing.worker.notify_trap_processed'):
             
             packet_data = {
-                'src_ip': '192.168.10.50',  # Redirected to 'voice'
+                # SampleIPs.REDIRECT_SECURITY_1 ('192.168.10.50') -> 'security' tag
+                'src_ip': SampleIPs.REDIRECT_SECURITY_1,
                 'dst_port': 162,
                 'payload': sample_payload
             }
@@ -304,7 +190,7 @@ class TestDestinationGroups:
             worker._process_packet(packet_data)
             
             assert len(forwarded_to) == 1
-            assert forwarded_to[0] == mock_config['redirected_destinations']['voice']
+            assert forwarded_to[0] == mock_config['redirected_destinations']['security']
     
     def test_oid_redirection_uses_correct_group(self, mock_config):
         """OID redirection forwards to correct destination group."""
@@ -322,8 +208,8 @@ class TestDestinationGroups:
         def capture_forward(src_ip, payload, destinations):
             forwarded_to.append(destinations)
         
-        # Build trap with OID that gets redirected to 'security'
-        payload = build_snmpv2c_trap(trap_oid='1.3.6.1.4.1.8072.2.3.0.99')
+        # SampleOIDs.REDIRECT_VOICE -> 'voice' tag
+        payload = build_snmpv2c_trap(trap_oid=SampleOIDs.REDIRECT_VOICE)
         
         with patch.object(_config_cache, 'get', return_value=mock_config), \
              patch('trapninja.processing.worker.forward_packet', side_effect=capture_forward), \
@@ -331,7 +217,7 @@ class TestDestinationGroups:
              patch('trapninja.processing.worker.notify_trap_processed'):
             
             packet_data = {
-                'src_ip': '192.168.1.50',  # Not IP-redirected
+                'src_ip': SampleIPs.NORMAL_1,  # Not IP-redirected
                 'dst_port': 162,
                 'payload': payload
             }
@@ -339,7 +225,7 @@ class TestDestinationGroups:
             worker._process_packet(packet_data)
             
             assert len(forwarded_to) == 1
-            assert forwarded_to[0] == mock_config['redirected_destinations']['security']
+            assert forwarded_to[0] == mock_config['redirected_destinations']['voice']
     
     def test_normal_traffic_uses_default_destinations(self, sample_payload, mock_config):
         """Non-redirected traffic goes to default destinations."""
@@ -929,8 +815,8 @@ class TestRoutingPriority:
             forwarded_to.append(destinations)
         
         # Build trap with OID that would redirect to 'security'
-        # But source IP redirects to 'voice'
-        payload = build_snmpv2c_trap(trap_oid='1.3.6.1.4.1.8072.2.3.0.99')
+        # But source IP redirects to 'voice' - IP should win
+        payload = build_snmpv2c_trap(trap_oid=SampleOIDs.REDIRECT_SECURITY)
         
         with patch.object(_config_cache, 'get', return_value=mock_config), \
              patch('trapninja.processing.worker.forward_packet', side_effect=capture_forward), \
@@ -938,14 +824,15 @@ class TestRoutingPriority:
              patch('trapninja.processing.worker.notify_trap_processed'):
             
             packet_data = {
-                'src_ip': '192.168.10.50',  # Redirects to 'voice'
+                # SampleIPs.REDIRECT_VOICE ('192.168.20.50') -> 'voice' tag
+                'src_ip': SampleIPs.REDIRECT_VOICE,
                 'dst_port': 162,
                 'payload': payload  # OID would redirect to 'security'
             }
             
             worker._process_packet(packet_data)
             
-            # Should go to 'voice', not 'security'
+            # Should go to 'voice' (IP redirect), not 'security' (OID redirect)
             assert len(forwarded_to) == 1
             assert forwarded_to[0] == mock_config['redirected_destinations']['voice']
     
@@ -965,8 +852,8 @@ class TestRoutingPriority:
         def capture_forward(src_ip, payload, destinations):
             forwarded_to.append(destinations)
         
-        # Build trap with OID that redirects
-        payload = build_snmpv2c_trap(trap_oid='1.3.6.1.4.1.8072.2.3.0.99')
+        # Build trap with OID that redirects to 'voice'
+        payload = build_snmpv2c_trap(trap_oid=SampleOIDs.REDIRECT_VOICE)
         
         with patch.object(_config_cache, 'get', return_value=mock_config), \
              patch('trapninja.processing.worker.forward_packet', side_effect=capture_forward), \
@@ -974,16 +861,16 @@ class TestRoutingPriority:
              patch('trapninja.processing.worker.notify_trap_processed'):
             
             packet_data = {
-                'src_ip': '192.168.1.50',  # Not IP-redirected
+                'src_ip': SampleIPs.NORMAL_1,  # Not IP-redirected
                 'dst_port': 162,
                 'payload': payload
             }
             
             worker._process_packet(packet_data)
             
-            # Should go to 'security', not default
+            # Should go to 'voice', not default
             assert len(forwarded_to) == 1
-            assert forwarded_to[0] == mock_config['redirected_destinations']['security']
+            assert forwarded_to[0] == mock_config['redirected_destinations']['voice']
             assert forwarded_to[0] != mock_config['destinations']
 
 

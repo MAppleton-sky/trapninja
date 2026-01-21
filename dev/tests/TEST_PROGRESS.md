@@ -120,6 +120,67 @@ pytest dev/tests/ --cov=src/trapninja --cov-report=html
 pytest dev/tests/ -n auto
 ```
 
+## Shared Test Utilities
+
+Test utilities are organized in the `fixtures/` directory:
+
+```
+dev/tests/
+├── conftest.py              # pytest fixture registration (auto-discovered)
+├── fixtures/
+│   ├── __init__.py          # Package exports
+│   ├── packets.py           # SNMP packet builders
+│   ├── sample_data.py       # SampleOIDs, SampleIPs classes
+│   └── configs.py           # Configuration helpers and generators
+└── test_*.py
+```
+
+### fixtures/packets.py - Packet Builders
+- `encode_oid_component(num)` - ASN.1 BER encode single OID component
+- `encode_oid(oid_string)` - Encode complete OID string
+- `build_snmpv2c_trap(community, trap_oid, request_id, uptime)` - Build SNMPv2c trap
+- `build_snmpv1_trap(community, enterprise_oid, generic_trap, specific_trap, agent_addr)` - Build SNMPv1 trap
+- `build_snmpv3_packet(msg_id, msg_max_size, msg_flags, security_model)` - Build SNMPv3 packet
+- `build_invalid_snmp_packet()` - Build malformed packet
+- `build_non_snmp_packet()` - Build non-SNMP data
+
+### fixtures/sample_data.py - Sample Data Classes
+- `SampleOIDs` - Common OIDs:
+  - Standard: `COLD_START`, `WARM_START`, `LINK_DOWN`, `LINK_UP`, `AUTH_FAILURE`
+  - Vendor: `NET_SNMP_TEST`, `CISCO_SYSLOG`, `NOKIA_ALARM`
+  - Test: `BLOCKED_1-3`, `REDIRECT_VOICE`, `REDIRECT_DATA`, `REDIRECT_SECURITY`
+- `SampleIPs` - Common IPs:
+  - Normal: `NORMAL_1-3`
+  - Blocked: `BLOCKED_1-3`
+  - Redirected: `REDIRECT_SECURITY_1-2`, `REDIRECT_VOICE`, `REDIRECT_DATA`
+  - Destinations: `DEST_PRIMARY`, `DEST_SECONDARY`, `DEST_SECURITY_1-2`, etc.
+
+### fixtures/configs.py - Configuration Helpers
+- `create_packet_data(src_ip, payload, dst_port)` - Build packet data dict
+- `create_config(...)` - Build configuration dict with defaults
+- Generators: `get_sample_destinations()`, `get_mock_config()`, etc.
+
+### conftest.py - Pytest Fixtures
+Registers pytest fixtures that wrap the fixtures module utilities.
+Fixtures are auto-discovered by pytest - no import needed in tests.
+
+Available fixtures:
+- **Configs**: `sample_destinations`, `mock_config`, `minimal_config`, `empty_config`
+- **Packets**: `sample_payload`, `blocked_oid_payload`, `sample_snmpv1_payload`
+- **Packet Data**: `normal_packet_data`, `blocked_ip_packet_data`, `redirect_ip_packet_data`
+- **Utilities**: `temp_config_dir`, `worker_queue`, `mock_socket`
+
+### Usage in Tests
+```python
+# Import for direct use (packet builders, classes)
+from fixtures import build_snmpv2c_trap, SampleOIDs, SampleIPs
+
+# Fixtures are auto-injected by pytest
+def test_something(mock_config, sample_payload):
+    # mock_config and sample_payload are automatically provided
+    pass
+```
+
 ## Session History
 
 | Date | Session | Modules Completed | Notes |
@@ -146,6 +207,8 @@ pytest dev/tests/ -n auto
 | 2026-01-20 | 9 | impl_trap_lifecycle | Phase 10A started - ~50 tests |
 | 2026-01-21 | 10 | impl_routing | Phase 10B complete - ~45 tests |
 | 2026-01-21 | 10 | impl_filters | Phase 10C complete - ~50 tests |
+| 2026-01-21 | 10 | conftest.py | Created shared fixtures/utilities, refactored test files |
+| 2026-01-21 | 10 | fixtures/ | Restructured: packets.py, sample_data.py, configs.py |
 
 ---
 
