@@ -210,6 +210,8 @@ def test_something(mock_config, sample_payload):
 | 2026-01-21 | 10 | conftest.py | Created shared fixtures/utilities, refactored test files |
 | 2026-01-21 | 10 | fixtures/ | Restructured: packets.py, sample_data.py, configs.py |
 | 2026-01-21 | 10 | impl_snmpv3 | Phase 10D complete - ~55 tests |
+| 2026-01-21 | 11 | impl_stats_forwarding | Phase 11A complete - ~55 tests |
+| 2026-01-21 | 11 | impl_ha_cache | Phase 11B complete - ~50 tests |
 
 ---
 
@@ -229,8 +231,9 @@ def test_something(mock_config, sample_payload):
 | Phase 9: Integration | ~90 tests | ✅ Complete |
 
 | Phase 10: Implementation | ~200 tests | ✅ Complete |
+| Phase 11: Cross-Component | ~105 tests | 🔄 In Progress |
 
-**Current total: ~1,610 tests across 41 modules (Phases 1-10 complete)**
+**Current total: ~1,715 tests across 43 modules (Phases 1-10 complete, 11A-B complete)**
 
 ---
 
@@ -311,10 +314,40 @@ def test_something(mock_config, sample_payload):
 
 | Test Area | Status | Test File | Notes |
 |-----------|--------|-----------|-------|
-| 11A: Stats + Forwarding | ⏳ Pending | `test_impl_stats_forwarding.py` | Stats accuracy during forwarding |
-| 11B: HA + Cache Coordination | ⏳ Pending | `test_impl_ha_cache.py` | Cache on secondary, replay on failover |
+| 11A: Stats + Forwarding | ✅ Complete | `test_impl_stats_forwarding.py` | Stats accuracy during forwarding |
+| 11B: HA + Cache Coordination | ✅ Complete | `test_impl_ha_cache.py` | Cache on secondary, replay on failover |
 | 11C: Config + Runtime Behavior | ⏳ Pending | `test_impl_config_runtime.py` | Hot reload effects |
 | 11D: Metrics Consistency | ⏳ Pending | `test_impl_metrics_consistency.py` | Metrics match actual behavior |
+
+### test_impl_stats_forwarding.py (~55 tests)
+- `TestProcessingStatsAccuracy` - Counter increments, fast/slow path ratio, rate calculation
+- `TestStatsCollectorThreadLocal` - Local accumulation, flush interval, manual flush
+- `TestGlobalStatsManagement` - Singleton instance, reset functionality
+- `TestMultiThreadStatsConsistency` - Concurrent increments, multiple collectors
+- `TestRateTrackerAccuracy` - Time-bucketed counting, rate calculation, peak tracking
+- `TestWorkerStatsIntegration` - Worker updates stats on process/forward/block/redirect
+- `TestGranularStatsCollection` - Per-IP/OID stats, LRU eviction
+- `TestStatsSummaryAndLogging` - Summary interval, computed values
+- `TestStatsDuringBatchProcessing` - Accuracy after batch processing
+- `TestDestinationStats` - Per-destination tracking
+- `TestStatsSnapshot` - Point-in-time capture
+
+### test_impl_ha_cache.py (~50 tests)
+- `TestFailoverReplayConfig` - Config defaults, from_dict, to_dict
+- `TestFailoverTracker` - Timestamp tracking, per-destination storage
+- `TestGapDetector` - Gap detection, min_gap threshold, GapInfo structure
+- `TestFailoverReplayManager` - Manager init, disabled behavior, delegation
+- `TestCacheOnSecondary` - Secondary stores traps, shared cache access
+- `TestReplayOnFailover` - Rate limiting, time range replay
+- `TestHAStateTransitionCacheOps` - State transition cache behavior
+- `TestGapDetectionScenarios` - Fresh start, small/large gaps, multi-destination
+- `TestReplayStatusTracking` - Status structure, duration, serialization
+- `TestHAClusterCacheIntegration` - Cluster init, forwarding enable/disable
+- `TestTrapPreservationDuringFailover` - Timestamp storage, time range retrieval
+- `TestFailoverTiming` - Replay delay, buffer, max gap
+- `TestBackgroundReplay` - Background/foreground config
+- `TestReplayCompletionCallback` - Completion callback acceptance
+- `TestCacheRetentionDuringHA` - Retention manager, defaults
 
 ## Phase 12: Stress & Edge Case Scenarios
 
@@ -329,13 +362,11 @@ def test_something(mock_config, sample_payload):
 ## Next Session Action Items
 
 When resuming, start with:
-1. Run Phase 10 tests: `pytest dev/tests/test_impl_*.py -v`
+1. Run Phase 11 tests: `pytest dev/tests/test_impl_stats_forwarding.py dev/tests/test_impl_ha_cache.py -v`
 2. Fix any failing tests
-3. Continue with Phase 11: Cross-Component Behavioral Tests
+3. Continue with Phase 11C: Config + Runtime Behavior
 
-**Phase 11 options:**
-- 11A: Stats + Forwarding - Stats accuracy during forwarding
-- 11B: HA + Cache Coordination - Cache on secondary, replay on failover
+**Phase 11 remaining:**
 - 11C: Config + Runtime Behavior - Hot reload effects
 - 11D: Metrics Consistency - Metrics match actual behavior
 
