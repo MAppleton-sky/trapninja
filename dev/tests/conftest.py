@@ -263,16 +263,16 @@ def redirect_oid_packet_data(redirect_voice_oid_payload):
 
 @pytest.fixture
 def temp_config_dir():
-    """Create a temporary config directory."""
+    """Create a temporary config directory (yields Path object)."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        yield tmpdir
+        yield Path(tmpdir)
 
 
 @pytest.fixture
 def temp_log_dir():
-    """Create a temporary log directory."""
+    """Create a temporary log directory (yields Path object)."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        yield tmpdir
+        yield Path(tmpdir)
 
 
 # =============================================================================
@@ -306,3 +306,71 @@ def mock_socket_pool(mock_socket):
     pool.is_raw_available = True
     pool.acquire.return_value = mock_socket
     return pool
+
+
+# =============================================================================
+# CONFIG STATE ISOLATION
+# =============================================================================
+
+@pytest.fixture(autouse=True)
+def isolate_config_state():
+    """
+    Automatically isolate config module state between tests.
+    
+    This fixture runs before and after EVERY test to ensure that
+    module-level globals in trapninja.config don't leak between tests.
+    """
+    from trapninja import config
+    from collections import defaultdict
+    
+    # Save original state
+    original_destinations = list(config.destinations)
+    original_blocked_traps = set(config.blocked_traps)
+    original_blocked_ips = set(config.blocked_ips)
+    original_blocked_dest = list(config.blocked_dest)
+    original_redirected_ips = dict(config.redirected_ips)
+    original_redirected_oids = dict(config.redirected_oids)
+    original_redirected_destinations = {k: list(v) for k, v in config.redirected_destinations.items()}
+    
+    # Save mtime tracking variables
+    original_dest_mtime = config.dest_mtime
+    original_blocked_mtime = config.blocked_mtime
+    original_ports_mtime = config.ports_mtime
+    original_blocked_ips_mtime = config.blocked_ips_mtime
+    original_redirected_ips_mtime = config.redirected_ips_mtime
+    original_redirected_oids_mtime = config.redirected_oids_mtime
+    original_redirected_destinations_mtime = config.redirected_destinations_mtime
+    
+    yield  # Test runs here
+    
+    # Restore original state
+    config.destinations.clear()
+    config.destinations.extend(original_destinations)
+    
+    config.blocked_traps.clear()
+    config.blocked_traps.update(original_blocked_traps)
+    
+    config.blocked_ips.clear()
+    config.blocked_ips.update(original_blocked_ips)
+    
+    config.blocked_dest.clear()
+    config.blocked_dest.extend(original_blocked_dest)
+    
+    config.redirected_ips.clear()
+    config.redirected_ips.update(original_redirected_ips)
+    
+    config.redirected_oids.clear()
+    config.redirected_oids.update(original_redirected_oids)
+    
+    config.redirected_destinations.clear()
+    for k, v in original_redirected_destinations.items():
+        config.redirected_destinations[k] = list(v)
+    
+    # Restore mtime tracking
+    config.dest_mtime = original_dest_mtime
+    config.blocked_mtime = original_blocked_mtime
+    config.ports_mtime = original_ports_mtime
+    config.blocked_ips_mtime = original_blocked_ips_mtime
+    config.redirected_ips_mtime = original_redirected_ips_mtime
+    config.redirected_oids_mtime = original_redirected_oids_mtime
+    config.redirected_destinations_mtime = original_redirected_destinations_mtime

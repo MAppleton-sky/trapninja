@@ -1,7 +1,7 @@
 # TrapNinja Documentation Index
 
-**Last Updated**: 2025-01-09  
-**TrapNinja Version**: 0.7.14 (Beta)
+**Last Updated**: 2025-01-22  
+**TrapNinja Version**: 0.7.15 (Beta)
 
 This index provides an overview of all documentation files and their purposes.
 
@@ -31,6 +31,12 @@ This index provides an overview of all documentation files and their purposes.
 | **FAILOVER_REPLAY.md** | Automatic gap replay | ✅ Current | 2025-01-09 |
 | **CONFIG_SYNC.md** | HA configuration synchronization | ✅ Current | 2025-01-09 |
 | **FRAGMENTATION.md** | Packet fragmentation handling | 📝 Needs Review | - |
+
+### Security Documentation
+
+| Document | Purpose | Status | Last Updated |
+|----------|---------|--------|--------------|
+| **SECURITY.md** | Security measures and CWE remediation | ✅ Current | 2025-01-22 |
 
 ### Operational Documentation
 

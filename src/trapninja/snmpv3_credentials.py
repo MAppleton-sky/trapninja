@@ -6,10 +6,15 @@ Manages SNMPv3 user credentials with encrypted storage.
 Uses Engine ID as the encryption key for credential protection.
 
 Security Features:
-- Encrypted storage using Fernet (AES-128-CBC)
-- PBKDF2 key derivation with 100,000 iterations
+- Encrypted storage using Fernet (AES-128-CBC with HMAC-SHA256)
+- PBKDF2 key derivation with 600,000 iterations (OWASP 2023 recommendation)
 - Restrictive file permissions (0o600)
 - Audit logging for all credential operations
+
+Security Notes (CWE-916):
+- PBKDF2 iteration count follows OWASP 2023 guidelines for PBKDF2-SHA256
+- Salt is derived deterministically from engine_id for consistent encryption
+- Consider Argon2id for future implementations where library support exists
 """
 import os
 import json
@@ -210,12 +215,14 @@ class SNMPv3CredentialStore:
         # This makes the encryption deterministic for a given engine ID
         salt = hashlib.sha256(password).digest()
         
-        # Derive key using PBKDF2
+        # Derive key using PBKDF2 with OWASP 2023 recommended iterations
+        # Security Note (CWE-916): 600,000 iterations for PBKDF2-SHA256
+        # per OWASP Password Storage Cheat Sheet (2023)
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
             salt=salt,
-            iterations=100000,
+            iterations=600000,  # OWASP 2023 recommendation
             backend=default_backend()
         )
         

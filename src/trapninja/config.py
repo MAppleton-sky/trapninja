@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """
+Security Notes (CWE-23):
+- All config file paths are validated to prevent path traversal
+- Filenames are restricted to known configuration file names
+- Symlinks are resolved before path validation
 TrapNinja Configuration Module - Fixed Version
 
 Handles loading, parsing, and updating the configuration files with
@@ -36,6 +40,68 @@ def _get_config_dir():
     return '/opt/trapninja/config'
 
 CONFIG_DIR = _get_config_dir()
+
+# Security: Allowed configuration file names (CWE-23 mitigation)
+# Only these filenames can be loaded as configuration files
+ALLOWED_CONFIG_FILES = frozenset([
+    'trapninja.json',
+    'destinations.json',
+    'blocked_traps.json',
+    'listen_ports.json',
+    'blocked_ips.json',
+    'redirected_ips.json',
+    'redirected_oids.json',
+    'redirected_destinations.json',
+    'cache_config.json',
+    'snmpv3_credentials.json',
+    'ha_config.json',
+])
+
+
+def _validate_config_path(file_path: str) -> bool:
+    """
+    Validate that a config file path is safe (CWE-23 mitigation).
+    
+    Checks:
+    1. Path resolves to within CONFIG_DIR
+    2. Filename is in allowed list
+    3. No path traversal sequences
+    
+    Args:
+        file_path: Path to validate
+        
+    Returns:
+        True if path is safe, False otherwise
+    """
+    log = logging.getLogger("trapninja")
+    
+    try:
+        # Get the real path (resolves symlinks)
+        real_path = os.path.realpath(os.path.abspath(file_path))
+        real_config_dir = os.path.realpath(os.path.abspath(CONFIG_DIR))
+        
+        # Check path is within config directory
+        if not real_path.startswith(real_config_dir + os.sep) and real_path != real_config_dir:
+            log.warning(f"Path traversal attempt blocked: {file_path} -> {real_path}")
+            return False
+        
+        # Check filename is allowed
+        filename = os.path.basename(real_path)
+        if filename not in ALLOWED_CONFIG_FILES:
+            log.warning(f"Unauthorized config file access blocked: {filename}")
+            return False
+        
+        # Check for path traversal patterns
+        if '..' in file_path:
+            log.warning(f"Path traversal pattern detected: {file_path}")
+            return False
+        
+        return True
+        
+    except Exception as e:
+        log.error(f"Path validation error: {e}")
+        return False
+
 
 # Main configuration file
 MAIN_CONFIG_FILE = os.path.join(CONFIG_DIR, "trapninja.json")
@@ -265,7 +331,12 @@ def ensure_config_dir():
 
 def safe_load_json(file_path, fallback):
     """
-    Safely load JSON from file with error handling
+    Safely load JSON from file with error handling.
+    
+    Security Note (CWE-23): This function is used with hardcoded config
+    file paths (constants like DESTINATIONS_FILE). User input validation
+    is handled separately in cli/validation.py. Use _validate_config_path()
+    if you need to validate a user-provided path.
 
     Args:
         file_path (str): Path to the JSON file

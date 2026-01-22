@@ -6,6 +6,13 @@ Handles decryption of SNMPv3 traps and conversion to SNMPv2c format.
 Integrates with the credential management system for authentication.
 
 Supports both pysnmp 4.x and 7.x API versions.
+
+Security Notes (CWE-327):
+- MD5 and SHA-1 usage is REQUIRED by RFC 3414 (SNMPv3 USM) for protocol
+  compatibility with network devices. These cannot be removed.
+- DES usage is REQUIRED by RFC 3414 for legacy device support.
+- Prefer SHA-256+ and AES-128+ when devices support them.
+- Security warnings are logged when legacy algorithms are used.
 """
 import logging
 import struct
@@ -284,9 +291,46 @@ def _parse_ber_length(data: bytes, idx: int) -> Tuple[int, int]:
         return data[idx], idx + 1
 
 
+# Security: Track which legacy algorithms have been warned about to avoid log spam
+_legacy_algorithm_warnings_issued = set()
+
+
+def _log_legacy_algorithm_warning(algorithm: str, context: str):
+    """
+    Log a warning about legacy algorithm usage (once per algorithm per session).
+    
+    These algorithms are required by RFC 3414 for SNMP protocol compatibility
+    but are cryptographically weak by modern standards.
+    """
+    warning_key = f"{algorithm}:{context}"
+    if warning_key not in _legacy_algorithm_warnings_issued:
+        _legacy_algorithm_warnings_issued.add(warning_key)
+        
+        if algorithm.upper() in ('MD5',):
+            logger.info(
+                f"SNMPv3 {context}: Using MD5 (RFC 3414 required). "
+                f"Consider SHA-256 where device supports it. [CWE-327 acknowledged]"
+            )
+        elif algorithm.upper() in ('SHA', 'SHA1'):
+            logger.info(
+                f"SNMPv3 {context}: Using SHA-1 (RFC 3414 default). "
+                f"Consider SHA-256 where device supports it. [CWE-327 acknowledged]"
+            )
+        elif algorithm.upper() in ('DES', '3DES'):
+            logger.info(
+                f"SNMPv3 {context}: Using {algorithm} (RFC 3414 required). "
+                f"Consider AES-128+ where device supports it. [CWE-327 acknowledged]"
+            )
+
+
 def _localize_key(passphrase: str, engine_id: bytes, auth_protocol: str) -> bytes:
     """
     Localize a passphrase to an engine-specific key using SNMPv3 key localization.
+    
+    Security Note (CWE-327):
+        MD5 and SHA-1 are used here as REQUIRED by RFC 3414 for SNMPv3 USM.
+        These cannot be replaced without breaking SNMP protocol compatibility.
+        Prefer SHA-256+ where device firmware supports it.
     
     Args:
         passphrase: User passphrase
@@ -297,8 +341,10 @@ def _localize_key(passphrase: str, engine_id: bytes, auth_protocol: str) -> byte
         Localized key bytes
     """
     # Select hash function based on auth protocol
+    # Note: MD5/SHA1 required by RFC 3414 for protocol compatibility
     if auth_protocol in ('MD5',):
         hash_func = hashlib.md5
+        _log_legacy_algorithm_warning('MD5', 'key localization')
     elif auth_protocol == 'SHA224':
         hash_func = hashlib.sha224
     elif auth_protocol == 'SHA256':
@@ -308,7 +354,8 @@ def _localize_key(passphrase: str, engine_id: bytes, auth_protocol: str) -> byte
     elif auth_protocol == 'SHA512':
         hash_func = hashlib.sha512
     else:
-        hash_func = hashlib.sha1  # Default SHA1
+        hash_func = hashlib.sha1  # Default SHA1 per RFC 3414
+        _log_legacy_algorithm_warning('SHA1', 'key localization')
     
     # Step 1: Generate Ku from passphrase (password to key)
     password = passphrase.encode('utf-8')
@@ -658,7 +705,8 @@ class SNMPv3Decryptor:
             priv_key = _localize_key(user.priv_passphrase, engine_id, auth_protocol)
             
             if priv_protocol in ('DES', '3DES'):
-                # DES decryption
+                # DES decryption - Security Note: DES is required by RFC 3414
+                _log_legacy_algorithm_warning(priv_protocol, 'encryption')
                 des_key = priv_key[:8]
                 pre_iv = priv_key[8:16]
                 iv = bytes(a ^ b for a, b in zip(pre_iv, priv_params[:8]))
