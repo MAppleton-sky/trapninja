@@ -212,6 +212,7 @@ def test_something(mock_config, sample_payload):
 | 2026-01-21 | 10 | impl_snmpv3 | Phase 10D complete - ~55 tests |
 | 2026-01-21 | 11 | impl_stats_forwarding | Phase 11A complete - ~55 tests |
 | 2026-01-21 | 11 | impl_ha_cache | Phase 11B complete - ~50 tests |
+| 2026-01-22 | 12 | impl_config_runtime | Phase 11C complete - ~55 tests |
 
 ---
 
@@ -231,9 +232,9 @@ def test_something(mock_config, sample_payload):
 | Phase 9: Integration | ~90 tests | ✅ Complete |
 
 | Phase 10: Implementation | ~200 tests | ✅ Complete |
-| Phase 11: Cross-Component | ~105 tests | 🔄 In Progress |
+| Phase 11: Cross-Component | ~160 tests | 🔄 In Progress |
 
-**Current total: ~1,715 tests across 43 modules (Phases 1-10 complete, 11A-B complete)**
+**Current total: ~1,770 tests across 44 modules (Phases 1-10 complete, 11A-C complete)**
 
 ---
 
@@ -316,7 +317,7 @@ def test_something(mock_config, sample_payload):
 |-----------|--------|-----------|-------|
 | 11A: Stats + Forwarding | ✅ Complete | `test_impl_stats_forwarding.py` | Stats accuracy during forwarding |
 | 11B: HA + Cache Coordination | ✅ Complete | `test_impl_ha_cache.py` | Cache on secondary, replay on failover |
-| 11C: Config + Runtime Behavior | ⏳ Pending | `test_impl_config_runtime.py` | Hot reload effects |
+| 11C: Config + Runtime Behavior | ✅ Complete | `test_impl_config_runtime.py` | Hot reload effects |
 | 11D: Metrics Consistency | ⏳ Pending | `test_impl_metrics_consistency.py` | Metrics match actual behavior |
 
 ### test_impl_stats_forwarding.py (~55 tests)
@@ -349,6 +350,25 @@ def test_something(mock_config, sample_payload):
 - `TestReplayCompletionCallback` - Completion callback acceptance
 - `TestCacheRetentionDuringHA` - Retention manager, defaults
 
+### test_impl_config_runtime.py (~55 tests)
+- `TestMtimeChangeDetection` - mtime-based change detection, independent file checks
+- `TestSafeJsonLoading` - Success, missing file, invalid JSON, permission error
+- `TestDestinationsReload` - List format, empty validation, format validation
+- `TestBlockedIPsReload` - Set storage, reload updates, O(1) lookup
+- `TestBlockedTrapsReload` - Set storage, OID lookup efficiency
+- `TestListenPortsReload` - Integer validation, filtering, callback trigger, defaults
+- `TestRedirectionConfigReload` - defaultdict storage, load_all, cache clearing
+- `TestRedirectionLookup` - IP priority, OID fallback, empty return, LRU cache
+- `TestCheckForRedirection` - Tuple return, no match, destinations match
+- `TestScheduledConfigChecks` - Timer usage, stop_event, exception handling
+- `TestCacheConfigLoading` - Config return, file loading, defaults
+- `TestConfigDirectoryDetection` - Env var priority, /etc fallback, /opt fallback
+- `TestEnsureConfigDir` - Directory creation, example files
+- `TestRuntimeBehaviorEffects` - Blocked IP/OID effects, destination changes, cache clear
+- `TestConfigChangeReturnValue` - True on change, False on no change
+- `TestInterfaceAutoDetection` - Loopback skip, IP preference, eth0 fallback
+- `TestSaveCacheConfig` - JSON write, error handling
+
 ## Phase 12: Stress & Edge Case Scenarios
 
 | Test Area | Status | Test File | Notes |
@@ -362,12 +382,11 @@ def test_something(mock_config, sample_payload):
 ## Next Session Action Items
 
 When resuming, start with:
-1. Run Phase 11 tests: `pytest dev/tests/test_impl_stats_forwarding.py dev/tests/test_impl_ha_cache.py -v`
+1. Run Phase 11 tests: `pytest dev/tests/test_impl_stats_forwarding.py dev/tests/test_impl_ha_cache.py dev/tests/test_impl_config_runtime.py -v`
 2. Fix any failing tests
-3. Continue with Phase 11C: Config + Runtime Behavior
+3. Continue with Phase 11D: Metrics Consistency
 
 **Phase 11 remaining:**
-- 11C: Config + Runtime Behavior - Hot reload effects
 - 11D: Metrics Consistency - Metrics match actual behavior
 
 **Optional (Phase 7 remaining - CLI commands):**
