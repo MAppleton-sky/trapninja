@@ -212,26 +212,32 @@ Configuration in /opt/trapninja/config/capture_config.json:
 CLI COMMANDS
 ------------
 
-Start in shadow mode:
+Foreground (testing/debugging):
+  python trapninja.py daemon foreground --shadow-mode
+  python trapninja.py daemon foreground --mirror-mode
+  python trapninja.py daemon foreground --parallel
+
+Background daemon (production):
+  python trapninja.py daemon start --shadow-mode
+  python trapninja.py daemon start --mirror-mode
+  python trapninja.py daemon start --parallel
+  python trapninja.py daemon restart --shadow-mode
+
+Legacy flat-style (also supported):
+  python trapninja.py --start --shadow-mode
   python trapninja.py --foreground --shadow-mode
 
-Start in mirror mode:
-  python trapninja.py --foreground --mirror-mode
-
-Enable parallel capture:
-  python trapninja.py --foreground --parallel
-
 Log all observed traps:
-  python trapninja.py --foreground --shadow-mode --log-traps /tmp/traps.log
+  python trapninja.py daemon start --shadow-mode --log-traps /var/log/shadow.log
 
 Show shadow statistics:
-  python trapninja.py --shadow-status
+  python trapninja.py shadow status
 
 Export statistics as JSON:
-  python trapninja.py --shadow-export
+  python trapninja.py shadow export
 
 Set capture mode:
-  python trapninja.py --foreground --capture-mode sniff
+  python trapninja.py daemon start --capture-mode sniff
 
 EXAMPLES
 --------
@@ -239,19 +245,26 @@ EXAMPLES
 Test TrapNinja alongside existing Net-SNMP snmptrapd:
 
   # Existing snmptrapd is running on port 162
-  # Start TrapNinja in shadow mode
-  sudo python trapninja.py --foreground --shadow-mode --debug
+  # Start TrapNinja in shadow mode (foreground for debugging)
+  sudo python trapninja.py daemon foreground --shadow-mode --debug
+  
+  # Or run as background daemon for production testing
+  sudo python trapninja.py daemon start --shadow-mode
   
   # Watch the output to verify routing decisions
   # No traps are actually forwarded
 
 Compare forwarding behavior:
 
-  # Start TrapNinja in mirror mode
-  sudo python trapninja.py --foreground --mirror-mode
+  # Start TrapNinja in mirror mode as daemon
+  sudo python trapninja.py daemon start --mirror-mode
   
   # Both systems receive and forward traps
   # Compare destinations and timing
+  
+  # Check status
+  sudo python trapninja.py daemon status
+  sudo python trapninja.py shadow status
 
 CONFIGURATION FILES
 -------------------

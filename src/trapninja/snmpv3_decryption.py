@@ -6,6 +6,13 @@ Handles decryption of SNMPv3 traps and conversion to SNMPv2c format.
 Integrates with the credential management system for authentication.
 
 Supports both pysnmp 4.x and 7.x API versions.
+
+Security Notes (CWE-327):
+- MD5 and SHA-1 usage is REQUIRED by RFC 3414 (SNMPv3 USM) for protocol
+  compatibility with network devices. These cannot be removed.
+- DES usage is REQUIRED by RFC 3414 for legacy device support.
+- Prefer SHA-256+ and AES-128+ when devices support them.
+- Security warnings are logged when legacy algorithms are used.
 """
 import logging
 import struct
@@ -284,9 +291,46 @@ def _parse_ber_length(data: bytes, idx: int) -> Tuple[int, int]:
         return data[idx], idx + 1
 
 
+# Security: Track which legacy algorithms have been warned about to avoid log spam
+_legacy_algorithm_warnings_issued = set()
+
+
+def _log_legacy_algorithm_warning(algorithm: str, context: str):
+    """
+    Log a warning about legacy algorithm usage (once per algorithm per session).
+    
+    These algorithms are required by RFC 3414 for SNMP protocol compatibility
+    but are cryptographically weak by modern standards.
+    """
+    warning_key = f"{algorithm}:{context}"
+    if warning_key not in _legacy_algorithm_warnings_issued:
+        _legacy_algorithm_warnings_issued.add(warning_key)
+        
+        if algorithm.upper() in ('MD5',):
+            logger.info(
+                f"SNMPv3 {context}: Using MD5 (RFC 3414 required). "
+                f"Consider SHA-256 where device supports it. [CWE-327 acknowledged]"
+            )
+        elif algorithm.upper() in ('SHA', 'SHA1'):
+            logger.info(
+                f"SNMPv3 {context}: Using SHA-1 (RFC 3414 default). "
+                f"Consider SHA-256 where device supports it. [CWE-327 acknowledged]"
+            )
+        elif algorithm.upper() in ('DES', '3DES'):
+            logger.info(
+                f"SNMPv3 {context}: Using {algorithm} (RFC 3414 required). "
+                f"Consider AES-128+ where device supports it. [CWE-327 acknowledged]"
+            )
+
+
 def _localize_key(passphrase: str, engine_id: bytes, auth_protocol: str) -> bytes:
     """
     Localize a passphrase to an engine-specific key using SNMPv3 key localization.
+    
+    Security Note (CWE-327):
+        MD5 and SHA-1 are used here as REQUIRED by RFC 3414 for SNMPv3 USM.
+        These cannot be replaced without breaking SNMP protocol compatibility.
+        Prefer SHA-256+ where device firmware supports it.
     
     Args:
         passphrase: User passphrase
@@ -297,8 +341,10 @@ def _localize_key(passphrase: str, engine_id: bytes, auth_protocol: str) -> byte
         Localized key bytes
     """
     # Select hash function based on auth protocol
+    # Note: MD5/SHA1 required by RFC 3414 for protocol compatibility
     if auth_protocol in ('MD5',):
         hash_func = hashlib.md5
+        _log_legacy_algorithm_warning('MD5', 'key localization')
     elif auth_protocol == 'SHA224':
         hash_func = hashlib.sha224
     elif auth_protocol == 'SHA256':
@@ -308,7 +354,8 @@ def _localize_key(passphrase: str, engine_id: bytes, auth_protocol: str) -> byte
     elif auth_protocol == 'SHA512':
         hash_func = hashlib.sha512
     else:
-        hash_func = hashlib.sha1  # Default SHA1
+        hash_func = hashlib.sha1  # Default SHA1 per RFC 3414
+        _log_legacy_algorithm_warning('SHA1', 'key localization')
     
     # Step 1: Generate Ku from passphrase (password to key)
     password = passphrase.encode('utf-8')
@@ -408,6 +455,10 @@ class SNMPv3Decryptor:
     ) -> Optional[Dict]:
         """
         Attempt to decrypt message with specific user credentials.
+        
+        Returns:
+            Dict with keys: version, request_id, varbinds, username (from USM params)
+            or None if decryption fails
         """
         try:
             # Parse the SNMPv3 message structure manually
@@ -415,23 +466,27 @@ class SNMPv3Decryptor:
             
             # Outer SEQUENCE
             if message[idx] != 0x30:
+                logger.debug("Invalid message: not a SEQUENCE")
                 return None
             idx += 1
             _, idx = _parse_ber_length(message, idx)
             
             # Version INTEGER (should be 3)
             if message[idx] != 0x02:
+                logger.debug("Invalid message: version not INTEGER")
                 return None
             idx += 1
             ver_len = message[idx]
             idx += 1
             version = int.from_bytes(message[idx:idx+ver_len], 'big')
             if version != 3:
+                logger.debug(f"Invalid version: {version} (expected 3)")
                 return None
             idx += ver_len
             
             # msgGlobalData SEQUENCE
             if message[idx] != 0x30:
+                logger.debug("Invalid message: msgGlobalData not SEQUENCE")
                 return None
             idx += 1
             global_len, idx = _parse_ber_length(message, idx)
@@ -441,6 +496,7 @@ class SNMPv3Decryptor:
             
             # msgID INTEGER
             if message[idx] != 0x02:
+                logger.debug("Invalid message: msgID not INTEGER")
                 return None
             idx += 1
             msgid_len = message[idx]
@@ -450,6 +506,7 @@ class SNMPv3Decryptor:
             
             # msgMaxSize INTEGER
             if message[idx] != 0x02:
+                logger.debug("Invalid message: msgMaxSize not INTEGER")
                 return None
             idx += 1
             maxsize_len = message[idx]
@@ -458,6 +515,7 @@ class SNMPv3Decryptor:
             
             # msgFlags OCTET STRING (1 byte)
             if message[idx] != 0x04:
+                logger.debug("Invalid message: msgFlags not OCTET STRING")
                 return None
             idx += 1
             flags_len = message[idx]
@@ -469,11 +527,14 @@ class SNMPv3Decryptor:
             auth_flag = bool(msg_flags & 0x01)
             priv_flag = bool(msg_flags & 0x02)
             
+            logger.debug(f"Message flags: auth={auth_flag}, priv={priv_flag}")
+            
             # Skip remaining msgGlobalData (msgSecurityModel)
             idx = global_start + global_len
             
             # msgSecurityParameters OCTET STRING
             if message[idx] != 0x04:
+                logger.debug("Invalid message: msgSecurityParameters not OCTET STRING")
                 return None
             idx += 1
             sec_len, idx = _parse_ber_length(message, idx)
@@ -482,7 +543,13 @@ class SNMPv3Decryptor:
             usm_data = message[idx:idx+sec_len]
             usm_params = self._parse_usm_params(usm_data)
             if not usm_params:
+                logger.debug("Failed to parse USM parameters")
                 return None
+            
+            logger.debug(
+                f"USM params: user={usm_params['username']}, "
+                f"boots={usm_params['engine_boots']}, time={usm_params['engine_time']}"
+            )
             
             idx += sec_len
             
@@ -490,10 +557,13 @@ class SNMPv3Decryptor:
             if priv_flag:
                 # Encrypted - OCTET STRING containing encrypted ScopedPDU
                 if message[idx] != 0x04:
+                    logger.debug("Invalid message: encrypted PDU not OCTET STRING")
                     return None
                 idx += 1
                 encrypted_len, idx = _parse_ber_length(message, idx)
                 encrypted_data = message[idx:idx+encrypted_len]
+                
+                logger.debug(f"Encrypted PDU: {encrypted_len} bytes")
                 
                 # Decrypt the data
                 if not CRYPTO_AVAILABLE:
@@ -510,18 +580,31 @@ class SNMPv3Decryptor:
                 )
                 
                 if decrypted_data is None:
+                    logger.debug("PDU decryption returned None")
                     return None
+                
+                logger.debug(f"Decrypted PDU: {len(decrypted_data)} bytes")
                 
                 # Parse the decrypted ScopedPDU
                 scoped_pdu_data = decrypted_data
             else:
                 # Plaintext ScopedPDU SEQUENCE
                 if message[idx] != 0x30:
+                    logger.debug("Invalid message: ScopedPDU not SEQUENCE")
                     return None
                 scoped_pdu_data = message[idx:]
+                logger.debug(f"Plaintext ScopedPDU: {len(scoped_pdu_data)} bytes")
             
             # Parse ScopedPDU to extract varbinds
             trap_data = self._parse_scoped_pdu(scoped_pdu_data)
+            
+            # Add username from USM params to trap_data for logging
+            if trap_data:
+                trap_data['username'] = usm_params['username']
+                logger.debug(
+                    f"Parsed trap_data: request_id={trap_data.get('request_id')}, "
+                    f"varbinds={len(trap_data.get('varbinds', []))}"
+                )
             
             return trap_data
             
@@ -622,7 +705,8 @@ class SNMPv3Decryptor:
             priv_key = _localize_key(user.priv_passphrase, engine_id, auth_protocol)
             
             if priv_protocol in ('DES', '3DES'):
-                # DES decryption
+                # DES decryption - Security Note: DES is required by RFC 3414
+                _log_legacy_algorithm_warning(priv_protocol, 'encryption')
                 des_key = priv_key[:8]
                 pre_iv = priv_key[8:16]
                 iv = bytes(a ^ b for a, b in zip(pre_iv, priv_params[:8]))
@@ -878,36 +962,70 @@ class SNMPv3Decryptor:
         Convert decrypted SNMPv3 trap data to SNMPv2c format.
         
         Builds a proper SNMPv2c trap message from scratch using BER encoding.
+        
+        Args:
+            trap_data: Dict with 'varbinds', 'request_id', etc.
+            community: SNMP community string for v2c message
+            
+        Returns:
+            Complete SNMPv2c message bytes, or None if conversion fails
         """
         try:
+            varbinds = trap_data.get('varbinds', [])
+            request_id = trap_data.get('request_id', 0)
+            
+            logger.debug(
+                f"Converting to SNMPv2c: request_id={request_id}, "
+                f"varbinds={len(varbinds)}, community={community}"
+            )
+            
             # Build varbinds
             varbinds_bytes = b''
             
-            for vb in trap_data.get('varbinds', []):
-                oid_str = vb['oid']
-                value = vb['value']
-                value_type = vb['type']
-                
-                # Encode OID
-                oid_encoded = self._encode_oid(oid_str)
-                
-                # Encode value based on type
-                if 'raw_tag' in vb and 'raw_bytes' in vb:
-                    # Use original encoding if available
-                    value_encoded = bytes([vb['raw_tag']]) + self._encode_length(len(vb['raw_bytes'])) + vb['raw_bytes']
-                else:
-                    value_encoded = self._encode_value(value, value_type)
-                
-                # VarBind SEQUENCE
-                vb_content = oid_encoded + value_encoded
-                vb_bytes = bytes([0x30]) + self._encode_length(len(vb_content)) + vb_content
-                varbinds_bytes += vb_bytes
+            for i, vb in enumerate(varbinds):
+                try:
+                    oid_str = vb.get('oid', '')
+                    value = vb.get('value')
+                    value_type = vb.get('type', 'OctetString')
+                    
+                    if not oid_str:
+                        logger.warning(f"Varbind {i}: empty OID, skipping")
+                        continue
+                    
+                    # Encode OID
+                    oid_encoded = self._encode_oid(oid_str)
+                    
+                    # Encode value based on type
+                    if 'raw_tag' in vb and 'raw_bytes' in vb:
+                        # Use original encoding if available (preserves exact value)
+                        raw_bytes = vb['raw_bytes']
+                        value_encoded = bytes([vb['raw_tag']]) + self._encode_length(len(raw_bytes)) + raw_bytes
+                        logger.debug(
+                            f"Varbind {i}: {oid_str} = raw({vb['raw_tag']:02x}, {len(raw_bytes)} bytes)"
+                        )
+                    else:
+                        value_encoded = self._encode_value(value, value_type)
+                        logger.debug(f"Varbind {i}: {oid_str} = {value_type}({value})")
+                    
+                    # VarBind SEQUENCE
+                    vb_content = oid_encoded + value_encoded
+                    vb_bytes = bytes([0x30]) + self._encode_length(len(vb_content)) + vb_content
+                    varbinds_bytes += vb_bytes
+                    
+                except Exception as vb_err:
+                    logger.warning(f"Failed to encode varbind {i}: {vb_err}")
+                    continue
+            
+            if not varbinds_bytes and varbinds:
+                logger.warning(
+                    f"All {len(varbinds)} varbinds failed to encode, "
+                    f"message will have empty varbind list"
+                )
             
             # VarBindList SEQUENCE
             varbind_list = bytes([0x30]) + self._encode_length(len(varbinds_bytes)) + varbinds_bytes
             
             # Build PDU
-            request_id = trap_data.get('request_id', 0)
             request_id_bytes = self._encode_integer(request_id)
             error_status = self._encode_integer(0)
             error_index = self._encode_integer(0)
@@ -924,7 +1042,28 @@ class SNMPv3Decryptor:
             message_content = version + community_bytes + pdu
             message = bytes([0x30]) + self._encode_length(len(message_content)) + message_content
             
-            logger.debug(f"Built SNMPv2c message: {len(message)} bytes, {len(trap_data.get('varbinds', []))} varbinds")
+            logger.debug(
+                f"Built SNMPv2c message: {len(message)} bytes total, "
+                f"{len(varbinds)} varbinds ({len(varbinds_bytes)} bytes encoded)"
+            )
+            
+            # Sanity check the message
+            if len(message) < 25:  # Minimum valid message is ~25 bytes
+                logger.warning(
+                    f"Generated message suspiciously small: {len(message)} bytes. "
+                    f"Components: version={len(request_id_bytes)}, "
+                    f"community={len(community_bytes)}, pdu={len(pdu)}, "
+                    f"varbinds={len(varbinds_bytes)}"
+                )
+            
+            # DEBUG: Hex dump of generated message for troubleshooting
+            logger.debug(f"SNMPv2c message hex dump: {message.hex()}")
+            
+            # Validate the message structure
+            if not self._validate_snmpv2c_message(message):
+                logger.error(f"Generated SNMPv2c message FAILED validation!")
+                logger.error(f"Message hex: {message.hex()}")
+                return None
             
             return message
             
@@ -933,6 +1072,92 @@ class SNMPv3Decryptor:
             import traceback
             logger.debug(traceback.format_exc())
             return None
+    
+    def _validate_snmpv2c_message(self, message: bytes) -> bool:
+        """
+        Validate that the generated SNMPv2c message has correct structure.
+        
+        Expected structure:
+        SEQUENCE {
+            INTEGER (version = 1)
+            OCTET STRING (community)
+            SNMPv2-Trap-PDU [7] {
+                INTEGER (request-id)
+                INTEGER (error-status)
+                INTEGER (error-index)
+                SEQUENCE (varbind-list)
+            }
+        }
+        """
+        try:
+            idx = 0
+            
+            # Outer SEQUENCE
+            if message[idx] != 0x30:
+                logger.error(f"Validation: Expected SEQUENCE (0x30), got 0x{message[idx]:02x}")
+                return False
+            idx += 1
+            
+            # Skip length
+            if message[idx] & 0x80:
+                len_bytes = message[idx] & 0x7f
+                idx += 1 + len_bytes
+            else:
+                idx += 1
+            
+            # Version INTEGER
+            if message[idx] != 0x02:
+                logger.error(f"Validation: Expected INTEGER (0x02) for version, got 0x{message[idx]:02x}")
+                return False
+            idx += 1
+            ver_len = message[idx]
+            idx += 1
+            version = int.from_bytes(message[idx:idx+ver_len], 'big')
+            if version != 1:
+                logger.error(f"Validation: Expected version 1, got {version}")
+                return False
+            idx += ver_len
+            
+            # Community OCTET STRING
+            if message[idx] != 0x04:
+                logger.error(f"Validation: Expected OCTET STRING (0x04) for community, got 0x{message[idx]:02x}")
+                return False
+            idx += 1
+            if message[idx] & 0x80:
+                len_bytes = message[idx] & 0x7f
+                comm_len = int.from_bytes(message[idx+1:idx+1+len_bytes], 'big')
+                idx += 1 + len_bytes
+            else:
+                comm_len = message[idx]
+                idx += 1
+            community = message[idx:idx+comm_len].decode('utf-8', errors='replace')
+            logger.debug(f"Validation: community='{community}'")
+            idx += comm_len
+            
+            # SNMPv2-Trap-PDU (tag 0xa7)
+            if message[idx] != 0xa7:
+                logger.error(f"Validation: Expected SNMPv2-Trap-PDU (0xa7), got 0x{message[idx]:02x}")
+                return False
+            idx += 1
+            
+            # Skip PDU length
+            if message[idx] & 0x80:
+                len_bytes = message[idx] & 0x7f
+                idx += 1 + len_bytes
+            else:
+                idx += 1
+            
+            # Request ID INTEGER
+            if message[idx] != 0x02:
+                logger.error(f"Validation: Expected INTEGER (0x02) for request-id, got 0x{message[idx]:02x}")
+                return False
+            
+            logger.debug("Validation: SNMPv2c message structure OK")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Validation error: {e}")
+            return False
     
     def _encode_length(self, length: int) -> bytes:
         """Encode BER length."""

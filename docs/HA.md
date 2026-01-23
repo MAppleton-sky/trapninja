@@ -31,40 +31,34 @@ TrapNinja supports High Availability (HA) clustering with automatic failover for
 
 ```bash
 # Configure as primary
-python trapninja.py --configure-ha \
-    --ha-mode primary \
-    --ha-peer-host 192.168.1.102 \
-    --ha-priority 150
+trapninja ha configure --mode primary --peer 192.168.1.102 --priority 150
 
 # Start service
-python trapninja.py --start
+trapninja daemon start
 ```
 
 ### Secondary Node
 
 ```bash
 # Configure as secondary
-python trapninja.py --configure-ha \
-    --ha-mode secondary \
-    --ha-peer-host 192.168.1.101 \
-    --ha-priority 100
+trapninja ha configure --mode secondary --peer 192.168.1.101 --priority 100
 
 # Start service
-python trapninja.py --start
+trapninja daemon start
 ```
 
 ### Verify HA Status
 
 ```bash
 # Check status on both nodes
-python trapninja.py --ha-status
+trapninja ha status
 ```
 
 Expected output on PRIMARY:
 ```
 HA Status: primary
 Forwarding: True
-Peer: 192.168.1.102:5000
+Peer: 192.168.1.102:8162
 Peer Status: CONNECTED
 Last Heartbeat: 1s ago
 ```
@@ -73,7 +67,7 @@ Expected output on SECONDARY:
 ```
 HA Status: secondary
 Forwarding: False
-Peer: 192.168.1.101:5000
+Peer: 192.168.1.101:8162
 Peer Status: CONNECTED
 Last Heartbeat: 1s ago
 ```
@@ -89,8 +83,8 @@ Location: `config/ha_config.json`
     "enabled": true,
     "mode": "primary",
     "peer_host": "192.168.1.102",
-    "peer_port": 5000,
-    "local_port": 5000,
+    "peer_port": 8162,
+    "listen_port": 8162,
     "priority": 150,
     "heartbeat_interval": 1.0,
     "heartbeat_timeout": 3.0,
@@ -107,8 +101,8 @@ Location: `config/ha_config.json`
 | `enabled` | bool | false | Enable HA functionality |
 | `mode` | string | "standalone" | Role: "primary", "secondary", or "standalone" |
 | `peer_host` | string | - | IP address of peer node |
-| `peer_port` | int | 5000 | UDP port for HA communication |
-| `local_port` | int | 5000 | Local UDP port for HA |
+| `peer_port` | int | 8162 | UDP port for HA communication |
+| `listen_port` | int | 8162 | Local UDP port for HA |
 | `priority` | int | 100 | Election priority (higher wins) |
 | `heartbeat_interval` | float | 1.0 | Seconds between heartbeats |
 | `heartbeat_timeout` | float | 3.0 | Seconds before peer is considered dead |
@@ -138,7 +132,28 @@ When the PRIMARY node fails:
 2. SECONDARY waits `failover_delay` (2 seconds)
 3. SECONDARY promotes itself to PRIMARY
 4. SECONDARY begins forwarding traps
-5. Total failover time: <5 seconds (typically 3-4 seconds)
+5. **Gap detection**: Check for missed traps during failover
+6. **Auto-replay**: Replay any missed traps from cache
+7. Total failover time: &lt;5 seconds (typically 3-4 seconds)
+
+#### Zero Trap Loss with Failover Replay
+
+With caching enabled, TrapNinja automatically detects and replays traps that arrived during the failover window:
+
+```
+Timeline with Failover Replay:
+  T=0:00:00  Primary forwarding (last trap at T=0:00:00)
+  T=0:00:03  Primary fails
+  T=0:00:06  Secondary detects failure
+  T=0:00:08  Secondary becomes PRIMARY
+  T=0:00:08  Gap detected: ~5 seconds
+  T=0:00:09  Auto-replay: 100-500 traps from cache
+  T=0:00:10  Normal operation resumes
+  
+  Result: ZERO TRAP LOSS
+```
+
+See [FAILOVER_REPLAY.md](FAILOVER_REPLAY.md) for detailed configuration.
 
 ### Manual Failover (Maintenance)
 
@@ -146,17 +161,17 @@ For planned maintenance on the PRIMARY:
 
 ```bash
 # On PRIMARY - demote to secondary
-python trapninja.py --demote
+trapninja ha demote
 
 # On SECONDARY - promote to primary
-python trapninja.py --promote
+trapninja ha promote
 ```
 
 Or use force failover:
 
 ```bash
 # Trigger immediate failover
-python trapninja.py --force-failover
+trapninja ha force-failover
 ```
 
 ### Failback
@@ -187,12 +202,12 @@ If both nodes believe they are PRIMARY:
 
 | Port | Protocol | Direction | Purpose |
 |------|----------|-----------|---------|
-| 5000 | UDP | Bidirectional | HA heartbeat and state sync |
+| 8162 | UDP | Bidirectional | HA heartbeat and state sync |
 | 162 | UDP | Inbound | SNMP trap reception |
 
 ```bash
 # Example firewall rules (firewalld)
-firewall-cmd --permanent --add-port=5000/udp
+firewall-cmd --permanent --add-port=8162/udp
 firewall-cmd --permanent --add-port=162/udp
 firewall-cmd --reload
 ```
@@ -228,30 +243,43 @@ ERROR - HA: Failed to connect to peer
 
 ## CLI Commands
 
+### Configuration
+
 ```bash
-# Configure HA
-python trapninja.py --configure-ha \
-    --ha-mode <primary|secondary> \
-    --ha-peer-host <ip> \
-    --ha-priority <number>
+# Configure HA as primary
+trapninja ha configure --mode primary --peer 192.168.1.102 --priority 150
 
+# Configure HA as secondary
+trapninja ha configure --mode secondary --peer 192.168.1.101 --priority 100
+
+# Configure with custom ports
+trapninja ha configure --mode primary --peer 192.168.1.102 \
+    --peer-port 8162 --listen-port 8162
+```
+
+### Status and Control
+
+```bash
 # Show HA status
-python trapninja.py --ha-status
+trapninja ha status
 
-# Manual promotion
-python trapninja.py --promote
+# Manual promotion to PRIMARY
+trapninja ha promote
 
-# Manual demotion
-python trapninja.py --demote
+# Force promotion (without peer coordination)
+trapninja ha promote --force
 
-# Force failover
-python trapninja.py --force-failover
+# Manual demotion to SECONDARY
+trapninja ha demote
+
+# Force failover (for maintenance)
+trapninja ha force-failover
 
 # Disable HA
-python trapninja.py --disable-ha
+trapninja ha disable
 
 # Show HA help
-python trapninja.py --ha-help
+trapninja ha help
 ```
 
 ## Troubleshooting
@@ -265,7 +293,7 @@ python trapninja.py --ha-help
 **Verification**:
 ```bash
 # Check ha_blocked counter - should increment on SECONDARY
-python trapninja.py --status | grep ha_blocked
+trapninja daemon status | grep ha_blocked
 ```
 
 **Solution**: Ensure using TrapNinja 0.5.0+ which includes the HA forwarding fix.
@@ -275,13 +303,13 @@ python trapninja.py --status | grep ha_blocked
 **Symptom**: Frequent failovers, peer shown as disconnected.
 
 **Checks**:
-1. Firewall allowing UDP port 5000
+1. Firewall allowing UDP port 8162
 2. Network connectivity between nodes
 3. Correct peer IP in configuration
 
 ```bash
 # Test connectivity
-nc -vzu <peer_ip> 5000
+nc -vzu <peer_ip> 8162
 
 # Check firewall
 firewall-cmd --list-ports
@@ -295,7 +323,7 @@ firewall-cmd --list-ports
 
 **Resolution**:
 1. Check network connectivity
-2. Manually demote one node: `python trapninja.py --demote`
+2. Manually demote one node: `trapninja ha demote`
 3. Verify only one PRIMARY exists
 
 ### HA State Not Persisting
@@ -353,22 +381,89 @@ TrapNinja HA includes automatic configuration synchronization between Primary an
 
 ```bash
 # Show sync status
-python trapninja.py --config-sync-status
+trapninja sync status
 
 # Trigger manual sync
-python trapninja.py --config-sync
+trapninja sync now
 
 # Force sync (ignore checksums)
-python trapninja.py --config-sync --force
+trapninja sync now --force
 ```
 
 ### Making Config Changes
 
 1. **Always modify on Primary**: Changes should be made on the Primary server
 2. **Automatic propagation**: Changes are automatically pushed to Secondary
-3. **Verify sync**: Use `--config-sync-status` to confirm propagation
+3. **Verify sync**: Use `trapninja sync status` to confirm propagation
 
 For detailed config sync documentation, see [CONFIG_SYNC.md](CONFIG_SYNC.md).
+
+## Rolling Upgrades and Version Compatibility
+
+TrapNinja HA supports mixed-version operation during rolling upgrades.
+
+### Version Compatibility (0.7.9+)
+
+Starting with version 0.7.9, TrapNinja HA uses backward-compatible message
+serialization that allows nodes running different versions to communicate
+without checksum failures.
+
+**How it works:**
+- Newer optional fields (like `config_checksum`) are excluded from checksum
+  calculation when null
+- Older versions that don't have these fields will produce matching checksums
+- This enables zero-downtime upgrades in HA clusters
+
+### Rolling Upgrade Procedure
+
+1. **Upgrade Secondary First**:
+   ```bash
+   # On Secondary
+   trapninja daemon stop
+   # Deploy new version
+   trapninja daemon start
+   ```
+
+2. **Verify Secondary Health**:
+   ```bash
+   trapninja ha status
+   # Confirm SECONDARY state, peer connected
+   ```
+
+3. **Failover to Secondary**:
+   ```bash
+   # On Primary
+   trapninja ha demote
+   ```
+
+4. **Upgrade Original Primary**:
+   ```bash
+   trapninja daemon stop
+   # Deploy new version
+   trapninja daemon start
+   ```
+
+5. **Optional: Restore Original Roles**:
+   ```bash
+   # If you want original primary back as primary
+   trapninja ha promote
+   ```
+
+### Troubleshooting Version Mismatches
+
+If you see "HA message checksum failed" in logs:
+
+1. **Check Versions**: Ensure both nodes are running 0.7.9 or later
+2. **View Debug Logs**: Check debug output for checksum details
+3. **Upgrade Both Nodes**: If running pre-0.7.9 on either node, upgrade both
+
+```bash
+# Enable debug logging temporarily
+export TRAPNINJA_LOG_LEVEL=DEBUG
+trapninja daemon start
+```
+
+---
 
 ## Best Practices
 
@@ -402,8 +497,8 @@ For detailed config sync documentation, see [CONFIG_SYNC.md](CONFIG_SYNC.md).
     "enabled": true,
     "mode": "primary",
     "peer_host": "192.168.1.102",
-    "peer_port": 5000,
-    "local_port": 5000,
+    "peer_port": 8162,
+    "listen_port": 8162,
     "priority": 150,
     "heartbeat_interval": 1.0,
     "heartbeat_timeout": 3.0,
@@ -420,8 +515,8 @@ For detailed config sync documentation, see [CONFIG_SYNC.md](CONFIG_SYNC.md).
     "enabled": true,
     "mode": "secondary",
     "peer_host": "192.168.1.101",
-    "peer_port": 5000,
-    "local_port": 5000,
+    "peer_port": 8162,
+    "listen_port": 8162,
     "priority": 100,
     "heartbeat_interval": 1.0,
     "heartbeat_timeout": 3.0,
@@ -433,37 +528,4 @@ For detailed config sync documentation, see [CONFIG_SYNC.md](CONFIG_SYNC.md).
 
 ---
 
-## Configuration Synchronization
-
-TrapNinja supports automatic synchronization of shared configurations between HA nodes. This ensures both nodes have identical trap handling rules.
-
-### Enable Config Sync
-
-```bash
-# Enable on both nodes
-python trapninja.py --enable-sync
-
-# Check status
-python trapninja.py --sync-status
-
-# Show differences
-python trapninja.py --sync-diff
-```
-
-### Synced vs Local Configs
-
-**Synced** (identical on both nodes):
-- `destinations.json`
-- `blocked_ips.json`, `blocked_traps.json`
-- `redirected_*.json`
-
-**Local** (node-specific):
-- `ha_config.json`
-- `cache_config.json`
-- `listen_ports.json`
-
-See [CONFIG_SYNC.md](CONFIG_SYNC.md) for detailed documentation.
-
----
-
-**Last Updated**: 2025-01-15
+**Last Updated**: 2025-01-09

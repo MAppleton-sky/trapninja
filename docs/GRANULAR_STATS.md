@@ -12,6 +12,20 @@ The granular statistics system provides detailed tracking beyond the aggregate m
 | **Per-OID** | Volume, rate, source IPs | Understand alarm types, spot patterns |
 | **Per-Destination** | Forwards, success rate, sources | Monitor forwarding health |
 
+### SNMPv3 Support
+
+As of v0.7.15, decrypted SNMPv3 traps are **routed through the standard v2c processing pipeline**. When an SNMPv3 trap is successfully decrypted and converted to v2c format:
+
+1. The converted v2c payload is processed exactly like a native v2c trap
+2. OID-based blocking rules are applied (same as v2c)
+3. OID-based redirection rules are applied (same as v2c)
+4. IP-based redirection rules are applied (same as v2c)
+5. The OID is extracted and recorded in granular statistics
+
+This unified processing ensures consistent behavior - blocking/redirection rules work identically for both native v2c and decrypted v3 traps.
+
+**Example:** If you block OID `1.3.6.1.4.1.9.9.41.2.0.1`, it will be blocked whether it arrives as v2c or encrypted v3.
+
 ## Architecture
 
 ```
@@ -109,11 +123,16 @@ trapninja stats top-ips -s blocked
 trapninja stats top-ips --json
 ```
 
-**Sort Options:**
+**Sort Options (`-s, --sort`):**
 - `total` - Total trap count (default)
 - `rate` - Current traps/minute
+- `peak` - Highest peak rate ever observed
 - `blocked` - Number blocked
 - `recent` - Most recently active
+
+**Detail Options:**
+- `--sources N` - Number of top source IPs for OID details (default: 10, max: 500)
+- `--oids N` - Number of top OIDs for IP details (default: 10, max: 500)
 
 Example output:
 ```
@@ -139,29 +158,43 @@ trapninja stats top-oids -n 50 -s rate
 ### IP Details
 
 ```bash
-# Detailed stats for specific IP
+# Detailed stats for specific IP (shows top 10 OIDs by default)
 trapninja stats ip 10.0.0.1
+
+# Show top 50 OIDs from this IP
+trapninja stats ip 10.0.0.1 --oids 50
+
+# Export as JSON for further analysis
+trapninja stats ip 10.0.0.1 --oids 100 --json --pretty
 ```
 
 Shows comprehensive details:
 - All counters (total, forwarded, blocked, redirected, dropped)
 - Timing (first/last seen, age, idle time)
-- Current rates
-- Top 10 OIDs sent from this IP
+- Current and peak rates
+- Top N OIDs sent from this IP (configurable with `--oids`, default 10, max 500)
 - Destination breakdown
 
 ### OID Details
 
+> **Note:** The OID query searches **all tracked OIDs** (up to 5,000), not just the top 100 shown by `stats top-oids`. If an OID has been seen but isn't in the top list, it can still be queried directly.
+
 ```bash
-# Detailed stats for specific OID
+# Detailed stats for specific OID (shows top 10 sources by default)
 trapninja stats oid 1.3.6.1.4.1.9.9.41.2.0.1
+
+# Show top 30 source IPs for this OID
+trapninja stats oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 30
+
+# Export as JSON for further analysis
+trapninja stats oid 1.3.6.1.4.1.9.9.41.2.0.1 --sources 100 --json --pretty
 ```
 
 Shows comprehensive details:
 - All counters
 - Timing
-- Current rates
-- Top 10 source IPs for this OID
+- Current and peak rates
+- Top N source IPs for this OID (configurable with `--sources`, default 10, max 500)
 - Destination breakdown
 
 ### Destination Statistics
@@ -302,7 +335,7 @@ scrape_configs:
 
 ### Statistics Not Updating
 
-1. Check service is running: `trapninja --status`
+1. Check service is running: `trapninja daemon status`
 2. Check for errors: `journalctl -u trapninja | grep -i granular`
 3. Verify metrics directory: `ls -la /var/log/trapninja/metrics/`
 
@@ -315,6 +348,25 @@ scrape_configs:
 ### Missing IPs/OIDs
 
 Entries are removed after `stale_threshold` seconds of inactivity. Increase this value for longer retention.
+
+### SNMPv3 OIDs Not Appearing
+
+If decrypted SNMPv3 traps aren't showing in OID statistics:
+
+1. **Check decryption is working:** Look for "SNMPv3 decrypted" in logs:
+   ```bash
+   journalctl -u trapninja | grep "SNMPv3 decrypted"
+   ```
+
+2. **Verify varbind extraction:** Enable debug logging to see OID extraction:
+   ```bash
+   journalctl -u trapninja | grep "Extracted trap OID"
+   ```
+
+3. **Restart after upgrade:** If you upgraded TrapNinja, restart to load new worker code:
+   ```bash
+   systemctl restart trapninja
+   ```
 
 ## See Also
 

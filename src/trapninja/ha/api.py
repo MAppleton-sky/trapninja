@@ -34,7 +34,9 @@ def get_ha_cluster() -> Optional[HACluster]:
 
 def initialize_ha(
     config: HAConfig,
-    trap_forwarder_callback: Callable[[bool], None]
+    trap_forwarder_callback: Callable[[bool], None],
+    config_dir: Optional[str] = None,
+    on_config_changed: Optional[Callable[[], None]] = None
 ) -> bool:
     """
     Initialize the global HA cluster.
@@ -42,6 +44,8 @@ def initialize_ha(
     Args:
         config: HA configuration
         trap_forwarder_callback: Callback to enable/disable forwarding
+        config_dir: Path to config directory (enables config sync)
+        on_config_changed: Callback when configs are updated by sync
         
     Returns:
         True if initialized successfully
@@ -49,7 +53,12 @@ def initialize_ha(
     global _ha_cluster
     
     try:
-        _ha_cluster = HACluster(config, trap_forwarder_callback)
+        _ha_cluster = HACluster(
+            config,
+            trap_forwarder_callback,
+            config_dir=config_dir,
+            on_config_changed=on_config_changed
+        )
         return _ha_cluster.start()
     except Exception as e:
         logger.error(f"Failed to initialize HA cluster: {e}")

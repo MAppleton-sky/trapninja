@@ -4,12 +4,26 @@ TrapNinja SNMPv3 Credentials Module
 
 Manages SNMPv3 user credentials with encrypted storage.
 Uses Engine ID as the encryption key for credential protection.
+
+Security Features:
+- Encrypted storage using Fernet (AES-128-CBC with HMAC-SHA256)
+- PBKDF2 key derivation with 600,000 iterations (OWASP 2023 recommendation)
+- Restrictive file permissions (0o600)
+- Audit logging for all credential operations
+
+Security Notes (CWE-916):
+- PBKDF2 iteration count follows OWASP 2023 guidelines for PBKDF2-SHA256
+- Salt is derived deterministically from engine_id for consistent encryption
+- Consider Argon2id for future implementations where library support exists
 """
 import os
 import json
 import logging
 import hashlib
 import base64
+import getpass
+import socket
+import time
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 from cryptography.fernet import Fernet, InvalidToken
@@ -17,8 +31,70 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 
-# Get logger instance
+# Get logger instances
 logger = logging.getLogger("trapninja")
+
+# Separate audit logger for security-sensitive operations
+audit_logger = logging.getLogger("trapninja.audit")
+
+
+class AuditEvent:
+    """Security audit event types."""
+    CREDENTIAL_ADD = "CREDENTIAL_ADD"
+    CREDENTIAL_UPDATE = "CREDENTIAL_UPDATE"
+    CREDENTIAL_REMOVE = "CREDENTIAL_REMOVE"
+    CREDENTIAL_ACCESS = "CREDENTIAL_ACCESS"
+    CREDENTIAL_LIST = "CREDENTIAL_LIST"
+    CREDENTIAL_DECRYPT_FAIL = "CREDENTIAL_DECRYPT_FAIL"
+    STORE_LOAD = "STORE_LOAD"
+    STORE_SAVE = "STORE_SAVE"
+
+
+def _log_audit(event: str, details: Dict, success: bool = True):
+    """
+    Log a security audit event.
+    
+    All credential operations are logged for security auditing purposes.
+    Sensitive data (passphrases) are never logged.
+    
+    Args:
+        event: Audit event type from AuditEvent
+        details: Event details (username, engine_id, etc.)
+        success: Whether the operation succeeded
+    """
+    try:
+        # Get caller info
+        try:
+            caller_user = getpass.getuser()
+        except Exception:
+            caller_user = "unknown"
+        
+        hostname = socket.gethostname()
+        timestamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        
+        # Build audit record
+        audit_record = {
+            "timestamp": timestamp,
+            "event": event,
+            "success": success,
+            "host": hostname,
+            "user": caller_user,
+            **details
+        }
+        
+        # Remove any accidentally included sensitive fields
+        for sensitive_key in ['auth_passphrase', 'priv_passphrase', 'passphrase', 'password', 'secret']:
+            audit_record.pop(sensitive_key, None)
+        
+        # Log at appropriate level
+        if success:
+            audit_logger.info(f"AUDIT: {json.dumps(audit_record)}")
+        else:
+            audit_logger.warning(f"AUDIT: {json.dumps(audit_record)}")
+            
+    except Exception as e:
+        # Don't let audit logging failures break functionality
+        logger.debug(f"Audit logging error: {e}")
 
 
 @dataclass
@@ -94,10 +170,12 @@ class SNMPv3User:
 
 class SNMPv3CredentialStore:
     """
-    Manages encrypted storage of SNMPv3 credentials
+    Manages encrypted storage of SNMPv3 credentials with security auditing.
     
     Uses Engine ID as the basis for encryption keys to provide
     engine-specific protection of credentials.
+    
+    All credential operations are logged for security audit purposes.
     """
     
     def __init__(self, credentials_file: str):
@@ -137,12 +215,14 @@ class SNMPv3CredentialStore:
         # This makes the encryption deterministic for a given engine ID
         salt = hashlib.sha256(password).digest()
         
-        # Derive key using PBKDF2
+        # Derive key using PBKDF2 with OWASP 2023 recommended iterations
+        # Security Note (CWE-916): 600,000 iterations for PBKDF2-SHA256
+        # per OWASP Password Storage Cheat Sheet (2023)
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
             salt=salt,
-            iterations=100000,
+            iterations=600000,  # OWASP 2023 recommendation
             backend=default_backend()
         )
         
@@ -198,10 +278,14 @@ class SNMPv3CredentialStore:
             
         except (InvalidToken, json.JSONDecodeError, Exception) as e:
             logger.error(f"Failed to decrypt credentials: {e}")
+            _log_audit(AuditEvent.CREDENTIAL_DECRYPT_FAIL, {
+                "engine_id": engine_id,
+                "error": str(e)
+            }, success=False)
             return None
     
     def _load_credentials(self):
-        """Load credentials from file"""
+        """Load credentials from file with audit logging."""
         if not os.path.exists(self.credentials_file):
             logger.info(f"No SNMPv3 credentials file found at {self.credentials_file}")
             return
@@ -211,6 +295,9 @@ class SNMPv3CredentialStore:
                 data = json.load(f)
             
             # Data structure: {engine_id: {username: encrypted_credentials}}
+            loaded_count = 0
+            failed_count = 0
+            
             for engine_id, users in data.items():
                 self.credentials[engine_id] = {}
                 
@@ -218,20 +305,34 @@ class SNMPv3CredentialStore:
                     user = self._decrypt_credentials(encrypted_creds, engine_id)
                     if user:
                         self.credentials[engine_id][username] = user
+                        loaded_count += 1
                     else:
                         logger.warning(f"Failed to decrypt credentials for {username}@{engine_id}")
+                        failed_count += 1
             
             logger.info(f"Loaded SNMPv3 credentials for {len(self.credentials)} engine IDs")
             
+            _log_audit(AuditEvent.STORE_LOAD, {
+                "file": self.credentials_file,
+                "engine_count": len(self.credentials),
+                "user_count": loaded_count,
+                "failed_count": failed_count
+            })
+            
         except Exception as e:
             logger.error(f"Error loading SNMPv3 credentials: {e}")
+            _log_audit(AuditEvent.STORE_LOAD, {
+                "file": self.credentials_file,
+                "error": str(e)
+            }, success=False)
             self.credentials = {}
     
     def _save_credentials(self):
-        """Save credentials to file"""
+        """Save credentials to file with audit logging."""
         try:
             # Build storage structure with encrypted credentials
             data = {}
+            user_count = 0
             
             for engine_id, users in self.credentials.items():
                 data[engine_id] = {}
@@ -239,6 +340,7 @@ class SNMPv3CredentialStore:
                 for username, user in users.items():
                     encrypted = self._encrypt_credentials(user)
                     data[engine_id][username] = encrypted
+                    user_count += 1
             
             # Write to file with proper permissions
             with open(self.credentials_file, 'w') as f:
@@ -249,12 +351,22 @@ class SNMPv3CredentialStore:
             
             logger.info(f"Saved SNMPv3 credentials to {self.credentials_file}")
             
+            _log_audit(AuditEvent.STORE_SAVE, {
+                "file": self.credentials_file,
+                "engine_count": len(self.credentials),
+                "user_count": user_count
+            })
+            
         except Exception as e:
             logger.error(f"Error saving SNMPv3 credentials: {e}")
+            _log_audit(AuditEvent.STORE_SAVE, {
+                "file": self.credentials_file,
+                "error": str(e)
+            }, success=False)
     
     def add_user(self, user: SNMPv3User) -> Tuple[bool, str]:
         """
-        Add or update SNMPv3 user credentials
+        Add or update SNMPv3 user credentials with audit logging.
         
         Args:
             user: SNMPv3 user to add
@@ -265,6 +377,11 @@ class SNMPv3CredentialStore:
         # Validate user
         is_valid, error_msg = user.validate()
         if not is_valid:
+            _log_audit(AuditEvent.CREDENTIAL_ADD, {
+                "username": user.username,
+                "engine_id": user.engine_id,
+                "error": error_msg
+            }, success=False)
             return False, error_msg
         
         # Normalize engine ID to lowercase
@@ -285,13 +402,22 @@ class SNMPv3CredentialStore:
         self._save_credentials()
         
         action = "Updated" if is_update else "Added"
+        event = AuditEvent.CREDENTIAL_UPDATE if is_update else AuditEvent.CREDENTIAL_ADD
+        
         logger.info(f"{action} SNMPv3 user {user.username} for engine {engine_id}")
+        
+        _log_audit(event, {
+            "username": user.username,
+            "engine_id": engine_id,
+            "auth_protocol": user.auth_protocol,
+            "priv_protocol": user.priv_protocol
+        })
         
         return True, f"{action} user {user.username} for engine {engine_id}"
     
     def remove_user(self, engine_id: str, username: str) -> Tuple[bool, str]:
         """
-        Remove SNMPv3 user credentials
+        Remove SNMPv3 user credentials with audit logging.
         
         Args:
             engine_id: SNMP Engine ID
@@ -305,9 +431,19 @@ class SNMPv3CredentialStore:
         
         # Check if user exists
         if engine_id not in self.credentials:
+            _log_audit(AuditEvent.CREDENTIAL_REMOVE, {
+                "username": username,
+                "engine_id": engine_id,
+                "error": "Engine ID not found"
+            }, success=False)
             return False, f"No credentials found for engine {engine_id}"
         
         if username not in self.credentials[engine_id]:
+            _log_audit(AuditEvent.CREDENTIAL_REMOVE, {
+                "username": username,
+                "engine_id": engine_id,
+                "error": "Username not found"
+            }, success=False)
             return False, f"User {username} not found for engine {engine_id}"
         
         # Remove user
@@ -322,11 +458,16 @@ class SNMPv3CredentialStore:
         
         logger.info(f"Removed SNMPv3 user {username} for engine {engine_id}")
         
+        _log_audit(AuditEvent.CREDENTIAL_REMOVE, {
+            "username": username,
+            "engine_id": engine_id
+        })
+        
         return True, f"Removed user {username} for engine {engine_id}"
     
     def get_user(self, engine_id: str, username: str) -> Optional[SNMPv3User]:
         """
-        Get SNMPv3 user credentials
+        Get SNMPv3 user credentials with audit logging.
         
         Args:
             engine_id: SNMP Engine ID
@@ -338,10 +479,18 @@ class SNMPv3CredentialStore:
         # Normalize engine ID
         engine_id = engine_id.lower()
         
+        user = None
         if engine_id in self.credentials:
-            return self.credentials[engine_id].get(username)
+            user = self.credentials[engine_id].get(username)
         
-        return None
+        # Log access attempt
+        _log_audit(AuditEvent.CREDENTIAL_ACCESS, {
+            "username": username,
+            "engine_id": engine_id,
+            "found": user is not None
+        })
+        
+        return user
     
     def get_users_for_engine(self, engine_id: str) -> List[SNMPv3User]:
         """
@@ -363,7 +512,9 @@ class SNMPv3CredentialStore:
     
     def list_all_users(self) -> List[Dict]:
         """
-        List all configured users with masked passphrases
+        List all configured users with masked passphrases.
+        
+        Audit logged for security tracking.
         
         Returns:
             List of user info dictionaries
@@ -380,6 +531,10 @@ class SNMPv3CredentialStore:
                     'auth_passphrase': '***' if user.auth_passphrase else '',
                     'priv_passphrase': '***' if user.priv_passphrase else ''
                 })
+        
+        _log_audit(AuditEvent.CREDENTIAL_LIST, {
+            "user_count": len(result)
+        })
         
         return result
     

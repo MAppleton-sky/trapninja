@@ -19,6 +19,29 @@ from .service import run_service
 logger = logging.getLogger("trapninja")
 
 
+def _build_process_check_cmd(own_pid: int) -> str:
+    """
+    Build the ps command to find running TrapNinja processes.
+    
+    Excludes:
+    - grep itself
+    - CLI commands (--start, --restart, --stop, --status)
+    - The calling process (own_pid)
+    
+    Args:
+        own_pid: PID of the calling process to exclude
+        
+    Returns:
+        Shell command string for finding TrapNinja daemon processes
+    """
+    return (
+        f"ps aux | grep -i 'trapninja\\|trapNinja' | grep -v grep "
+        f"| grep -v '\\-\\-start' | grep -v '\\-\\-restart' "
+        f"| grep -v '\\-\\-stop' | grep -v '\\-\\-status' "
+        f"| grep -v \" {own_pid} \""
+    )
+
+
 def run_command_safe(command, timeout=30):
     """
     Run a command safely with Python 3.6 compatibility
@@ -49,9 +72,20 @@ def run_command_safe(command, timeout=30):
         return ""
 
 
-def start_daemon():
+def start_daemon(shadow_mode=False, mirror_mode=False, parallel=False,
+                 capture_mode=None, log_traps=None):
     """
-    Start the daemon process - Python 3.6 compatible version
+    Start the daemon process with startup verification.
+    
+    After spawning the daemon, waits briefly and verifies it started
+    successfully by checking the control socket.
+
+    Args:
+        shadow_mode (bool): Run in shadow mode (observe only, no forwarding)
+        mirror_mode (bool): Run in mirror mode (parallel capture and forward)
+        parallel (bool): Enable parallel operation (sniff capture)
+        capture_mode (str): Force capture mode (auto, sniff, socket)
+        log_traps (str): Log all observed traps to file
 
     Returns:
         int: 0 on success, non-zero on failure
@@ -59,8 +93,8 @@ def start_daemon():
     # Get our own PID to exclude from the check
     own_pid = os.getpid()
 
-    # Check for running instances, excluding our own process
-    cmd = f"ps aux | grep -i 'trapninja\\|trapNinja' | grep -v grep | grep -v \" {own_pid} \" | grep -v \"grep\""
+    # Check for running instances, excluding our own process and CLI commands
+    cmd = _build_process_check_cmd(own_pid)
     processes = run_command_safe(cmd)
 
     if processes:
@@ -116,26 +150,60 @@ def start_daemon():
 
     # Create a subprocess that will run independently
     try:
-        # Build the command without the --start argument
+        # Build the command using --foreground-daemon (hidden arg for daemon mode)
         script_path = os.path.abspath(sys.argv[0])
-        args = [sys.executable, script_path, "--foreground"]
+        args = [sys.executable, script_path, "--foreground-daemon"]
 
-        # Copy any other arguments except --start
+        # Daemon control arguments that should NOT be passed to the subprocess
+        # These are mutually exclusive with --foreground-daemon and would cause crashes
+        DAEMON_CONTROL_ARGS = {
+            '--start', '--stop', '--restart', '--status', '--foreground',
+            '--foreground-daemon'
+        }
+        
+        # Shadow mode arguments that may be passed via function params
+        # These need to be added explicitly as they may not be in sys.argv
+        # when using subcommand style (e.g., 'daemon start --shadow-mode')
+        SHADOW_MODE_ARGS = {
+            '--shadow-mode', '--mirror-mode', '--parallel',
+            '--capture-mode', '--log-traps'
+        }
+
+        # Copy runtime configuration arguments, filtering out daemon control commands
+        # and shadow mode args (we'll add those explicitly below)
         for arg in sys.argv[1:]:
-            if arg != "--start" and arg != "--foreground":
-                args.append(arg)
+            # Skip daemon control args
+            if arg in DAEMON_CONTROL_ARGS:
+                continue
+            # Skip shadow mode args from argv (we add them explicitly)
+            if arg in SHADOW_MODE_ARGS:
+                continue
+            # Skip the value following --capture-mode or --log-traps if present
+            args.append(arg)
+        
+        # Explicitly add shadow mode arguments based on function parameters
+        if shadow_mode:
+            args.append('--shadow-mode')
+        if mirror_mode:
+            args.append('--mirror-mode')
+        if parallel:
+            args.append('--parallel')
+        if capture_mode:
+            args.extend(['--capture-mode', capture_mode])
+        if log_traps:
+            args.extend(['--log-traps', log_traps])
 
         # Python 3.6 compatible way to start detached process
         if os.name == 'posix':  # Unix/Linux/MacOS
-            # Create null file objects for stdin/stdout/stderr
-            devnull = open(os.devnull, 'w')
-
+            # Use DEVNULL for clean file handle management
+            # Note: subprocess.DEVNULL properly handles the file descriptor
             daemon_process = subprocess.Popen(
                 args,
-                stdout=devnull,
-                stderr=devnull,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
-                preexec_fn=os.setsid  # Create new session (detach from parent)
+                preexec_fn=os.setsid,  # Create new session (detach from parent)
+                close_fds=True  # Close inherited file descriptors
             )
         else:  # Windows
             daemon_process = subprocess.Popen(
@@ -151,8 +219,16 @@ def start_daemon():
         with open(PID_FILE, 'w') as f:
             f.write(str(daemon_pid))
 
-        print(f"TrapNinja daemon started successfully with PID {daemon_pid}")
-        return 0
+        print(f"Daemon process spawned with PID {daemon_pid}")
+        
+        # Verify daemon started successfully
+        print("Verifying daemon startup...")
+        if _verify_daemon_started(daemon_pid, timeout=15):
+            print(f"✓ TrapNinja daemon started successfully with PID {daemon_pid}")
+            return 0
+        else:
+            print(f"✗ Daemon may not have started correctly. Check logs at {LOG_FILE}")
+            return 1
 
     except Exception as e:
         print(f"Error starting daemon: {e}")
@@ -163,6 +239,109 @@ def start_daemon():
             except:
                 pass
         return 1
+
+
+def _verify_daemon_started(pid: int, timeout: int = 15) -> bool:
+    """
+    Verify the daemon started successfully.
+    
+    Checks:
+    1. Process is still running
+    2. Control socket responds to ping
+    3. Logs file shows successful initialization
+    
+    Args:
+        pid: Daemon process ID
+        timeout: Maximum seconds to wait (default 15 for complex setups)
+        
+    Returns:
+        True if daemon started successfully
+    """
+    import time
+    from .control import ControlSocket
+    
+    start_time = time.time()
+    last_status = ""
+    socket_attempts = 0
+    
+    # Give daemon a moment to initialize
+    time.sleep(1.5)
+    
+    while time.time() - start_time < timeout:
+        # Check process is still running
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            # Process died - try to get info from log file
+            print(f"  Daemon process {pid} exited unexpectedly")
+            _show_daemon_crash_info()
+            return False
+        
+        # Try to ping control socket
+        try:
+            socket_attempts += 1
+            response = ControlSocket.send_command('ping', timeout=2.0)
+            if response.get('status') == ControlSocket.SUCCESS:
+                return True
+            # Got response but not success - log it
+            new_status = f"Got response: {response.get('status')}"
+            if new_status != last_status:
+                print(f"  {new_status}")
+                last_status = new_status
+        except ConnectionRefusedError:
+            # Control socket not ready yet - this is normal during startup
+            if socket_attempts == 5:  # Only show once
+                print(f"  Waiting for control socket...")
+        except FileNotFoundError:
+            # Socket file doesn't exist yet
+            pass
+        except Exception as e:
+            # Log unexpected errors after a few attempts
+            if socket_attempts > 3:
+                new_status = f"Socket error: {type(e).__name__}"
+                if new_status != last_status:
+                    print(f"  {new_status}")
+                    last_status = new_status
+        
+        time.sleep(0.5)
+    
+    # Timeout reached - check if process at least exists
+    try:
+        os.kill(pid, 0)
+        # Process exists but control socket not responding
+        print(f"  Warning: Control socket not responding after {timeout}s, but process {pid} is running")
+        print(f"  Daemon may still be initializing (complex HA/cache setup).")
+        print(f"  Check status with: --status")
+        print(f"  Check logs at: {LOG_FILE}")
+        return True  # Give benefit of the doubt
+    except OSError:
+        print(f"  Daemon process {pid} died during startup")
+        _show_daemon_crash_info()
+        return False
+
+
+def _show_daemon_crash_info():
+    """
+    Show relevant information when daemon crashes during startup.
+    Reads the last few lines of the log file for context.
+    """
+    if os.path.exists(LOG_FILE):
+        try:
+            print(f"\n  Recent log entries from {LOG_FILE}:")
+            with open(LOG_FILE, 'r') as f:
+                # Read last 1KB of file
+                f.seek(0, 2)  # Go to end
+                size = f.tell()
+                f.seek(max(0, size - 2048))  # Go back up to 2KB
+                lines = f.read().splitlines()
+                # Show last 10 lines
+                for line in lines[-10:]:
+                    print(f"    {line}")
+        except Exception as e:
+            print(f"  Could not read log file: {e}")
+    else:
+        print(f"  Log file not found: {LOG_FILE}")
+        print(f"  Check if daemon has write access to log directory")
 
 
 def stop_daemon():
@@ -193,8 +372,8 @@ def stop_daemon():
     else:
         print("No PID file found")
 
-    # Find all running instances, excluding our own stop command
-    cmd = f"ps aux | grep -i 'trapninja\\|trapNinja' | grep -v grep | grep -v '\\-\\-status' | grep -v '\\-\\-stop' | grep -v \" {own_pid} \""
+    # Find all running instances, excluding our own stop command and other CLI commands
+    cmd = _build_process_check_cmd(own_pid)
     processes = run_command_safe(cmd)
 
     if not processes:
@@ -272,8 +451,7 @@ def stop_daemon():
 
     # Verify all processes are stopped
     time.sleep(1)
-    cmd = f"ps aux | grep -i 'trapninja\\|trapNinja' | grep -v grep | grep -v '\\-\\-status' | grep -v '\\-\\-stop' | grep -v \" {own_pid} \""
-    remaining = run_command_safe(cmd)
+    remaining = run_command_safe(_build_process_check_cmd(own_pid))
 
     if remaining:
         print("\nWARNING: Some TrapNinja processes may still be running:")
@@ -297,8 +475,7 @@ def status_daemon():
     # First check for PID file
     if not os.path.exists(PID_FILE):
         # No PID file, but check for running processes anyway
-        cmd = f"ps aux | grep -i 'trapninja\\|trapNinja' | grep -v grep | grep -v \" {own_pid} \" | grep -v \"\\-\\-status\" | grep -v \"\\-\\-stop\" | grep -v \"\\-\\-start\""
-        processes = run_command_safe(cmd)
+        processes = run_command_safe(_build_process_check_cmd(own_pid))
 
         if processes:
             print("TrapNinja appears to be running but PID file is missing:")
@@ -364,8 +541,7 @@ def status_daemon():
                 pass
 
             # Check if it's running under a different PID
-            cmd = f"ps aux | grep -i 'trapninja\\|trapNinja' | grep -v grep | grep -v \" {own_pid} \" | grep -v \"\\-\\-status\" | grep -v \"\\-\\-stop\" | grep -v \"\\-\\-start\""
-            processes = run_command_safe(cmd)
+            processes = run_command_safe(_build_process_check_cmd(own_pid))
 
             if processes:
                 print("\nHowever, TrapNinja appears to be running with a different PID:")
@@ -375,8 +551,7 @@ def status_daemon():
     except Exception as e:
         print(f"Error checking status: {e}")
         print("Checking for running processes anyway...")
-        cmd = f"ps aux | grep -i 'trapninja\\|trapNinja' | grep -v grep | grep -v \" {own_pid} \" | grep -v \"\\-\\-status\" | grep -v \"\\-\\-stop\" | grep -v \"\\-\\-start\""
-        processes = run_command_safe(cmd)
+        processes = run_command_safe(_build_process_check_cmd(own_pid))
 
         if processes:
             print("TrapNinja appears to be running:")
@@ -385,16 +560,30 @@ def status_daemon():
         return 2
 
 
-def restart_daemon():
+def restart_daemon(shadow_mode=False, mirror_mode=False, parallel=False,
+                   capture_mode=None, log_traps=None):
     """
     Restart the daemon
+
+    Args:
+        shadow_mode (bool): Run in shadow mode (observe only, no forwarding)
+        mirror_mode (bool): Run in mirror mode (parallel capture and forward)
+        parallel (bool): Enable parallel operation (sniff capture)
+        capture_mode (str): Force capture mode (auto, sniff, socket)
+        log_traps (str): Log all observed traps to file
 
     Returns:
         int: 0 on success, non-zero on failure
     """
     stop_result = stop_daemon()
     time.sleep(2)  # Give it a moment to fully shut down
-    start_result = start_daemon()
+    start_result = start_daemon(
+        shadow_mode=shadow_mode,
+        mirror_mode=mirror_mode,
+        parallel=parallel,
+        capture_mode=capture_mode,
+        log_traps=log_traps
+    )
 
     return 0 if (stop_result == 0 and start_result == 0) else 1
 

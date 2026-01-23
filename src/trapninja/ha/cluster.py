@@ -21,14 +21,16 @@ from .state import HAState, HAStateManager
 from .messages import HAMessage, HAMessageType, MessageFactory
 from .config import HAConfig
 
+logger = logging.getLogger("trapninja")
+
 # Try to import config sync (optional feature)
 try:
     from .sync import ConfigSyncManager, ConfigBundle
     CONFIG_SYNC_AVAILABLE = True
-except ImportError:
+    logger.debug("Config sync module imported successfully")
+except ImportError as e:
     CONFIG_SYNC_AVAILABLE = False
-
-logger = logging.getLogger("trapninja")
+    logger.warning(f"Config sync module not available: {e}")
 
 
 class HACluster:
@@ -98,6 +100,9 @@ class HACluster:
         self.peer_priority: int = 0
         self.peer_uptime: float = 0
         
+        # Failover replay tracking
+        self._failover_gap_start: Optional[float] = None
+        
         # Flags
         self.split_brain_detected = False
         self.manual_override = False
@@ -105,13 +110,25 @@ class HACluster:
         # Config sync manager (optional)
         self.config_sync: Optional['ConfigSyncManager'] = None
         if CONFIG_SYNC_AVAILABLE and config_dir:
-            self.config_sync = ConfigSyncManager(
-                config_dir=config_dir,
-                instance_id=self.instance_id,
-                peer_host=config.peer_host,
-                peer_port=config.peer_port,
-                on_config_changed=on_config_changed
-            )
+            logger.info(f"Initializing config sync: config_dir={config_dir}")
+            logger.info(f"Config sync peer: {config.peer_host}:{config.peer_port}")
+            try:
+                self.config_sync = ConfigSyncManager(
+                    config_dir=config_dir,
+                    instance_id=self.instance_id,
+                    peer_host=config.peer_host,
+                    peer_port=config.peer_port,
+                    on_config_changed=on_config_changed
+                )
+                logger.info("ConfigSyncManager created successfully")
+            except Exception as e:
+                logger.error(f"Failed to create ConfigSyncManager: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
+        elif not CONFIG_SYNC_AVAILABLE:
+            logger.info("Config sync not available (module import failed)")
+        elif not config_dir:
+            logger.info("Config sync disabled (no config_dir provided)")
         
         logger.info(f"HA Cluster initialized - Instance ID: {self.instance_id[:8]}...")
         logger.info(f"Mode: {config.mode}, Priority: {config.priority}")
@@ -251,7 +268,8 @@ class HACluster:
                 "last_trap_time": self.last_trap_time,
                 "manual_override": self.manual_override,
                 "auto_failback": self.config.auto_failback,
-                "enabled": self.config.enabled
+                "enabled": self.config.enabled,
+                "failover_gap_pending": self._failover_gap_start is not None
             }
             
             # Add config sync status if available
@@ -475,10 +493,27 @@ class HACluster:
         """Handle incoming peer connection."""
         try:
             conn.settimeout(5.0)
-            data = conn.recv(4096)
+            data = conn.recv(65536)  # Larger buffer for config sync
             if not data:
                 return
             
+            # Try to parse as JSON first (config sync messages)
+            try:
+                json_data = json.loads(data.decode('utf-8'))
+                msg_type = json_data.get('type', '')
+                
+                # Handle config sync messages
+                if msg_type == 'config_request':
+                    self._handle_config_request_json(conn, json_data, addr)
+                    return
+                elif msg_type == 'config_push':
+                    self._handle_config_push_json(conn, json_data, addr)
+                    return
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                # Not a JSON message, try as HAMessage
+                pass
+            
+            # Parse as HAMessage
             try:
                 message = HAMessage.from_bytes(data)
             except Exception as e:
@@ -486,7 +521,16 @@ class HACluster:
                 return
             
             if not message.verify():
-                logger.warning(f"HA message checksum failed from {addr}")
+                logger.warning(
+                    f"HA message checksum failed from {addr} - "
+                    f"possible version mismatch between HA nodes. "
+                    f"Received: type={message.msg_type.value}, "
+                    f"sender={message.sender_id[:8]}..."
+                )
+                logger.debug(
+                    f"Checksum details - received: {message.checksum}, "
+                    f"calculated: {message.calculate_checksum()}"
+                )
                 return
             
             self._process_message(message, addr)
@@ -506,6 +550,67 @@ class HACluster:
             logger.error(f"Error handling connection from {addr}: {e}")
         finally:
             conn.close()
+    
+    def _handle_config_request_json(self, conn: socket.socket, data: dict, addr: tuple):
+        """Handle JSON config request from peer."""
+        sender = data.get('sender', 'unknown')[:8]
+        logger.info(f"Config request from {sender}... at {addr}")
+        
+        if not self.config_sync:
+            logger.warning("Config request received but config sync not available")
+            response = {'type': 'error', 'error': 'Config sync not available'}
+            conn.send(json.dumps(response).encode('utf-8'))
+            return
+        
+        if self.current_state != HAState.PRIMARY:
+            logger.warning(f"Config request received but we are {self.current_state.name}, not PRIMARY")
+            response = {'type': 'error', 'error': f'Not PRIMARY (currently {self.current_state.name})'}
+            conn.send(json.dumps(response).encode('utf-8'))
+            return
+        
+        # Get config bundle and send response
+        bundle = self.config_sync.handle_config_request()
+        if bundle:
+            response = {
+                'type': 'config_response',
+                'bundle': bundle.to_dict(),
+            }
+            conn.send(json.dumps(response).encode('utf-8'))
+            logger.info(f"Sent config bundle to {sender}...")
+        else:
+            response = {'type': 'error', 'error': 'Failed to create bundle'}
+            conn.send(json.dumps(response).encode('utf-8'))
+    
+    def _handle_config_push_json(self, conn: socket.socket, data: dict, addr: tuple):
+        """Handle JSON config push from peer."""
+        sender = data.get('sender', 'unknown')[:8]
+        logger.info(f"Config push from {sender}... at {addr}")
+        
+        if not self.config_sync:
+            logger.warning("Config push received but config sync not available")
+            response = {'success': False, 'error': 'Config sync not available'}
+            conn.send(json.dumps(response).encode('utf-8'))
+            return
+        
+        if self.current_state == HAState.PRIMARY:
+            logger.warning("Config push received but we are PRIMARY - rejecting")
+            response = {'success': False, 'error': 'Cannot push to PRIMARY'}
+            conn.send(json.dumps(response).encode('utf-8'))
+            return
+        
+        # Apply the bundle
+        bundle_data = data.get('bundle', {})
+        try:
+            from .sync import ConfigBundle
+            bundle = ConfigBundle.from_dict(bundle_data)
+            success, msg = self.config_sync.handle_config_push(bundle.to_bytes())
+            response = {'success': success, 'message': msg}
+            conn.send(json.dumps(response).encode('utf-8'))
+            logger.info(f"Config push result: success={success}, {msg}")
+        except Exception as e:
+            logger.error(f"Failed to handle config push: {e}")
+            response = {'success': False, 'error': str(e)}
+            conn.send(json.dumps(response).encode('utf-8'))
     
     def _start_heartbeat(self):
         """Start heartbeat thread."""
@@ -719,6 +824,142 @@ class HACluster:
         logger.info("Completing failover to PRIMARY")
         self._set_state(HAState.PRIMARY)
         self.split_brain_detected = False
+        
+        # CRITICAL: Replay missed traps from the failover gap
+        # This runs AFTER we become PRIMARY to ensure zero trap loss
+        if self._failover_gap_start:
+            self._trigger_failover_replay()
+        else:
+            logger.info("No failover gap recorded - replay not needed (clean failover)")
+    
+    def _trigger_failover_replay(self):
+        """
+        Trigger replay of traps from the failover gap window.
+        
+        This method queries the LOCAL cache for traps received during
+        the time window between the last known good heartbeat from the
+        peer (when we know PRIMARY was alive) and now.
+        
+        Both PRIMARY and SECONDARY receive and cache traps, but only
+        PRIMARY forwards them. After failover, SECONDARY (now PRIMARY)
+        replays traps from its own cache to fill the gap.
+        
+        Timeline:
+            T=0:00:00  Last heartbeat from PRIMARY (peer_last_seen)
+            T=0:00:03  PRIMARY fails (unknown to us yet)
+            T=0:00:06  Heartbeat timeout detected
+            T=0:00:08  We become PRIMARY
+            T=0:00:08  Replay traps from T=0:00:00 to T=0:00:08
+        """
+        gap_start = self._failover_gap_start
+        gap_end = time.time()
+        gap_seconds = gap_end - gap_start
+        
+        # Convert to human-readable timestamps
+        from datetime import datetime
+        start_str = datetime.fromtimestamp(gap_start).strftime('%H:%M:%S.%f')[:-3]
+        end_str = datetime.fromtimestamp(gap_end).strftime('%H:%M:%S.%f')[:-3]
+        
+        logger.info(f"========================================")
+        logger.info(f"FAILOVER REPLAY: Gap detected")
+        logger.info(f"  Gap start: {start_str}")
+        logger.info(f"  Gap end:   {end_str}")
+        logger.info(f"  Duration:  {gap_seconds:.1f} seconds")
+        logger.info(f"========================================")
+        
+        # Clear the gap start now that we've captured it
+        self._failover_gap_start = None
+        
+        # Don't replay if gap is too small (less than 1 second)
+        if gap_seconds < 1.0:
+            logger.info(f"Gap too small ({gap_seconds:.1f}s < 1.0s) - skipping replay")
+            return
+        
+        # Don't replay if gap is too large (more than 5 minutes - something is wrong)
+        if gap_seconds > 300:
+            logger.warning(f"Gap too large ({gap_seconds:.1f}s > 300s) - limiting to 5 minutes")
+            gap_start = gap_end - 300
+            gap_seconds = 300
+        
+        # Try to get cache and replay engine
+        try:
+            from ..cache import get_cache
+            from ..cache.replay import ReplayEngine
+            from datetime import datetime
+            
+            cache = get_cache()
+            if not cache or not cache.available:
+                logger.warning("Cache not available - cannot replay failover gap")
+                logger.warning("Traps during failover window may have been lost")
+                return
+            
+            # Create replay engine
+            replay_engine = ReplayEngine(cache)
+            
+            # Convert timestamps to datetime
+            start_dt = datetime.fromtimestamp(gap_start)
+            end_dt = datetime.fromtimestamp(gap_end)
+            
+            # Get list of destinations to replay
+            destinations = cache.get_destinations()
+            if not destinations:
+                logger.info("No destinations found in cache - nothing to replay")
+                return
+            
+            logger.info(f"Found {len(destinations)} destination(s) in cache: {destinations}")
+            
+            # Replay each destination
+            total_sent = 0
+            total_failed = 0
+            
+            for dest in destinations:
+                # Count entries first
+                try:
+                    count = cache.count_range(dest, start_dt, end_dt)
+                    if count == 0:
+                        logger.info(f"No traps to replay for destination '{dest}' (0 in cache)")
+                        continue
+                    
+                    logger.info(f"Replaying {count} traps for destination '{dest}'")
+                    
+                    # Replay with rate limiting (2000/sec default for failover)
+                    result = replay_engine.replay(
+                        destination=dest,
+                        start=start_dt,
+                        end=end_dt,
+                        rate_limit=2000,  # High rate for failover recovery
+                        dry_run=False,
+                        mark_as_replay=True
+                    )
+                    
+                    total_sent += result.sent
+                    total_failed += result.failed
+                    
+                    logger.info(
+                        f"  Destination '{dest}': sent={result.sent}, "
+                        f"failed={result.failed}, rate={result.rate_achieved:.0f}/s"
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"Error replaying destination '{dest}': {e}")
+                    continue
+            
+            logger.info(f"========================================")
+            logger.info(f"FAILOVER REPLAY COMPLETE")
+            logger.info(f"  Total sent: {total_sent}")
+            logger.info(f"  Total failed: {total_failed}")
+            logger.info(f"  Gap duration: {gap_seconds:.1f}s")
+            if total_sent == 0 and total_failed == 0:
+                logger.info(f"  Note: No traps needed replay (cache was empty for gap window)")
+            logger.info(f"========================================")
+            
+        except ImportError as e:
+            logger.error(f"Failed to import cache/replay modules: {e}")
+            logger.error("Failover replay not available - traps may have been lost")
+        except Exception as e:
+            logger.error(f"Error during failover replay: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
     
     def _check_peer_timeout(self):
         """Check if peer has timed out."""
@@ -732,6 +973,12 @@ class HACluster:
             
             if self.current_state == HAState.SECONDARY:
                 logger.info("Peer timeout - claiming PRIMARY")
+                # CRITICAL: Save the last known good heartbeat time BEFORE clearing
+                # This is used for failover replay to determine the gap window
+                self._failover_gap_start = self.peer_last_seen
+                from datetime import datetime
+                gap_start_str = datetime.fromtimestamp(self._failover_gap_start).strftime('%H:%M:%S.%f')[:-3]
+                logger.info(f"Failover gap start recorded: {gap_start_str} (will replay from this time)")
                 self._claim_primary()
             
             self.peer_last_seen = None
@@ -785,13 +1032,20 @@ class HACluster:
                 'message': 'Config sync not available'
             }
         
-        from .sync import SyncMode
-        mode = SyncMode.FORCE if force else (
-            SyncMode.PUSH if self.current_state == HAState.PRIMARY else SyncMode.PULL
-        )
-        
-        result = self.config_sync.sync_now(mode)
-        return result.to_dict()
+        if self.current_state == HAState.PRIMARY:
+            success = self.config_sync.push_configs()
+            return {
+                'success': success,
+                'message': 'Pushed configs to peer' if success else 'Push failed',
+                'direction': 'push'
+            }
+        else:
+            success = self.config_sync.pull_configs()
+            return {
+                'success': success,
+                'message': 'Pulled configs from PRIMARY' if success else 'Pull failed',
+                'direction': 'pull'
+            }
     
     def _close_sockets(self):
         """Close all sockets."""

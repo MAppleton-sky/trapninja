@@ -102,14 +102,19 @@ class QueueStats:
             self.max_depth = depth
     
     def get_stats(self) -> Dict[str, Any]:
+        # Update max depth on every stats check
+        current_depth = packet_queue.qsize()
+        if current_depth > self.max_depth:
+            self.max_depth = current_depth
+        
         return {
-            'current_depth': packet_queue.qsize(),
+            'current_depth': current_depth,
             'max_depth': self.max_depth,
             'total_queued': self.total_queued,
             'total_dropped': self.total_dropped,
             'full_events': self.full_events,
             'queue_capacity': QUEUE_MAX_SIZE,
-            'utilization': packet_queue.qsize() / QUEUE_MAX_SIZE
+            'utilization': current_depth / QUEUE_MAX_SIZE
         }
 
 
@@ -358,22 +363,21 @@ def cleanup_udp_sockets():
 def start_packet_processors(num_workers: int = None) -> List[threading.Thread]:
     """
     Start packet processing workers.
-    Uses the optimized packet_processor module.
+    Uses the optimized processing module.
     """
     try:
-        from .packet_processor import start_workers, start_stats_monitor
+        from .processing import start_workers
         
         # Start workers
-        workers = start_workers(packet_queue, num_workers)
-        
-        # Start stats monitor
-        start_stats_monitor(interval=30.0)
+        # IMPORTANT: Use keyword argument for num_workers to avoid
+        # passing it as stop_event (which is the 2nd positional parameter)
+        workers = start_workers(packet_queue, num_workers=num_workers)
         
         return workers
         
     except ImportError:
         # Fallback to legacy worker implementation
-        logger.warning("Using legacy packet processor (packet_processor module not found)")
+        logger.warning("Using legacy packet processor (processing module not found)")
         return _start_legacy_workers(num_workers or 4)
 
 
@@ -513,14 +517,14 @@ def forward_trap(packet):
 def forward_packet(source_ip: str, payload: bytes, destinations: List):
     """
     Forward packet to destinations.
-    Uses optimized forwarding from packet_processor if available.
+    Uses optimized forwarding from processing module if available.
     
     IMPORTANT: Uses FORWARD_SOURCE_PORT (not 162) to prevent
     forwarded packets from being re-captured.
     """
     try:
-        from .packet_processor import forward_fast
-        forward_fast(source_ip, payload, destinations)
+        from .processing import forward_packet as forward_packet_raw
+        forward_packet_raw(source_ip, payload, destinations)
     except ImportError:
         # Fallback to Scapy-based forwarding
         _forward_packet_scapy(source_ip, payload, destinations)

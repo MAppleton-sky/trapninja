@@ -51,6 +51,10 @@ class CollectorConfig:
     # Export settings
     export_interval: int = 60  # Export metrics every minute
     metrics_dir: str = "/var/log/trapninja/metrics"
+    
+    # Global labels applied to all Prometheus metrics
+    # Example: {"environment": "production", "on_prem": "1"}
+    global_labels: Dict[str, str] = field(default_factory=dict)
 
 
 class LRUDict(OrderedDict):
@@ -243,32 +247,40 @@ class GranularStatsCollector:
     # QUERY METHODS
     # =========================================================================
     
-    def get_ip_stats(self, ip_address: str) -> Optional[Dict[str, Any]]:
+    def get_ip_stats(self, ip_address: str, top_n_oids: int = 10) -> Optional[Dict[str, Any]]:
         """
         Get detailed statistics for a specific IP.
         
         Args:
             ip_address: IP to look up
+            top_n_oids: Number of top OIDs to include in details (default 10)
             
         Returns:
             Dictionary with IP stats or None if not found
         """
         if ip_address in self._ip_stats:
-            return self._ip_stats[ip_address].to_dict(include_details=True)
+            return self._ip_stats[ip_address].to_dict(
+                include_details=True, 
+                top_n_oids=top_n_oids
+            )
         return None
     
-    def get_oid_stats(self, oid: str) -> Optional[Dict[str, Any]]:
+    def get_oid_stats(self, oid: str, top_n_sources: int = 10) -> Optional[Dict[str, Any]]:
         """
         Get detailed statistics for a specific OID.
         
         Args:
             oid: OID to look up
+            top_n_sources: Number of top source IPs to include (default 10)
             
         Returns:
             Dictionary with OID stats or None if not found
         """
         if oid in self._oid_stats:
-            return self._oid_stats[oid].to_dict(include_details=True)
+            return self._oid_stats[oid].to_dict(
+                include_details=True,
+                top_n_sources=top_n_sources
+            )
         return None
     
     def get_destination_stats(self, destination: str) -> Optional[Dict[str, Any]]:
@@ -352,7 +364,12 @@ class GranularStatsCollector:
         Returns:
             StatsSnapshot with summary and top entities
         """
-        snapshot = StatsSnapshot(timestamp=time.time())
+        now = time.time()
+        snapshot = StatsSnapshot(timestamp=now)
+        
+        # Collection period info
+        snapshot.collection_started = self._start_time
+        snapshot.uptime_seconds = now - self._start_time
         
         # Summary
         snapshot.total_traps = self._total_traps
@@ -383,6 +400,20 @@ class GranularStatsCollector:
             all_last_seen = [ip.last_seen for ip in ip_stats_list]
             snapshot.oldest_data = min(all_first_seen) if all_first_seen else 0
             snapshot.newest_data = max(all_last_seen) if all_last_seen else 0
+        
+        # IP+OID combinations (top 100)
+        ip_oid_combinations = []
+        for ip_stat in ip_stats_list:
+            for oid, count in ip_stat.oid_counts.items():
+                ip_oid_combinations.append({
+                    'ip': ip_stat.ip_address,
+                    'oid': oid,
+                    'count': count
+                })
+        
+        # Sort by count and take top 100
+        ip_oid_combinations.sort(key=lambda x: x['count'], reverse=True)
+        snapshot.top_ip_oid_combinations = ip_oid_combinations[:100]
         
         return snapshot
     
@@ -477,6 +508,37 @@ class GranularStatsCollector:
     # EXPORT METHODS
     # =========================================================================
     
+    def _format_labels(self, extra_labels: Dict[str, str] = None) -> str:
+        """
+        Format labels for Prometheus metric output.
+        
+        Combines global labels with any metric-specific labels.
+        Labels are sorted alphabetically for consistent output.
+        
+        Args:
+            extra_labels: Additional labels for this specific metric
+            
+        Returns:
+            Formatted label string like '{env="prod",ip="10.0.0.1"}' or ''
+        """
+        all_labels = {}
+        
+        # Add global labels first
+        if self.config.global_labels:
+            all_labels.update(self.config.global_labels)
+        
+        # Add metric-specific labels (these can override globals if needed)
+        if extra_labels:
+            all_labels.update(extra_labels)
+        
+        if not all_labels:
+            return ""
+        
+        # Sort labels alphabetically for consistent output
+        sorted_labels = sorted(all_labels.items())
+        label_parts = [f'{k}="{v}"' for k, v in sorted_labels]
+        return "{" + ",".join(label_parts) + "}"
+    
     def export_prometheus(self) -> str:
         """
         Export stats in Prometheus format with labels.
@@ -484,6 +546,8 @@ class GranularStatsCollector:
         Exports metrics that are valuable for observability platforms:
         - Counters: totals (let Prometheus calculate rates)
         - Gauges: current rates, peak rates (not derivable from counters for silent sources)
+        
+        Global labels from config are applied to ALL metrics.
         
         NOT exported (observability platforms calculate natively):
         - Average rates (use rate() function)
@@ -508,44 +572,49 @@ class GranularStatsCollector:
         # Header
         lines.append("# TrapNinja Granular Statistics")
         lines.append(f"# Timestamp: {now}")
+        if self.config.global_labels:
+            lines.append(f"# Global labels: {self.config.global_labels}")
         lines.append("")
+        
+        # Global labels string for metrics without extra labels
+        global_labels = self._format_labels()
         
         # =================================================================
         # GLOBAL METRICS
         # =================================================================
         lines.append("# HELP trapninja_traps_total Total traps received")
         lines.append("# TYPE trapninja_traps_total counter")
-        lines.append(f"trapninja_traps_total {self._total_traps}")
+        lines.append(f"trapninja_traps_total{global_labels} {self._total_traps}")
         
         lines.append("")
         lines.append("# HELP trapninja_traps_forwarded_total Total traps forwarded")
         lines.append("# TYPE trapninja_traps_forwarded_total counter")
-        lines.append(f"trapninja_traps_forwarded_total {self._total_forwarded}")
+        lines.append(f"trapninja_traps_forwarded_total{global_labels} {self._total_forwarded}")
         
         lines.append("")
         lines.append("# HELP trapninja_traps_blocked_total Total traps blocked")
         lines.append("# TYPE trapninja_traps_blocked_total counter")
-        lines.append(f"trapninja_traps_blocked_total {self._total_blocked}")
+        lines.append(f"trapninja_traps_blocked_total{global_labels} {self._total_blocked}")
         
         lines.append("")
         lines.append("# HELP trapninja_traps_redirected_total Total traps redirected")
         lines.append("# TYPE trapninja_traps_redirected_total counter")
-        lines.append(f"trapninja_traps_redirected_total {self._total_redirected}")
+        lines.append(f"trapninja_traps_redirected_total{global_labels} {self._total_redirected}")
         
         lines.append("")
         lines.append("# HELP trapninja_unique_sources Number of unique source IPs")
         lines.append("# TYPE trapninja_unique_sources gauge")
-        lines.append(f"trapninja_unique_sources {unique_ips}")
+        lines.append(f"trapninja_unique_sources{global_labels} {unique_ips}")
         
         lines.append("")
         lines.append("# HELP trapninja_unique_oids Number of unique trap OIDs")
         lines.append("# TYPE trapninja_unique_oids gauge")
-        lines.append(f"trapninja_unique_oids {unique_oids}")
+        lines.append(f"trapninja_unique_oids{global_labels} {unique_oids}")
         
         lines.append("")
         lines.append("# HELP trapninja_uptime_seconds Seconds since stats collection started")
         lines.append("# TYPE trapninja_uptime_seconds gauge")
-        lines.append(f"trapninja_uptime_seconds {uptime:.0f}")
+        lines.append(f"trapninja_uptime_seconds{global_labels} {uptime:.0f}")
         
         # =================================================================
         # PER-IP METRICS (top 50 by volume)
@@ -555,7 +624,8 @@ class GranularStatsCollector:
         lines.append("# TYPE trapninja_ip_traps_total counter")
         for ip_stat in sorted(ip_stats_list, 
                               key=lambda x: x.total_traps, reverse=True)[:50]:
-            lines.append(f'trapninja_ip_traps_total{{ip="{ip_stat.ip_address}"}} {ip_stat.total_traps}')
+            labels = self._format_labels({"ip": ip_stat.ip_address})
+            lines.append(f'trapninja_ip_traps_total{labels} {ip_stat.total_traps}')
         
         # Current rate - useful as instant gauge
         lines.append("")
@@ -564,7 +634,8 @@ class GranularStatsCollector:
         for ip_stat in sorted(ip_stats_list,
                               key=lambda x: x.rate_per_minute, reverse=True)[:50]:
             if ip_stat.rate_per_minute > 0:
-                lines.append(f'trapninja_ip_rate_per_minute{{ip="{ip_stat.ip_address}"}} {ip_stat.rate_per_minute:.2f}')
+                labels = self._format_labels({"ip": ip_stat.ip_address})
+                lines.append(f'trapninja_ip_rate_per_minute{labels} {ip_stat.rate_per_minute:.2f}')
         
         # Peak rate - valuable because observability platforms can't calculate
         # this for sources that have gone silent
@@ -574,7 +645,8 @@ class GranularStatsCollector:
         for ip_stat in sorted(ip_stats_list,
                               key=lambda x: x.peak_rate_per_minute, reverse=True)[:50]:
             if ip_stat.peak_rate_per_minute > 0:
-                lines.append(f'trapninja_ip_peak_rate_per_minute{{ip="{ip_stat.ip_address}"}} {ip_stat.peak_rate_per_minute:.2f}')
+                labels = self._format_labels({"ip": ip_stat.ip_address})
+                lines.append(f'trapninja_ip_peak_rate_per_minute{labels} {ip_stat.peak_rate_per_minute:.2f}')
         
         # Blocked count per IP - useful for identifying problematic sources
         lines.append("")
@@ -583,7 +655,8 @@ class GranularStatsCollector:
         for ip_stat in sorted(ip_stats_list,
                               key=lambda x: x.blocked, reverse=True)[:50]:
             if ip_stat.blocked > 0:
-                lines.append(f'trapninja_ip_blocked_total{{ip="{ip_stat.ip_address}"}} {ip_stat.blocked}')
+                labels = self._format_labels({"ip": ip_stat.ip_address})
+                lines.append(f'trapninja_ip_blocked_total{labels} {ip_stat.blocked}')
         
         # =================================================================
         # PER-OID METRICS (top 50 by volume)
@@ -593,7 +666,8 @@ class GranularStatsCollector:
         lines.append("# TYPE trapninja_oid_traps_total counter")
         for oid_stat in sorted(oid_stats_list,
                                key=lambda x: x.total_traps, reverse=True)[:50]:
-            lines.append(f'trapninja_oid_traps_total{{oid="{oid_stat.oid}"}} {oid_stat.total_traps}')
+            labels = self._format_labels({"oid": oid_stat.oid})
+            lines.append(f'trapninja_oid_traps_total{labels} {oid_stat.total_traps}')
         
         # Current rate
         lines.append("")
@@ -602,7 +676,8 @@ class GranularStatsCollector:
         for oid_stat in sorted(oid_stats_list,
                                key=lambda x: x.rate_per_minute, reverse=True)[:50]:
             if oid_stat.rate_per_minute > 0:
-                lines.append(f'trapninja_oid_rate_per_minute{{oid="{oid_stat.oid}"}} {oid_stat.rate_per_minute:.2f}')
+                labels = self._format_labels({"oid": oid_stat.oid})
+                lines.append(f'trapninja_oid_rate_per_minute{labels} {oid_stat.rate_per_minute:.2f}')
         
         # Peak rate - valuable for identifying trap types that cause floods
         lines.append("")
@@ -611,7 +686,8 @@ class GranularStatsCollector:
         for oid_stat in sorted(oid_stats_list,
                                key=lambda x: x.peak_rate_per_minute, reverse=True)[:50]:
             if oid_stat.peak_rate_per_minute > 0:
-                lines.append(f'trapninja_oid_peak_rate_per_minute{{oid="{oid_stat.oid}"}} {oid_stat.peak_rate_per_minute:.2f}')
+                labels = self._format_labels({"oid": oid_stat.oid})
+                lines.append(f'trapninja_oid_peak_rate_per_minute{labels} {oid_stat.peak_rate_per_minute:.2f}')
         
         # Unique sources per OID - useful for identifying widespread vs localized issues
         lines.append("")
@@ -619,7 +695,8 @@ class GranularStatsCollector:
         lines.append("# TYPE trapninja_oid_unique_sources gauge")
         for oid_stat in sorted(oid_stats_list,
                                key=lambda x: x.total_traps, reverse=True)[:50]:
-            lines.append(f'trapninja_oid_unique_sources{{oid="{oid_stat.oid}"}} {len(oid_stat.ip_counts)}')
+            labels = self._format_labels({"oid": oid_stat.oid})
+            lines.append(f'trapninja_oid_unique_sources{labels} {len(oid_stat.ip_counts)}')
         
         # =================================================================
         # PER-DESTINATION METRICS
@@ -628,14 +705,38 @@ class GranularStatsCollector:
         lines.append("# HELP trapninja_dest_forwards_total Total forwards to destination")
         lines.append("# TYPE trapninja_dest_forwards_total counter")
         for dest_stat in dest_stats_list:
-            lines.append(f'trapninja_dest_forwards_total{{destination="{dest_stat.destination}"}} {dest_stat.total_forwarded}')
+            labels = self._format_labels({"destination": dest_stat.destination})
+            lines.append(f'trapninja_dest_forwards_total{labels} {dest_stat.total_forwarded}')
         
         lines.append("")
         lines.append("# HELP trapninja_dest_failures_total Failed forwards to destination")
         lines.append("# TYPE trapninja_dest_failures_total counter")
         for dest_stat in dest_stats_list:
             if dest_stat.failed > 0:
-                lines.append(f'trapninja_dest_failures_total{{destination="{dest_stat.destination}"}} {dest_stat.failed}')
+                labels = self._format_labels({"destination": dest_stat.destination})
+                lines.append(f'trapninja_dest_failures_total{labels} {dest_stat.failed}')
+        
+        # =================================================================
+        # IP+OID COMBINATION METRICS (top 100 combinations)
+        # =================================================================
+        # Collect all IP+OID combinations from IP stats
+        # This provides granular visibility into which devices send which trap types
+        ip_oid_combinations = []
+        for ip_stat in ip_stats_list:
+            for oid, count in ip_stat.oid_counts.items():
+                ip_oid_combinations.append((ip_stat.ip_address, oid, count))
+        
+        # Sort by count and take top 100 to limit cardinality
+        ip_oid_combinations.sort(key=lambda x: x[2], reverse=True)
+        top_combinations = ip_oid_combinations[:100]
+        
+        if top_combinations:
+            lines.append("")
+            lines.append("# HELP trapninja_ip_oid_traps_total Traps from specific IP with specific OID")
+            lines.append("# TYPE trapninja_ip_oid_traps_total counter")
+            for ip, oid, count in top_combinations:
+                labels = self._format_labels({"ip": ip, "oid": oid})
+                lines.append(f'trapninja_ip_oid_traps_total{labels} {count}')
         
         return "\n".join(lines)
     
@@ -727,8 +828,14 @@ class GranularStatsCollector:
                 self.config.metrics_dir, 
                 "trapninja_granular.prom"
             )
+
+            content = self.export_prometheus()
+
+            # Ensure exactly one trailing newline
+            content = content.rstrip('\n') + '\n'
+
             with open(prom_path, 'w') as f:
-                f.write(self.export_prometheus())
+                f.write(content)
             
             # Export JSON format
             json_path = os.path.join(

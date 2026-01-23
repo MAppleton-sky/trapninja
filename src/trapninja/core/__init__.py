@@ -35,6 +35,25 @@ from .exceptions import (
     SecurityError,
 )
 
+# Import fragmentation support with fallback
+try:
+    from .fragmentation import (
+        FragmentReassemblyBuffer,
+        IPFragment,
+        parse_ip_header,
+        is_fragment,
+        is_udp_fragment,
+        generate_fragment_aware_filter,
+        generate_simple_filter,
+        get_fragment_buffer,
+        initialize_fragment_buffer,
+        shutdown_fragment_buffer,
+        get_fragment_stats,
+    )
+    FRAGMENTATION_AVAILABLE = True
+except ImportError:
+    FRAGMENTATION_AVAILABLE = False
+
 __all__ = [
     # Constants
     'SNMP_VERSION_MAP',
@@ -56,4 +75,17 @@ __all__ = [
     'ForwardingError',
     'HAError',
     'SecurityError',
+    # Fragmentation
+    'FRAGMENTATION_AVAILABLE',
+    'FragmentReassemblyBuffer',
+    'IPFragment',
+    'parse_ip_header',
+    'is_fragment',
+    'is_udp_fragment',
+    'generate_fragment_aware_filter',
+    'generate_simple_filter',
+    'get_fragment_buffer',
+    'initialize_fragment_buffer',
+    'shutdown_fragment_buffer',
+    'get_fragment_stats',
 ]

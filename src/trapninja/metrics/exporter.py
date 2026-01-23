@@ -1,0 +1,495 @@
+#!/usr/bin/env python3
+"""
+TrapNinja Metrics Exporter Module
+
+Handles exporting collected metrics in various formats:
+- Prometheus text format (.prom)
+- JSON format (.json)
+
+Supports global labels that are applied to all Prometheus metrics,
+allowing for easy integration with multi-tenant monitoring systems.
+
+Example output with global labels:
+    trapninja_traps_received_total{on_prem="1",environment="production"} 12345
+"""
+
+import os
+import json
+import logging
+from typing import Dict, Any, Optional, List
+
+logger = logging.getLogger("trapninja")
+
+
+def format_prometheus(
+    name: str,
+    value: Any,
+    labels: Dict[str, str] = None,
+    global_labels: Dict[str, str] = None,
+    help_text: str = None,
+    metric_type: str = "gauge"
+) -> str:
+    """
+    Format a metric in Prometheus format with support for global labels.
+
+    Args:
+        name: Name of the metric (should follow Prometheus naming conventions)
+        value: Value of the metric (numeric)
+        labels: Optional metric-specific labels
+        global_labels: Optional global labels to prepend to all metrics
+        help_text: Optional help text describing the metric
+        metric_type: Type of metric ('gauge', 'counter', 'histogram', 'summary')
+
+    Returns:
+        str: Metric in Prometheus exposition format
+        
+    Example:
+        >>> format_prometheus(
+        ...     "trapninja_traps_total",
+        ...     100,
+        ...     labels={"type": "v2c"},
+        ...     global_labels={"on_prem": "1"},
+        ...     help_text="Total traps received",
+        ...     metric_type="counter"
+        ... )
+        '# HELP trapninja_traps_total Total traps received\\n# TYPE trapninja_traps_total counter\\ntrapninja_traps_total{on_prem="1",type="v2c"} 100'
+    """
+    lines = []
+
+    # Add HELP and TYPE comments
+    if help_text:
+        lines.append(f"# HELP {name} {help_text}")
+        lines.append(f"# TYPE {name} {metric_type}")
+
+    # Merge global labels with metric-specific labels
+    # Global labels come first for consistent ordering
+    all_labels = {}
+    if global_labels:
+        all_labels.update(global_labels)
+    if labels:
+        all_labels.update(labels)
+
+    # Format the metric line
+    if all_labels:
+        # Sort labels for consistent output
+        sorted_labels = sorted(all_labels.items())
+        label_str = ",".join([f'{k}="{v}"' for k, v in sorted_labels])
+        lines.append(f"{name}{{{label_str}}} {value}")
+    else:
+        lines.append(f"{name} {value}")
+
+    return "\n".join(lines)
+
+
+def _format_labeled_metrics(
+    base_name: str,
+    label_name: str,
+    counter_data: Dict[str, int],
+    global_labels: Dict[str, str] = None,
+    help_text: str = None,
+    metric_type: str = "counter",
+    additional_labels: Dict[str, str] = None
+) -> List[str]:
+    """
+    Format a series of metrics with a common label dimension.
+    
+    Args:
+        base_name: Base metric name
+        label_name: Name of the varying label (e.g., "ip", "oid")
+        counter_data: Dict mapping label values to counts
+        global_labels: Global labels to apply
+        help_text: Help text for the metric
+        metric_type: Prometheus metric type
+        additional_labels: Extra labels to add to all metrics
+        
+    Returns:
+        List of formatted metric lines
+    """
+    if not counter_data:
+        return []
+    
+    lines = []
+    
+    # Add HELP and TYPE once
+    if help_text:
+        lines.append(f"# HELP {base_name} {help_text}")
+        lines.append(f"# TYPE {base_name} {metric_type}")
+    
+    # Format each metric
+    for label_value, count in counter_data.items():
+        # Build labels dict
+        labels = {label_name: label_value}
+        if additional_labels:
+            labels.update(additional_labels)
+        
+        # Merge with global labels
+        all_labels = {}
+        if global_labels:
+            all_labels.update(global_labels)
+        all_labels.update(labels)
+        
+        # Sort for consistent output
+        sorted_labels = sorted(all_labels.items())
+        label_str = ",".join([f'{k}="{v}"' for k, v in sorted_labels])
+        lines.append(f"{base_name}{{{label_str}}} {count}")
+    
+    return lines
+
+
+def export_metrics(metrics_summary: Dict[str, Any] = None) -> bool:
+    """
+    Export metrics in Prometheus format with global labels.
+    
+    Collects metrics from all sources and writes to both
+    Prometheus (.prom) and JSON formats.
+    
+    Args:
+        metrics_summary: Optional pre-computed metrics. If not provided,
+                        will collect current metrics.
+    
+    Returns:
+        True if export succeeded, False otherwise
+    """
+    from .collector import get_metrics_summary, get_current_config
+    
+    try:
+        # Get metrics if not provided
+        if metrics_summary is None:
+            metrics_summary = get_metrics_summary()
+        
+        # Get configuration
+        config = get_current_config()
+        global_labels = config.global_labels
+        
+        lines = []
+
+        # Header comments
+        lines.append(f"# TrapNinja Metrics Export")
+        lines.append(f"# Timestamp: {metrics_summary['timestamp']}")
+        lines.append(f"# Uptime: {metrics_summary['uptime_seconds']}s")
+        
+        if global_labels:
+            labels_str = ", ".join(f"{k}={v}" for k, v in global_labels.items())
+            lines.append(f"# Global Labels: {labels_str}")
+        
+        lines.append("")
+
+        # =================================================================
+        # CORE TRAP PROCESSING METRICS
+        # =================================================================
+        
+        lines.append(format_prometheus(
+            "trapninja_traps_received_total",
+            metrics_summary["total_traps_received"],
+            global_labels=global_labels,
+            help_text="Total number of SNMP traps received",
+            metric_type="counter"
+        ))
+        
+        lines.append(format_prometheus(
+            "trapninja_traps_forwarded_total",
+            metrics_summary["total_traps_forwarded"],
+            global_labels=global_labels,
+            help_text="Total number of SNMP traps forwarded to destinations",
+            metric_type="counter"
+        ))
+        
+        lines.append(format_prometheus(
+            "trapninja_traps_blocked_total",
+            metrics_summary["total_traps_blocked"],
+            global_labels=global_labels,
+            help_text="Total number of SNMP traps blocked by IP or OID filters",
+            metric_type="counter"
+        ))
+        
+        lines.append(format_prometheus(
+            "trapninja_traps_redirected_total",
+            metrics_summary["total_traps_redirected"],
+            global_labels=global_labels,
+            help_text="Total number of SNMP traps redirected to alternate destinations",
+            metric_type="counter"
+        ))
+        
+        lines.append(format_prometheus(
+            "trapninja_traps_dropped_total",
+            metrics_summary["total_traps_dropped"],
+            global_labels=global_labels,
+            help_text="Total number of SNMP traps dropped due to queue full",
+            metric_type="counter"
+        ))
+        
+        lines.append(format_prometheus(
+            "trapninja_processing_errors_total",
+            metrics_summary["processing_errors"],
+            global_labels=global_labels,
+            help_text="Total number of packet processing errors",
+            metric_type="counter"
+        ))
+
+        # =================================================================
+        # HA METRICS
+        # =================================================================
+        
+        lines.append(format_prometheus(
+            "trapninja_ha_blocked_total",
+            metrics_summary["ha_blocked"],
+            global_labels=global_labels,
+            help_text="Total traps not forwarded because node is in secondary mode",
+            metric_type="counter"
+        ))
+        
+        ha_info = metrics_summary.get("ha", {})
+        lines.append(format_prometheus(
+            "trapninja_ha_enabled",
+            1 if ha_info.get('enabled', False) else 0,
+            global_labels=global_labels,
+            help_text="Whether HA clustering is enabled",
+            metric_type="gauge"
+        ))
+        
+        if ha_info.get('enabled', False):
+            lines.append(format_prometheus(
+                "trapninja_ha_is_primary",
+                1 if ha_info.get('is_primary', False) else 0,
+                global_labels=global_labels,
+                help_text="Whether this node is the primary (1) or secondary (0)",
+                metric_type="gauge"
+            ))
+            
+            lines.append(format_prometheus(
+                "trapninja_ha_is_forwarding",
+                1 if ha_info.get('is_forwarding', False) else 0,
+                global_labels=global_labels,
+                help_text="Whether this node is actively forwarding traps",
+                metric_type="gauge"
+            ))
+            
+            lines.append(format_prometheus(
+                "trapninja_ha_peer_connected",
+                1 if ha_info.get('peer_connected', False) else 0,
+                global_labels=global_labels,
+                help_text="Whether the HA peer is connected",
+                metric_type="gauge"
+            ))
+            
+            lines.append(format_prometheus(
+                "trapninja_ha_failover_count",
+                ha_info.get('failover_count', 0),
+                global_labels=global_labels,
+                help_text="Number of HA failover events",
+                metric_type="counter"
+            ))
+
+        # =================================================================
+        # CACHE METRICS
+        # =================================================================
+        
+        lines.append(format_prometheus(
+            "trapninja_traps_cached_total",
+            metrics_summary["traps_cached"],
+            global_labels=global_labels,
+            help_text="Total traps stored in cache for replay",
+            metric_type="counter"
+        ))
+        
+        lines.append(format_prometheus(
+            "trapninja_cache_failures_total",
+            metrics_summary["cache_failures"],
+            global_labels=global_labels,
+            help_text="Total cache storage failures",
+            metric_type="counter"
+        ))
+        
+        cache_info = metrics_summary.get("cache", {})
+        lines.append(format_prometheus(
+            "trapninja_cache_available",
+            1 if cache_info.get('available', False) else 0,
+            global_labels=global_labels,
+            help_text="Whether cache backend (Redis) is available",
+            metric_type="gauge"
+        ))
+
+        # =================================================================
+        # PERFORMANCE METRICS
+        # =================================================================
+        
+        lines.append(format_prometheus(
+            "trapninja_fast_path_hits_total",
+            metrics_summary["fast_path_hits"],
+            global_labels=global_labels,
+            help_text="Packets processed via optimized SNMPv2c fast path",
+            metric_type="counter"
+        ))
+        
+        lines.append(format_prometheus(
+            "trapninja_slow_path_hits_total",
+            metrics_summary["slow_path_hits"],
+            global_labels=global_labels,
+            help_text="Packets processed via full SNMP parsing",
+            metric_type="counter"
+        ))
+        
+        lines.append(format_prometheus(
+            "trapninja_fast_path_ratio",
+            round(metrics_summary["fast_path_ratio"], 2),
+            global_labels=global_labels,
+            help_text="Percentage of packets using fast path processing",
+            metric_type="gauge"
+        ))
+        
+        lines.append(format_prometheus(
+            "trapninja_processing_rate",
+            round(metrics_summary["processing_rate"], 2),
+            global_labels=global_labels,
+            help_text="Current packet processing rate (packets/second)",
+            metric_type="gauge"
+        ))
+
+        # =================================================================
+        # QUEUE METRICS
+        # =================================================================
+        
+        lines.append(format_prometheus(
+            "trapninja_queue_depth",
+            metrics_summary["queue_current_depth"],
+            global_labels=global_labels,
+            help_text="Current number of packets in processing queue",
+            metric_type="gauge"
+        ))
+        
+        lines.append(format_prometheus(
+            "trapninja_queue_max_depth",
+            metrics_summary["queue_max_depth"],
+            global_labels=global_labels,
+            help_text="Maximum queue depth observed",
+            metric_type="gauge"
+        ))
+        
+        lines.append(format_prometheus(
+            "trapninja_queue_capacity",
+            metrics_summary["queue_capacity"],
+            global_labels=global_labels,
+            help_text="Maximum queue capacity",
+            metric_type="gauge"
+        ))
+        
+        lines.append(format_prometheus(
+            "trapninja_queue_utilization",
+            round(metrics_summary["queue_utilization"], 4),
+            global_labels=global_labels,
+            help_text="Queue utilization ratio (0.0 to 1.0)",
+            metric_type="gauge"
+        ))
+        
+        lines.append(format_prometheus(
+            "trapninja_queue_full_events_total",
+            metrics_summary["queue_full_events"],
+            global_labels=global_labels,
+            help_text="Number of times queue reached capacity",
+            metric_type="counter"
+        ))
+
+        # =================================================================
+        # DETAILED IP/OID METRICS (if any tracked)
+        # =================================================================
+        
+        # Blocked IP metrics
+        blocked_ip_lines = _format_labeled_metrics(
+            "trapninja_blocked_ip_count",
+            "ip",
+            metrics_summary.get("blocked_ips", {}),
+            global_labels=global_labels,
+            help_text="Traps blocked from specific IP",
+            metric_type="counter"
+        )
+        lines.extend(blocked_ip_lines)
+
+        # Blocked OID metrics
+        blocked_oid_lines = _format_labeled_metrics(
+            "trapninja_blocked_oid_count",
+            "oid",
+            metrics_summary.get("blocked_oids", {}),
+            global_labels=global_labels,
+            help_text="Traps blocked with specific OID",
+            metric_type="counter"
+        )
+        lines.extend(blocked_oid_lines)
+
+        # Redirected IP metrics (with tag dimension)
+        redirected_ips = metrics_summary.get("redirected_ips", {})
+        if redirected_ips:
+            lines.append("# HELP trapninja_redirected_ip_count Traps redirected from specific IP")
+            lines.append("# TYPE trapninja_redirected_ip_count counter")
+            for tag, ip_counts in redirected_ips.items():
+                for ip, count in ip_counts.items():
+                    labels = {"ip": ip, "tag": tag}
+                    all_labels = {}
+                    if global_labels:
+                        all_labels.update(global_labels)
+                    all_labels.update(labels)
+                    sorted_labels = sorted(all_labels.items())
+                    label_str = ",".join([f'{k}="{v}"' for k, v in sorted_labels])
+                    lines.append(f"trapninja_redirected_ip_count{{{label_str}}} {count}")
+
+        # Redirected OID metrics (with tag dimension)
+        redirected_oids = metrics_summary.get("redirected_oids", {})
+        if redirected_oids:
+            lines.append("# HELP trapninja_redirected_oid_count Traps redirected with specific OID")
+            lines.append("# TYPE trapninja_redirected_oid_count counter")
+            for tag, oid_counts in redirected_oids.items():
+                for oid, count in oid_counts.items():
+                    labels = {"oid": oid, "tag": tag}
+                    all_labels = {}
+                    if global_labels:
+                        all_labels.update(global_labels)
+                    all_labels.update(labels)
+                    sorted_labels = sorted(all_labels.items())
+                    label_str = ",".join([f'{k}="{v}"' for k, v in sorted_labels])
+                    lines.append(f"trapninja_redirected_oid_count{{{label_str}}} {count}")
+
+        # =================================================================
+        # UPTIME METRIC
+        # =================================================================
+        
+        lines.append(format_prometheus(
+            "trapninja_uptime_seconds",
+            round(metrics_summary["uptime_seconds"], 1),
+            global_labels=global_labels,
+            help_text="Time in seconds since service started",
+            metric_type="counter"
+        ))
+
+        # =================================================================
+        # WRITE OUTPUT FILES
+        # =================================================================
+        
+        # Ensure metrics directory exists
+        if not os.path.exists(config.directory):
+            os.makedirs(config.directory, exist_ok=True)
+        
+        # Write Prometheus format file (atomic write)
+        prom_path = config.prometheus_path
+        temp_path = f"{prom_path}.tmp"
+        
+        with open(temp_path, 'w') as f:
+            f.write("\n".join(lines))
+            f.write("\n")  # Trailing newline required for node_exporter
+        
+        os.rename(temp_path, prom_path)
+        logger.debug(f"Metrics exported to {prom_path}")
+
+        # Write JSON format file (if enabled)
+        if config.json_enabled:
+            json_path = config.json_path
+            with open(json_path, 'w') as f:
+                json.dump(metrics_summary, f, indent=2)
+            
+            logger.debug(f"Metrics exported to JSON: {json_path}")
+        
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to export metrics: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
+        return False

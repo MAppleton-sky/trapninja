@@ -22,6 +22,95 @@ curl http://localhost:8080/metrics | grep trapninja
 
 ---
 
+## Daemon Startup Issues
+
+### Symptom: Daemon Crashes Immediately After Restart (Fixed in v0.7.12)
+
+**Example Output**:
+```
+python3.9 -O trapninja.py --restart
+...
+Starting TrapNinja daemon...
+Daemon process spawned with PID 3543057
+Verifying daemon startup...
+  Warning: Control socket not responding, but process 3543057 is running
+✓ TrapNinja daemon started successfully with PID 3543057
+
+# Then immediately:
+python3.9 -O trapninja.py --status
+TrapNinja is not running (stale PID file)
+```
+
+**Root Cause**: The `--restart` argument was being passed to the daemon subprocess
+along with `--foreground`. Since these are in a mutually exclusive argument group,
+the subprocess crashed during argument parsing, but error output was hidden (sent
+to /dev/null).
+
+**Solution**: Fixed in v0.7.12:
+- Changed to use hidden `--foreground-daemon` argument for daemon spawning
+- Added comprehensive filtering of ALL daemon control arguments
+- Better startup verification with crash diagnostics
+
+**Workaround for older versions**:
+```bash
+# Instead of --restart, do stop then start separately:
+python trapninja.py --stop
+sleep 2
+python trapninja.py --start
+```
+
+### Symptom: Daemon Starts But Control Socket Doesn't Respond
+
+**Causes**:
+
+1. **Complex initialization still in progress**:
+   - HA cluster initialization
+   - Redis cache connection
+   - SNMPv3 credential loading
+   
+   The default timeout was increased to 15 seconds in v0.7.12.
+
+2. **Permission issues on socket file**:
+   ```bash
+   ls -la /tmp/trapninja_control.sock
+   # Should show owner as the user running the daemon
+   ```
+
+3. **Old socket file lingering**:
+   ```bash
+   # Remove stale socket
+   rm -f /tmp/trapninja_control.sock
+   python trapninja.py --start
+   ```
+
+**Diagnostics**:
+```bash
+# Check log file for startup errors
+tail -50 /var/log/trapninja.log
+
+# Run in foreground to see all output
+python trapninja.py --foreground --debug
+```
+
+### Symptom: "stale PID file" on Status Check
+
+**The daemon stopped unexpectedly and left behind a PID file.**
+
+**Solutions**:
+
+1. TrapNinja automatically removes stale PID files
+2. Check logs for crash reason:
+   ```bash
+   tail -100 /var/log/trapninja.log | grep -i "error\|exception\|crash"
+   ```
+
+3. Common causes:
+   - Out of memory
+   - Unhandled exception during packet processing
+   - Signal from external source (OOM killer, user, etc.)
+
+---
+
 ## Packet Duplication Issues
 
 ### Symptom: More Packets Forwarded Than Received
@@ -245,6 +334,215 @@ curl -s http://localhost:8080/metrics | grep processing_seconds
 2. **Check destination health**:
    - Slow destinations back up the workers
    - Use multiple workers to parallelize
+
+---
+
+## tcpdump Shows Higher Volume Than TrapNinja Reports
+
+### Symptom: Massive Packet Volume in tcpdump, Reasonable Volume in TrapNinja
+
+**Example scenario**:
+```
+TrapNinja reports: ~65 traps/sec
+tcpdump shows: Thousands of packets/sec with many duplicates
+tcpdump filter used: 'udp port 162 and dst host 1.2.3.4'
+```
+
+This is a very common point of confusion when Samplicator or any UDP forwarder is running.
+
+### Root Cause: tcpdump Sees Both Ingress AND Egress Packets
+
+When you run `tcpdump -i any 'udp port 162 and dst host 1.2.3.4'`, you're capturing:
+
+1. **Incoming traps** - Packets from network devices TO your server (port 162)
+2. **Outgoing forwarded traps** - Packets FROM your server (Samplicator/TrapNinja) TO destination 1.2.3.4
+
+If Samplicator is configured with 10 destinations, each incoming trap generates 10 outgoing packets.
+
+**The Math**:
+```
+Real incoming rate: ~65 traps/sec
+Destinations: 10
+Total egress to ONE destination: ~65/sec
+Total traffic tcpdump sees: 65 (ingress) + 650 (egress) = ~715/sec
+If tcpdump captures all egress: 65 + 650 = massive volume
+```
+
+### Quick Diagnosis
+
+Run this on your server:
+```bash
+# Download and run diagnostic
+cd /opt/trapninja/dev/tools
+sudo bash quick_packet_diagnostic.sh 1.2.3.4
+```
+
+Or manually:
+```bash
+# Get your server's IP
+SERVER_IP=$(hostname -I | awk '{print $1}')
+
+# Count ONLY incoming traps (real volume)
+timeout 10 tcpdump -i any -nn "udp port 162 and not src $SERVER_IP" 2>/dev/null | wc -l
+
+# Count ONLY outgoing forwarded traps
+timeout 10 tcpdump -i any -nn "udp port 162 and src $SERVER_IP" 2>/dev/null | wc -l
+```
+
+### Solution: Use Correct tcpdump Filters
+
+**To see ONLY incoming traps (actual trap rate)**:
+```bash
+tcpdump -i any 'udp dst port 162 and not src <your_server_ip>'
+```
+
+**To see traps forwarded TO a specific destination**:
+```bash
+tcpdump -i any 'udp and src <your_server_ip> and dst host 1.2.3.4'
+```
+
+**To see all traffic involving a destination (both directions)**:
+```bash
+tcpdump -i any 'udp port 162 and host 1.2.3.4'
+```
+
+### Verifying the Numbers Add Up
+
+1. **Check Samplicator destinations**:
+   ```bash
+   cat /etc/samplicator.conf | grep -v '^#' | grep -v '^$'
+   # Count the destinations
+   ```
+
+2. **Calculate expected amplification**:
+   ```
+   Incoming rate × Number of destinations = Expected egress rate
+   65/sec × 10 destinations = 650/sec egress
+   ```
+
+3. **TrapNinja reports ingress** - so ~65/sec is the real unique trap volume
+
+### Common Confusion Points
+
+| Observation | Explanation |
+|-------------|-------------|
+| "Identical packets" in tcpdump | You're seeing the same trap forwarded to multiple destinations |
+| Huge packet counts | tcpdump captures both directions by default |
+| TrapNinja rate seems low | TrapNinja reports unique incoming traps, not forwarded copies |
+| Samplicator multiplies traffic | That's its job - forwarding to multiple destinations |
+
+### When Running Both Samplicator AND TrapNinja
+
+If both are active:
+- Ensure they listen on DIFFERENT ports, OR
+- Disable one of them
+
+**Check for conflicts**:
+```bash
+# See what's listening on port 162
+ss -tulnp | grep ':162'
+
+# Should show ONLY ONE process
+```
+
+### Diagnostic Tools
+
+TrapNinja includes diagnostic tools:
+
+```bash
+# Full Python diagnostic
+sudo python3 dev/tools/packet_duplication_diagnostic.py --dest 1.2.3.4
+
+# Quick bash diagnostic  
+sudo bash dev/tools/quick_packet_diagnostic.sh 1.2.3.4
+```
+
+### tcpdump Diagnostics With Spoofed Traffic
+
+When **source IP spoofing** is enabled (Samplicator `-S` flag, `spoof` config directive, or TrapNinja's `preserve_source` option), standard ingress/egress filtering breaks down because both directions have the same source IP.
+
+**The Problem With Spoofing**:
+
+Without spoofing:
+```
+Device (10.1.1.1) → Server (10.2.2.2) → Destination (1.2.3.4)
+                    Ingress src: 10.1.1.1    Egress src: 10.2.2.2
+```
+
+With spoofing:
+```
+Device (10.1.1.1) → Server (10.2.2.2) → Destination (1.2.3.4)
+                    Ingress src: 10.1.1.1    Egress src: 10.1.1.1 (spoofed!)
+```
+
+With spoofing enabled, **both ingress and egress packets have the original device's IP as source** - so the filter `not src $SERVER_IP` captures BOTH.
+
+**Detecting If Spoofing Is Enabled**:
+```bash
+# Check Samplicator command line for -S flag
+pgrep -a samplicator | grep -o '\-S'
+
+# Check Samplicator config for spoof directive
+grep -i 'spoof' /etc/samplicator.conf
+
+# Check TrapNinja config
+grep -i 'preserve_source\|spoof' config/config.json
+```
+
+**Alternative Methods for Spoofed Traffic**:
+
+1. **TTL Analysis** - Forwarded packets have TTL decremented:
+   ```bash
+   # Capture with verbose mode to see TTL
+   tcpdump -i eth0 -v 'udp port 162' 2>/dev/null | grep -oP 'ttl \K[0-9]+' | sort | uniq -c
+   
+   # Example output:
+   #   1500 64   <- Original packets (Linux default TTL)
+   #   1500 63   <- Forwarded packets (TTL decremented)
+   ```
+
+2. **Source Port Analysis** - Forwarders often use different source ports:
+   ```bash
+   # See source port distribution
+   tcpdump -i eth0 -nn 'udp port 162' | awk '{print $3}' | grep -oP '\.[0-9]+$' | sort | uniq -c
+   
+   # Port 162 = device traps, high ports = forwarder
+   ```
+
+3. **Interface-Specific Capture** - If ingress/egress use different NICs:
+   ```bash
+   # Capture only on external interface (ingress)
+   tcpdump -i eth0 'udp port 162'
+   
+   # Capture only on internal interface (egress)
+   tcpdump -i eth1 'udp port 162'
+   ```
+
+4. **iptables/nflog Marking** - Most reliable method:
+   ```bash
+   # Mark incoming packets in PREROUTING (before local processing)
+   iptables -t mangle -A PREROUTING -p udp --dport 162 -j NFLOG --nflog-group 1
+   
+   # Mark outgoing packets in POSTROUTING (after forwarding)
+   iptables -t mangle -A POSTROUTING -p udp --dport 162 -j NFLOG --nflog-group 2
+   
+   # Capture ONLY ingress:
+   tcpdump -i nflog:1 -nn
+   
+   # Capture ONLY egress:
+   tcpdump -i nflog:2 -nn
+   
+   # Clean up when done:
+   iptables -t mangle -D PREROUTING -p udp --dport 162 -j NFLOG --nflog-group 1
+   iptables -t mangle -D POSTROUTING -p udp --dport 162 -j NFLOG --nflog-group 2
+   ```
+
+**Diagnostic Tool for Spoofed Traffic**:
+```bash
+# Use the spoofed traffic diagnostic script
+cd /opt/trapninja/dev/tools
+sudo bash spoofed_traffic_diagnostic.sh eth0
+```
 
 ---
 
@@ -486,6 +784,136 @@ If issues persist:
 
 ---
 
+## Packet Drops
+
+### Symptom: Non-Zero "Dropped" Count in Stats Summary
+
+**Understanding Drops**:
+
+The "Dropped" counter in TrapNinja indicates **queue overflow events** - packets that arrived when the processing queue was full. This typically occurs during burst traffic scenarios (e.g., fiber cuts, device reboots causing alarm floods).
+
+**Example**:
+```
+Dropped:                    629
+```
+
+With 629 drops out of 2.8M traps, the drop rate is ~0.02% which is excellent for telco-scale traffic.
+
+### Diagnosing Drops
+
+**1. Check Queue Statistics**:
+```bash
+# View queue metrics in real-time
+watch -n 5 'cat /var/log/trapninja/metrics/trapninja_granular.prom | grep -E "queue|dropped"'
+
+# Or check the JSON stats
+cat /var/log/trapninja/metrics/trapninja_granular.json | python -m json.tool | grep -A5 queue
+```
+
+**2. Check Processing Logs for Queue Full Warnings**:
+```bash
+# Look for queue full events (logged with rate limiting)
+grep -i "queue full" /var/log/trapninja.log
+
+# Example output:
+# WARNING - Queue full: 15 packets dropped
+```
+
+**3. Identify Burst Traffic Periods**:
+```bash
+# Check peak rates - high peaks indicate burst traffic
+python trapninja.py --stats-top-ips --sort peak -n 20
+python trapninja.py --stats-top-oids --sort peak -n 20
+
+# Look for IPs with very high peak vs current rate
+# Peak/min >> Current/min indicates burst traffic occurred
+```
+
+**4. Correlate Drops with Traffic Patterns**:
+```bash
+# Check when drops occurred by looking at log timestamps
+grep "Queue full" /var/log/trapninja.log | head -20
+
+# Cross-reference with network events (fiber cuts, maintenance, etc.)
+```
+
+### Understanding Queue Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `current_depth` | Current packets waiting in queue |
+| `max_depth` | Highest queue depth observed |
+| `total_queued` | Total packets successfully queued |
+| `total_dropped` | Packets dropped due to full queue |
+| `full_events` | Number of times queue was full |
+| `queue_capacity` | Maximum queue size (default: 200,000) |
+| `utilization` | current_depth / queue_capacity |
+
+### Solutions for Reducing Drops
+
+**1. Enable eBPF Acceleration** (Recommended):
+```bash
+# eBPF filtering happens in kernel, reducing queue pressure
+sudo yum install bcc bcc-tools python3-bcc  # RHEL
+sudo python trapninja.py --start
+```
+
+**2. Block High-Volume Noise Sources**:
+```bash
+# Identify sources generating excessive traps
+python trapninja.py --stats-top-ips --sort peak -n 10
+
+# Block noisy sources if appropriate
+python trapninja.py --add-blocked-ip 10.x.x.x
+```
+
+**3. Block Noisy OIDs**:
+```bash
+# Identify OIDs causing floods
+python trapninja.py --stats-top-oids --sort peak -n 10
+
+# Block non-critical OIDs
+python trapninja.py --add-blocked-oid 1.3.6.1.4.1.xxxx
+```
+
+**4. Increase Processing Capacity**:
+
+Edit `packet_processor.py` to increase workers:
+```python
+# In start_workers(), change:
+num_workers = min(cpu_count * 2, 32)  # Default
+num_workers = min(cpu_count * 4, 64)  # More aggressive
+```
+
+**5. Increase Queue Capacity** (Last Resort):
+
+Edit `network.py`:
+```python
+QUEUE_MAX_SIZE = 200000  # Default
+QUEUE_MAX_SIZE = 500000  # Increase for extreme scenarios
+```
+
+**Note**: Increasing queue size uses more memory (~500 bytes per slot).
+
+### Acceptable Drop Rates
+
+| Drop Rate | Assessment |
+|-----------|------------|
+| < 0.01% | Excellent - no action needed |
+| 0.01-0.1% | Good - acceptable for most environments |
+| 0.1-1% | Monitor - may indicate capacity issues |
+| > 1% | Investigate - likely needs optimization |
+
+### Drop Rate Calculation
+
+```
+Drop Rate = (Dropped / Total Traps) × 100
+
+Example: 629 / 2,845,859 × 100 = 0.022%
+```
+
+---
+
 ## Metrics Issues
 
 ### Symptom: All Metrics Show Zero
@@ -564,4 +992,4 @@ See `documentation/METRICS.md` for full metrics reference.
 
 ---
 
-**Last Updated**: 2025-06-15
+**Last Updated**: 2025-01-09

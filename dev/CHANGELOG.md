@@ -16,6 +16,250 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+#### SNMPv3 Decrypted Traps - Unified v2c Processing Pipeline
+- **Fixed OID statistics not being recorded for SNMPv3 decrypted traps**. Previously,
+  when SNMPv3 traps were successfully decrypted and converted to v2c, the trap OID
+  was not extracted and the v3 handler had its own duplicated forwarding logic.
+- **Decrypted SNMPv3 traps now route through the standard v2c processing pipeline**:
+  - OID-based blocking rules are properly applied
+  - OID-based redirection rules are properly applied  
+  - IP-based redirection rules are properly applied
+  - OID statistics are correctly recorded via `extract_trap_oid_fast()`
+  - All filtering/forwarding behavior is consistent with native v2c traps
+- Added `_process_v2c_payload()` unified method for processing v2c payloads from
+  any source (native v2c or decrypted v3)
+- Removed duplicated forwarding logic from `_process_snmpv3()` (~60 lines)
+
+### Documentation
+- Updated GRANULAR_STATS.md with SNMPv3 OID tracking support
+- Added troubleshooting section for SNMPv3 OIDs not appearing in stats
+- Clarified that `--oid` query searches all tracked OIDs (not just top 100)
+
+---
+
+## [0.7.14] - 2026-01-07
+
+### Fixed
+
+#### Prometheus Metrics - Node Exporter Compatibility
+- **Fixed missing trailing newline** in `.prom` file output that caused node_exporter's
+  textfile collector to not read the metrics file. The Prometheus exposition format
+  requires files to end with a newline character.
+
+### Added
+
+#### Metrics Configuration - JSON Output Control
+- **Added `json_enabled` configuration option** to `metrics_config.json` allowing
+  the JSON metrics file to be disabled while keeping Prometheus format output.
+  Set `"json_enabled": false` to stop generating the `.json` metrics file.
+
+### Documentation
+- Added troubleshooting section for node_exporter integration issues
+- Updated metrics configuration documentation with new `json_enabled` option
+
+---
+
+## [0.7.13] - 2025-12-31
+
+### Changed
+
+#### Code Cleanup: Removed Legacy Redundant Modules (~76KB Reduction)
+- **Removed `ha.py` (36KB)** - Legacy monolithic HA implementation that was completely
+  replaced by the modular `ha/` package. All imports resolve to `ha/__init__.py`.
+  The package provides better organization:
+  - `ha/state.py` - HA state machine
+  - `ha/messages.py` - HA message types
+  - `ha/config.py` - Configuration management
+  - `ha/cluster.py` - Main HACluster implementation
+  - `ha/api.py` - Public API functions
+  - `ha/sync/` - Configuration synchronization
+- **Removed `packet_processor.py` (40KB)** - Duplicated functionality from the
+  `processing/` package. Updated `network.py` to use `processing.start_workers`
+  and `processing.forward_packet` instead.
+- **Updated `processing/__init__.py`** to export all necessary functions:
+  `forward_packet`, `start_workers`, `shutdown_forwarder`, `SocketPool`
+
+### Documentation
+- Added `docs/refactoring/REFACTORING_PLAN.md` documenting the cleanup process
+- Backups retained as `*.bak` files for safety during verification period
+
+### Technical Notes
+- All public APIs preserved through re-exports - no breaking changes
+- Import statements simplified: `from .ha import ...` resolves to package
+- Network module now uses processing package for all forwarding operations
+
+---
+
+## [0.7.12] - 2025-12-29
+
+### Fixed
+
+#### Critical: Daemon Restart Crash (Issue with --restart)
+- **Fixed daemon crashing immediately after restart**. When using `--restart`, the
+  daemon would start but crash within seconds, leaving a stale PID file.
+- **Root cause #1**: The `start_daemon()` function in `daemon.py` was passing
+  `--restart` to the subprocess along with `--foreground`. Since these are in a
+  mutually exclusive argument group, the subprocess would crash on argument parsing.
+- **Root cause #2**: The hidden `--foreground-daemon` argument was added to `parser`
+  instead of `group`, so it didn't satisfy the `required=True` constraint on the
+  mutually exclusive group - causing argparse to fail even after the first fix.
+- **Solution**: 
+  - Changed to use hidden `--foreground-daemon` argument instead of `--foreground`
+  - Added `--foreground-daemon` to the mutually exclusive group (not just parser)
+  - Added comprehensive filtering of ALL daemon control arguments:
+    `--start`, `--stop`, `--restart`, `--status`, `--foreground`, `--foreground-daemon`
+  - Only runtime configuration arguments are now passed to the subprocess
+
+#### Daemon File Handle Leak
+- Fixed file handle leak where `/dev/null` was opened but never closed when
+  spawning the daemon subprocess.
+- Now uses `subprocess.DEVNULL` which properly manages the file descriptor.
+
+#### Missing Runtime Mode Support in Daemon Mode
+- Fixed `--foreground-daemon` handler not passing shadow/mirror mode arguments
+  to `run_service()`.
+- Now properly passes: `--shadow-mode`, `--mirror-mode`, `--parallel`,
+  `--capture-mode`, `--log-traps`, and `--debug`.
+
+### Improved
+
+#### Better Daemon Startup Verification
+- Increased verification timeout from 10s to 15s for complex HA/cache setups
+- Added progress feedback during control socket connection attempts
+- When daemon crashes during startup, now shows last 10 lines from log file
+- Better error messages with specific guidance for troubleshooting
+
+#### Cleaner Subprocess Spawning
+- Added `close_fds=True` to close inherited file descriptors in child process
+- Logging console output disabled in daemon mode (stdout goes to /dev/null anyway)
+
+---
+
+## [0.7.11] - 2025-12-24
+
+### Fixed
+
+#### Config Sync Still Not Working After 0.7.10
+- **Fixed `initialize_ha()` not passing `config_dir` to `HACluster`**. Even though
+  the `ConfigSyncManager` was correctly rewritten in 0.7.10, the `initialize_ha()`
+  function in `api.py` wasn't updated to accept and pass the `config_dir` parameter.
+- **Solution**: Updated `initialize_ha()` signature to accept `config_dir` and
+  `on_config_changed` parameters, and updated `service.py` to pass `CONFIG_DIR`.
+
+### Changed
+- Added diagnostic logging during config sync initialization to help debug issues
+- Logger now created before config sync import to enable error logging
+- HACluster now logs whether config sync is available, enabled, or why it's disabled
+
+### Verification
+After updating, check logs for:
+```
+Initializing config sync: config_dir=/etc/trapninja
+Config sync peer: 192.168.x.x:8162
+ConfigSyncManager created successfully
+Config sync enabled
+```
+
+If you see "Config sync not available" or "module import failed", check for
+Python import errors in the sync module.
+
+---
+
+## [0.7.10] - 2025-12-24
+
+### Fixed
+
+#### HA Config Sync Not Working
+- **Fixed config sync between HA nodes not functioning**. The `ConfigSyncManager`
+  constructor signature in `manager.py` didn't match how `cluster.py` was calling it,
+  causing config sync to silently fail to initialize.
+- **Root cause**: The sync manager expected `ConfigSyncConfig`, `get_ha_state()`, and
+  `get_peer_info()` callbacks, but `cluster.py` was passing `peer_host`, `peer_port`
+  directly. This caused a `TypeError` that was caught by the `try/except` import,
+  setting `CONFIG_SYNC_AVAILABLE = False`.
+- **Solution**: Rewrote `ConfigSyncManager` with simplified interface matching what
+  `HACluster` provides. Now accepts `peer_host`, `peer_port` directly.
+
+#### Secondary Doesn't Pull Configs on Startup
+- **Fixed Secondary not receiving configs from Primary on startup**. When a node
+  started as Secondary, it should pull shared configurations from Primary.
+- **Solution**: `ConfigSyncManager.start(is_primary=False)` now automatically pulls
+  all shared configs from Primary after a brief delay. Configs are written to the
+  local config directory (`/etc/trapninja/` or configured path).
+
+### Changed
+
+#### Config Sync Message Handling
+- Config sync now uses JSON messages over the HA TCP socket instead of HAMessage
+  binary protocol. This simplifies handling and allows larger config payloads.
+- Added `_handle_config_request_json()` and `_handle_config_push_json()` handlers
+  in `cluster.py` to process config sync messages.
+- Increased receive buffer to 65536 bytes to accommodate full config bundles.
+
+#### Shared Config Files
+The following files are synchronized between HA nodes:
+- `destinations.json` - Trap forwarding destinations
+- `blocked_ips.json` - Blocked source IP addresses  
+- `blocked_traps.json` - Blocked trap OIDs
+- `redirected_ips.json` - IP-based redirection rules
+- `redirected_oids.json` - OID-based redirection rules
+- `redirected_destinations.json` - Redirection target destinations
+
+Local-only configs (never synced): `ha_config.json`, `cache_config.json`,
+`listen_ports.json`, `capture_config.json`, `shadow_config.json`, `stats_config.json`,
+`sync_config.json`
+
+### Usage
+
+Config sync is automatic when HA is enabled:
+1. **Secondary startup**: Pulls all shared configs from Primary
+2. **Primary file change**: Automatically pushes to Secondary (monitored every 10s)
+3. **Checksum mismatch**: If heartbeat checksums differ 3+ times, Secondary pulls
+4. **State change**: Becoming Secondary triggers a pull; becoming Primary enables push
+
+Manual sync via CLI:
+```bash
+trapninja.py --ha-sync      # Sync configs based on current role
+```
+
+---
+
+## [0.7.9] - 2025-12-24
+
+### Fixed
+
+#### HA Message Checksum Compatibility Between Versions
+- **Fixed checksum validation failures during rolling upgrades**. When HA nodes ran
+  different versions, the secondary would log "HA message checksum failed" because
+  newer versions include `config_checksum` field in message serialization.
+- **Root cause**: The `to_dict()` method always included `config_checksum: null` even
+  when the field didn't exist in older versions. The MD5 checksum would differ because
+  the original message's JSON didn't contain this field.
+- **Solution**: Modified `to_dict(for_checksum=True)` to exclude newer optional fields
+  when they are null, ensuring backward-compatible checksum calculation.
+- **Impact**: HA clusters can now run mixed versions during upgrades without checksum
+  failures. Nodes running 0.7.9+ will correctly validate messages from older versions.
+
+#### Restart Command Leaves Daemon Stopped
+- **Fixed `--restart` leaving TrapNinja stopped instead of restarting**. The
+  `start_daemon()` function detected its own `--restart` process in the process list
+  and incorrectly concluded TrapNinja was already running.
+- **Root cause**: Process detection excluded `--stop` and `--status` but not `--restart`
+  or `--start`, causing false "already running" detection during restart.
+- **Solution**: Added `--restart` and `--start` to exclusion list in process detection.
+  Refactored to use `_build_process_check_cmd()` helper to ensure consistent exclusions.
+
+### Changed
+- Improved HA checksum failure logging to indicate possible version mismatch
+- Added debug logging with received vs calculated checksums for troubleshooting
+- Refactored daemon process detection into `_build_process_check_cmd()` helper
+
+---
+
 ## [0.7.8] - 2025-12-19
 
 ### Enhanced
@@ -755,7 +999,11 @@ Before releasing 1.0.0, we need:
 
 | Version | Date | Type | Key Features | Status |
 |---------|------|------|--------------|--------|
-| **0.7.8** | 2025-12-19 | Enhancement | Enhanced Prometheus export with peak rates | **Current** |
+| **0.7.13** | 2025-12-31 | Cleanup | Code cleanup, removed ~76KB redundant code | **Current** |
+| 0.7.12 | 2025-12-29 | Fix | Daemon restart crash fix, startup verification improvements | Beta |
+| 0.7.11 | 2025-12-24 | Fix | Config sync init fix, pass config_dir to HACluster | Beta |
+| 0.7.10 | 2025-12-24 | Fix | HA config sync working, Secondary pulls on startup | Beta |
+| 0.7.8 | 2025-12-19 | Enhancement | Enhanced Prometheus export with peak rates | Beta |
 | 0.7.7 | 2025-12-19 | Enhancement | Peak rate tracking & --sort peak | Beta |
 | 0.7.6 | 2025-12-19 | Enhancement | Stats collection period & averages | Beta |
 | 0.7.5 | 2025-12-18 | Patch | SNMPv3 redirection fix | Beta |

@@ -246,8 +246,14 @@ class IPStats:
         """Get top N OIDs by count."""
         return self.oid_counts.most_common(n)
     
-    def to_dict(self, include_details: bool = True) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
+    def to_dict(self, include_details: bool = True, top_n_oids: int = 10) -> Dict[str, Any]:
+        """
+        Convert to dictionary for JSON serialization.
+        
+        Args:
+            include_details: Whether to include top OIDs and destinations
+            top_n_oids: Number of top OIDs to include (default 10)
+        """
         result = {
             'ip_address': self.ip_address,
             'total_traps': self.total_traps,
@@ -268,7 +274,7 @@ class IPStats:
         if include_details:
             result['top_oids'] = [
                 {'oid': oid, 'count': count} 
-                for oid, count in self.get_top_oids(10)
+                for oid, count in self.get_top_oids(top_n_oids)
             ]
             result['unique_oids'] = len(self.oid_counts)
             result['destinations'] = dict(self.destination_counts)
@@ -377,8 +383,14 @@ class OIDStats:
         """Get top N source IPs by count."""
         return self.ip_counts.most_common(n)
     
-    def to_dict(self, include_details: bool = True) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
+    def to_dict(self, include_details: bool = True, top_n_sources: int = 10) -> Dict[str, Any]:
+        """
+        Convert to dictionary for JSON serialization.
+        
+        Args:
+            include_details: Whether to include top source IPs and destinations
+            top_n_sources: Number of top source IPs to include (default 10)
+        """
         result = {
             'oid': self.oid,
             'total_traps': self.total_traps,
@@ -401,7 +413,7 @@ class OIDStats:
         if include_details:
             result['top_source_ips'] = [
                 {'ip': ip, 'count': count}
-                for ip, count in self.get_top_ips(10)
+                for ip, count in self.get_top_ips(top_n_sources)
             ]
             result['destinations'] = dict(self.destination_counts)
         
@@ -505,6 +517,10 @@ class StatsSnapshot:
     """
     timestamp: float = field(default_factory=time.time)
     
+    # Collection period tracking
+    collection_started: float = 0.0
+    uptime_seconds: float = 0.0
+    
     # Summary counters
     total_traps: int = 0
     total_forwarded: int = 0
@@ -524,6 +540,7 @@ class StatsSnapshot:
     top_ips: List[Dict] = field(default_factory=list)
     top_oids: List[Dict] = field(default_factory=list)
     top_destinations: List[Dict] = field(default_factory=list)
+    top_ip_oid_combinations: List[Dict] = field(default_factory=list)
     
     # Time range
     oldest_data: float = 0.0
@@ -533,6 +550,8 @@ class StatsSnapshot:
         """Convert to dictionary."""
         return {
             'timestamp': datetime.fromtimestamp(self.timestamp).isoformat(),
+            'collection_started': self.collection_started,
+            'uptime_seconds': self.uptime_seconds,
             'summary': {
                 'total_traps': self.total_traps,
                 'total_forwarded': self.total_forwarded,
@@ -547,6 +566,7 @@ class StatsSnapshot:
             'top_ips': self.top_ips,
             'top_oids': self.top_oids,
             'top_destinations': self.top_destinations,
+            'top_ip_oid_combinations': self.top_ip_oid_combinations,
             'time_range': {
                 'oldest': datetime.fromtimestamp(self.oldest_data).isoformat() if self.oldest_data else None,
                 'newest': datetime.fromtimestamp(self.newest_data).isoformat() if self.newest_data else None,

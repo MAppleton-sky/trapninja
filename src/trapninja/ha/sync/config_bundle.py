@@ -6,7 +6,11 @@ Handles bundling, serialization, and checksum calculation for
 shared configuration files in HA clusters.
 
 Author: TrapNinja Team
-Version: 1.0.0
+Version: 1.1.0
+
+Security Notes:
+- Uses SHA-256 for checksums (CWE-327 remediation)
+- Previous versions used MD5 which is cryptographically weak
 """
 
 import os
@@ -91,9 +95,15 @@ class ConfigEntry:
     
     @staticmethod
     def calculate_checksum(content: Any) -> str:
-        """Calculate MD5 checksum of content."""
+        """
+        Calculate SHA-256 checksum of content.
+        
+        Security Note (CWE-327): Uses SHA-256 instead of MD5 for
+        cryptographic strength, even though this is used for integrity
+        checking rather than security-critical operations.
+        """
         content_str = json.dumps(content, sort_keys=True, separators=(',', ':'))
-        return hashlib.md5(content_str.encode('utf-8')).hexdigest()
+        return hashlib.sha256(content_str.encode('utf-8')).hexdigest()
     
     def verify(self) -> bool:
         """Verify checksum matches content."""
@@ -130,13 +140,17 @@ class ConfigBundle:
             self.timestamp = time.time()
     
     def _calculate_bundle_checksum(self) -> str:
-        """Calculate overall bundle checksum."""
+        """
+        Calculate overall bundle checksum using SHA-256.
+        
+        Security Note (CWE-327): Uses SHA-256 for checksums.
+        """
         checksums = sorted([
             f"{name}:{entry.checksum}"
             for name, entry in self.entries.items()
         ])
         combined = "|".join(checksums) + f"|v{self.version}"
-        return hashlib.md5(combined.encode('utf-8')).hexdigest()
+        return hashlib.sha256(combined.encode('utf-8')).hexdigest()
     
     def get_summary_checksum(self) -> str:
         """Get a summary checksum for quick comparison."""
@@ -392,6 +406,7 @@ def get_local_bundle_checksum(config_dir: str) -> str:
     Quick checksum calculation without full bundle load.
     
     Useful for comparing if sync is needed without loading all files.
+    Uses SHA-256 for cryptographic integrity (CWE-327 remediation).
     
     Args:
         config_dir: Path to configuration directory
@@ -416,4 +431,4 @@ def get_local_bundle_checksum(config_dir: str) -> str:
             checksums.append(f"{config.value}:missing")
     
     combined = "|".join(sorted(checksums))
-    return hashlib.md5(combined.encode('utf-8')).hexdigest()
+    return hashlib.sha256(combined.encode('utf-8')).hexdigest()

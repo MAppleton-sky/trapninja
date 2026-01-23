@@ -45,31 +45,59 @@ def check_ebpf_support():
         if os.geteuid() != 0:
             return False, "eBPF acceleration requires root privileges"
         
-        # Add BCC installation paths for cmake-built installations
+        # BCC installation paths to check
+        # RHEL 8 installs python3-bcc to Python 3.6 site-packages regardless of runtime Python
         BCC_PATHS = [
-            '/usr/lib/python3.9/site-packages',
-            '/usr/lib64/python3.9/site-packages',
-            '/usr/local/lib/python{}.{}/site-packages'.format(
+            # RHEL 8 default location (python3-bcc RPM)
+            '/usr/lib/python3.6/site-packages',
+            '/usr/lib64/python3.6/site-packages',
+            # Current Python version paths
+            '/usr/lib/python{}.{}/site-packages'.format(
                 sys.version_info.major, sys.version_info.minor
             ),
             '/usr/lib64/python{}.{}/site-packages'.format(
                 sys.version_info.major, sys.version_info.minor
             ),
+            # CMake/source build locations
+            '/usr/local/lib/python{}.{}/site-packages'.format(
+                sys.version_info.major, sys.version_info.minor
+            ),
+            '/usr/local/lib64/python{}.{}/site-packages'.format(
+                sys.version_info.major, sys.version_info.minor
+            ),
         ]
         
-        for path in BCC_PATHS:
-            if os.path.exists(path) and path not in sys.path:
-                sys.path.insert(0, path)
+        # Try to import BCC, temporarily adding paths only for the import
+        # We remove them afterward to avoid polluting sys.path with Python 3.6
+        # packages that could conflict with Python 3.9 modules (e.g., cffi)
+        bpf_imported = False
+        added_paths = []
         
-        # Try to import BCC
         try:
             from bcc import BPF
+            bpf_imported = True
         except ImportError:
+            # BCC not in current path, try adding paths one at a time
+            for path in BCC_PATHS:
+                if os.path.exists(path) and path not in sys.path:
+                    sys.path.insert(0, path)
+                    added_paths.append(path)
+                    try:
+                        from bcc import BPF
+                        bpf_imported = True
+                        break
+                    except ImportError:
+                        continue
+        
+        # Clean up: remove ALL paths we added to prevent cffi version conflicts
+        # BCC is already imported into memory, so we don't need the path anymore
+        # This prevents Python 3.6 cffi from conflicting with Python 3.9 cffi
+        for path in added_paths:
+            if path in sys.path:
+                sys.path.remove(path)
+        
+        if not bpf_imported:
             return False, "BCC (BPF Compiler Collection) not installed"
-        except AttributeError as e:
-            return False, f"BCC version mismatch with system libraries: {e}"
-        except Exception as e:
-            return False, f"Error checking eBPF support: {e}"
         
         # Check kernel version
         import platform
@@ -83,6 +111,8 @@ def check_ebpf_support():
             return False, f"Kernel {kernel_version} does not fully support eBPF (4.4+ required)"
         
         return True, "eBPF support available"
+    except AttributeError as e:
+        return False, f"BCC version mismatch with system libraries: {e}"
     except Exception as e:
         return False, f"Error checking eBPF support: {e}"
 

@@ -12,12 +12,12 @@ import sys
 import time
 import signal
 import logging
-from scapy.all import sniff, get_if_list
+from scapy.all import sniff, get_if_list, get_if_addr
 
 from .config import INTERFACE, PID_FILE, LISTEN_PORTS, stop_event, load_config, CONFIG_DIR, LOG_FILE
 from .network import start_all_udp_listeners, cleanup_udp_sockets, forward_trap, start_packet_processors, start_queue_monitor
 from .redirection import schedule_config_check, load_redirection_config
-from .metrics import init_metrics, get_metrics_summary
+from .metrics import init_metrics, get_metrics_summary, load_metrics_config
 from .ha import (
     load_ha_config, initialize_ha, shutdown_ha, get_ha_cluster,
     notify_trap_processed, is_forwarding_enabled,
@@ -113,8 +113,212 @@ try:
 except ImportError:
     EBPF_AVAILABLE = False
 
+# Import fragmentation support with fallback
+try:
+    from .core.fragmentation import (
+        initialize_fragment_buffer,
+        shutdown_fragment_buffer,
+        get_fragment_buffer,
+        get_fragment_stats,
+        generate_fragment_aware_filter,
+        generate_simple_filter,
+    )
+    FRAGMENTATION_AVAILABLE = True
+except ImportError:
+    FRAGMENTATION_AVAILABLE = False
+    def initialize_fragment_buffer(**kwargs):
+        return None
+    def shutdown_fragment_buffer():
+        pass
+    def get_fragment_buffer():
+        return None
+    def get_fragment_stats():
+        return {}
+    def generate_fragment_aware_filter(ports, exclude_sport=None, local_ip=None):
+        # Fallback to simple filter
+        port_filter = " or ".join([f"udp dst port {p}" for p in ports])
+        if local_ip:
+            port_filter = f"({port_filter} and dst host {local_ip})"
+        if exclude_sport:
+            return f"({port_filter}) and not (udp src port {exclude_sport})"
+        return port_filter
+    def generate_simple_filter(ports, exclude_sport=None, local_ip=None):
+        port_filter = " or ".join([f"udp dst port {p}" for p in ports])
+        if local_ip:
+            port_filter = f"({port_filter} and dst host {local_ip})"
+        if exclude_sport:
+            return f"({port_filter}) and not (udp src port {exclude_sport})"
+        return port_filter
+
 # Get logger instance
 logger = logging.getLogger("trapninja")
+
+
+class ConfigurationError(Exception):
+    """Raised when configuration validation fails."""
+    pass
+
+
+def validate_configuration() -> tuple:
+    """
+    Validate all configuration before starting the service.
+    
+    Performs comprehensive checks on:
+    - Network interface existence
+    - Listen port validity
+    - Destination configuration
+    - HA configuration (if enabled)
+    
+    Returns:
+        Tuple of (is_valid: bool, errors: list, warnings: list)
+    """
+    # IMPORTANT: Import the module, not the variables directly!
+    # We need to load config first, then access via module reference.
+    from . import config as cfg
+    
+    # Temporarily set stop_event to prevent load_config from starting timer
+    cfg.stop_event.set()
+    cfg.load_config(None)  # Load configuration from files
+    cfg.stop_event.clear()
+    
+    errors = []
+    warnings = []
+    
+    # =======================================================================
+    # Validate Network Interface
+    # =======================================================================
+    try:
+        available_interfaces = get_if_list()
+        if cfg.INTERFACE not in available_interfaces:
+            errors.append(
+                f"Interface '{cfg.INTERFACE}' not found. "
+                f"Available interfaces: {', '.join(available_interfaces)}"
+            )
+    except Exception as e:
+        warnings.append(f"Could not verify interface: {e}")
+    
+    # =======================================================================
+    # Validate Listen Ports
+    # =======================================================================
+    if not cfg.LISTEN_PORTS:
+        errors.append("No listen ports configured")
+    else:
+        for port in cfg.LISTEN_PORTS:
+            if not isinstance(port, int):
+                errors.append(f"Invalid port type: {port} (must be integer)")
+            elif port < 1 or port > 65535:
+                errors.append(f"Port {port} out of valid range (1-65535)")
+            elif port < 1024:
+                warnings.append(f"Port {port} is privileged (requires root)")
+    
+    # =======================================================================
+    # Validate Destinations
+    # =======================================================================
+    if not cfg.destinations:
+        warnings.append(
+            "No forwarding destinations configured. "
+            "Traps will be received but not forwarded."
+        )
+    else:
+        for dest in cfg.destinations:
+            # Check destination format - supports multiple formats:
+            # 1. List/tuple: ["host", port] or ("host", port)
+            # 2. Dict: {"host": "...", "port": 162}
+            # 3. String: "host:port" or "host"
+            if isinstance(dest, (list, tuple)):
+                # Array format: ["host", port]
+                if len(dest) < 1:
+                    errors.append(f"Destination array is empty: {dest}")
+                elif len(dest) == 1:
+                    warnings.append(f"Destination {dest} has no port, will use 162")
+                elif len(dest) >= 2:
+                    host, port = dest[0], dest[1]
+                    if not isinstance(host, str) or not host:
+                        errors.append(f"Destination host must be a non-empty string: {dest}")
+                    try:
+                        port_num = int(port)
+                        if port_num < 1 or port_num > 65535:
+                            errors.append(f"Destination port {port_num} out of valid range (1-65535): {dest}")
+                    except (ValueError, TypeError):
+                        errors.append(f"Destination port must be an integer: {dest}")
+            elif isinstance(dest, dict):
+                # Dict format: {"host": "...", "port": 162}
+                if 'host' not in dest:
+                    errors.append(f"Destination missing 'host': {dest}")
+                if 'port' not in dest:
+                    warnings.append(f"Destination missing 'port', will use 162: {dest}")
+            elif isinstance(dest, str):
+                # String format "host:port" or "host"
+                if ':' not in dest:
+                    warnings.append(f"Destination '{dest}' has no port, will use 162")
+            else:
+                errors.append(f"Invalid destination format (expected list, dict, or string): {dest}")
+    
+    # =======================================================================
+    # Validate HA Configuration (if enabled)
+    # =======================================================================
+    try:
+        ha_config = load_ha_config()
+        if ha_config.enabled:
+            # Check peer host
+            if not ha_config.peer_host:
+                errors.append("HA enabled but peer_host not configured")
+            
+            # Check peer port
+            if ha_config.peer_port < 1 or ha_config.peer_port > 65535:
+                errors.append(f"HA peer_port {ha_config.peer_port} out of valid range")
+            
+            # Check listen port
+            if ha_config.listen_port < 1 or ha_config.listen_port > 65535:
+                errors.append(f"HA listen_port {ha_config.listen_port} out of valid range")
+            
+            # Check heartbeat settings
+            if ha_config.heartbeat_interval <= 0:
+                errors.append("HA heartbeat_interval must be positive")
+            
+            if ha_config.heartbeat_timeout <= ha_config.heartbeat_interval:
+                warnings.append(
+                    "HA heartbeat_timeout should be greater than heartbeat_interval"
+                )
+            
+            # Warn if no shared secret (weaker authentication)
+            if not ha_config.shared_secret:
+                warnings.append(
+                    "HA shared_secret not configured - using weaker authentication. "
+                    "Consider adding a shared_secret for HMAC-SHA256 authentication."
+                )
+    except Exception as e:
+        warnings.append(f"Could not validate HA configuration: {e}")
+    
+    # =======================================================================
+    # Validate Cache Configuration (if enabled)
+    # =======================================================================
+    if CACHE_MODULE_AVAILABLE:
+        try:
+            cache_config = load_cache_config()
+            if cache_config and cache_config.enabled:
+                if not cache_config.host:
+                    errors.append("Cache enabled but Redis host not configured")
+                if cache_config.port < 1 or cache_config.port > 65535:
+                    errors.append(f"Cache port {cache_config.port} out of valid range")
+        except Exception as e:
+            warnings.append(f"Could not validate cache configuration: {e}")
+    
+    # =======================================================================
+    # Check for blocking/redirection rules
+    # =======================================================================
+    if cfg.blocked_ips:
+        logger.debug(f"Loaded {len(cfg.blocked_ips)} blocked IP rules")
+    if cfg.blocked_traps:
+        logger.debug(f"Loaded {len(cfg.blocked_traps)} blocked OID rules")
+    if cfg.redirected_ips:
+        logger.debug(f"Loaded {len(cfg.redirected_ips)} IP redirection rules")
+    if cfg.redirected_oids:
+        logger.debug(f"Loaded {len(cfg.redirected_oids)} OID redirection rules")
+    
+    is_valid = len(errors) == 0
+    return is_valid, errors, warnings
+
 
 # Global variables
 capture_instance = None
@@ -211,6 +415,25 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
     
     # Record service start time
     start_time = time.time()
+    
+    # =======================================================================
+    # Validate Configuration Before Starting
+    # =======================================================================
+    logger.info("Validating configuration...")
+    is_valid, errors, warnings = validate_configuration()
+    
+    # Log warnings
+    for warning in warnings:
+        logger.warning(f"Configuration warning: {warning}")
+    
+    # If there are errors, fail fast
+    if not is_valid:
+        for error in errors:
+            logger.error(f"Configuration error: {error}")
+        logger.error("Configuration validation failed. Please fix the errors above.")
+        return 1
+    
+    logger.info("Configuration validation passed")
     
     # =======================================================================
     # Initialize Shadow/Parallel Mode
@@ -328,8 +551,8 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
             logger.info(f"HA enabled - Mode: {ha_config.mode}, Priority: {ha_config.priority}")
             logger.info(f"Peer: {ha_config.peer_host}:{ha_config.peer_port}")
 
-            # Initialize HA cluster
-            if not initialize_ha(ha_config, trap_forwarder_control):
+            # Initialize HA cluster with config_dir for config sync
+            if not initialize_ha(ha_config, trap_forwarder_control, config_dir=CONFIG_DIR):
                 logger.error("Failed to initialize HA cluster")
                 return 1
 
@@ -353,9 +576,30 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
     from .config import redirected_ips, redirected_oids, redirected_destinations
 
     # Initialize metrics module
-    metrics_dir = os.path.join(os.path.dirname(LOG_FILE), "metrics")
-    init_metrics(metrics_directory=metrics_dir, export_interval=60)
-    logger.info(f"Metrics collection initialized with output to {metrics_dir}")
+    # Load metrics configuration (supports custom directory and global labels)
+    metrics_dir = os.path.join(os.path.dirname(LOG_FILE), "metrics")  # Default
+    metrics_config = None  # Initialize for later use in granular stats
+    try:
+        metrics_config = load_metrics_config()
+        if metrics_config:
+            init_metrics(config=metrics_config)
+            metrics_dir = metrics_config.directory  # Use configured directory
+            logger.info(f"Metrics collection initialized:")
+            logger.info(f"  Output directory: {metrics_config.directory}")
+            logger.info(f"  Export interval: {metrics_config.export_interval_seconds}s")
+            if metrics_config.global_labels:
+                labels_str = ", ".join(
+                    f"{k}={v}" for k, v in metrics_config.global_labels.items()
+                )
+                logger.info(f"  Global labels: {labels_str}")
+        else:
+            # Fall back to default location
+            init_metrics(metrics_directory=metrics_dir, export_interval=60)
+            logger.info(f"Metrics collection initialized with defaults: {metrics_dir}")
+    except Exception as e:
+        logger.warning(f"Error loading metrics config: {e}")
+        init_metrics(metrics_directory=metrics_dir, export_interval=60)
+        logger.info(f"Metrics collection initialized with fallback: {metrics_dir}")
 
     # =======================================================================
     # Initialize Cache System (Redis-based trap buffering)
@@ -389,6 +633,11 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
     if GRANULAR_STATS_AVAILABLE:
         logger.info("Initializing granular statistics system...")
         try:
+            # Get global labels from metrics config (if available)
+            global_labels = {}
+            if metrics_config and metrics_config.global_labels:
+                global_labels = metrics_config.global_labels
+            
             # Configure the collector
             stats_config = CollectorConfig(
                 max_ips=10000,      # Track up to 10,000 unique source IPs
@@ -399,6 +648,7 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
                 rate_window=60,        # 1 minute rate calculation window
                 export_interval=60,    # Export to files every minute
                 metrics_dir=metrics_dir,  # Same directory as other metrics
+                global_labels=global_labels,  # Apply same labels as main metrics
             )
             
             # Initialize the collector
@@ -409,6 +659,9 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
                 logger.info(f"  Max tracked IPs: {stats_config.max_ips:,}")
                 logger.info(f"  Max tracked OIDs: {stats_config.max_oids:,}")
                 logger.info(f"  Export interval: {stats_config.export_interval}s")
+                if global_labels:
+                    labels_str = ", ".join(f"{k}={v}" for k, v in global_labels.items())
+                    logger.info(f"  Global labels: {labels_str}")
             else:
                 logger.warning("Failed to initialize granular statistics collector")
         except Exception as e:
@@ -530,6 +783,13 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
     workers = start_packet_processors(num_workers=worker_count)
     logger.info(f"Started {len(workers)} packet processing workers (optimized)")
     logger.info(f"Queue capacity: {packet_queue.maxsize} packets")
+    
+    # CRITICAL: Allow workers to fully initialize before starting capture
+    # Without this delay, packets arrive before workers are ready to process them,
+    # causing drops during the first few seconds of startup
+    worker_warmup_delay = 0.5  # 500ms for thread initialization
+    logger.info(f"Waiting {worker_warmup_delay}s for workers to initialize...")
+    time.sleep(worker_warmup_delay)
 
     # =======================================================================
     # Initialize packet capture (either eBPF or traditional)
@@ -537,7 +797,11 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
     capture_started = False
 
     # Try eBPF if available
-    if EBPF_AVAILABLE:
+    # IMPORTANT: Skip eBPF in parallel/shadow/mirror modes - eBPF binds exclusively
+    # and cannot coexist with other trap receivers. These modes require sniff capture.
+    if force_sniff_mode:
+        logger.info("Skipping eBPF - parallel/shadow/mirror mode requires sniff capture")
+    elif EBPF_AVAILABLE:
         logger.info("Checking for eBPF support...")
 
         # Check if eBPF is supported
@@ -558,6 +822,7 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
                     use_ebpf = True
                     capture_started = True
                     logger.info("Packet capture started successfully with eBPF acceleration")
+                    logger.info(">>> CAPTURE ACTIVE - Now receiving packets <<<")
                 else:
                     logger.warning("Failed to start eBPF capture, will try standard capture")
             except Exception as e:
@@ -623,24 +888,112 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
             cleanup_udp_sockets()
             logger.debug("Cleaned up any existing UDP socket listeners")
             
+            # =======================================================================
+            # Initialize Fragment Reassembly (for traps exceeding MTU)
+            # =======================================================================
+            fragment_reassembly_enabled = False
+            fragment_buffer = None
+            
+            if FRAGMENTATION_AVAILABLE:
+                # Load capture config to check if fragmentation is enabled
+                try:
+                    import json
+                    capture_config_file = os.path.join(CONFIG_DIR, 'capture_config.json')
+                    if os.path.exists(capture_config_file):
+                        with open(capture_config_file, 'r') as f:
+                            capture_cfg = json.load(f)
+                        
+                        frag_cfg = capture_cfg.get('fragment_reassembly', {})
+                        fragment_reassembly_enabled = frag_cfg.get('enabled', False)
+                        
+                        if fragment_reassembly_enabled:
+                            timeout_seconds = frag_cfg.get('timeout_seconds', 5.0)
+                            max_buffer_mb = frag_cfg.get('max_buffer_mb', 100.0)
+                            max_datagrams = frag_cfg.get('max_datagrams', 10000)
+                            
+                            fragment_buffer = initialize_fragment_buffer(
+                                timeout_seconds=timeout_seconds,
+                                max_buffer_mb=max_buffer_mb,
+                                max_datagrams=max_datagrams,
+                            )
+                            logger.info("Fragment reassembly ENABLED")
+                            logger.info(f"  Timeout: {timeout_seconds}s, Buffer: {max_buffer_mb}MB, Max datagrams: {max_datagrams}")
+                    else:
+                        logger.debug("No capture_config.json found, fragment reassembly disabled")
+                except Exception as e:
+                    logger.warning(f"Could not load fragment reassembly config: {e}")
+                    logger.info("Fragment reassembly disabled")
+            else:
+                logger.debug("Fragmentation module not available")
+            
             try:
-                # Construct BPF filter for incoming traps only
+                # Construct BPF filter for incoming traps
                 # CRITICAL: Must exclude our own forwarded packets to prevent re-capture loop
-                # - "udp dst port 162" captures packets destined to port 162
-                # - "not udp src port 10162" excludes packets WE are sending (FORWARD_SOURCE_PORT)
-                # Without the exclusion, forwarded packets (sport=10162, dport=162) would be re-captured
                 from .core.constants import FORWARD_SOURCE_PORT
-                port_filter = " or ".join(
-                    [f"(udp dst port {port} and not udp src port {FORWARD_SOURCE_PORT})" 
-                     for port in LISTEN_PORTS]
-                )
+                
+                # Get local IP for the interface - CRITICAL for parallel/sniff mode
+                # Without this, we capture packets forwarded by other processes to
+                # other destinations, causing duplication
+                local_ip = None
+                if force_sniff_mode:  # parallel, shadow, or mirror mode
+                    try:
+                        local_ip = get_if_addr(INTERFACE)
+                        if local_ip and local_ip != '0.0.0.0':
+                            logger.info(f"Parallel mode: filtering to local IP {local_ip}")
+                        else:
+                            logger.warning(
+                                f"Could not determine local IP for {INTERFACE}, "
+                                f"may capture other processes' forwarded packets"
+                            )
+                            local_ip = None
+                    except Exception as e:
+                        logger.warning(f"Failed to get local IP for {INTERFACE}: {e}")
+                        local_ip = None
+                
+                if fragment_reassembly_enabled:
+                    # Fragment-aware filter captures:
+                    # 1. Complete UDP packets destined to our ports
+                    # 2. Non-first IP fragments (which don't have UDP header visible)
+                    port_filter = generate_fragment_aware_filter(
+                        LISTEN_PORTS, 
+                        exclude_sport=FORWARD_SOURCE_PORT,
+                        local_ip=local_ip
+                    )
+                    logger.info("Using fragment-aware BPF filter")
+                else:
+                    # Standard filter only captures complete packets
+                    port_filter = generate_simple_filter(
+                        LISTEN_PORTS,
+                        exclude_sport=FORWARD_SOURCE_PORT,
+                        local_ip=local_ip
+                    )
+                
                 logger.info(f"BPF filter: {port_filter}")
+                
+                # Create the appropriate packet handler
+                if fragment_reassembly_enabled and fragment_buffer:
+                    # Use fragment-aware handler
+                    def fragment_aware_trap_handler(packet):
+                        """Handle packets with fragment reassembly support."""
+                        try:
+                            result = fragment_buffer.process_packet(packet)
+                            if result:
+                                # Got a complete packet (either non-fragmented or reassembled)
+                                forward_trap_dict(result)
+                        except Exception as e:
+                            logger.error(f"Error in fragment-aware handler: {e}")
+                    
+                    packet_handler = fragment_aware_trap_handler
+                    logger.info("Using fragment-aware packet handler")
+                else:
+                    # Use standard handler
+                    packet_handler = ha_aware_forward_trap
                 
                 # Use prn callback to queue packets instead of processing them directly
                 sniff(
                     iface=INTERFACE,
                     filter=port_filter,
-                    prn=ha_aware_forward_trap,  # Use HA-aware packet handler
+                    prn=packet_handler,
                     store=0,  # Don't store packets in memory
                     stop_filter=lambda x: stop_event.is_set()
                 )
@@ -692,10 +1045,25 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
         except Exception as e:
             logger.error(f"Error shutting down shadow mode: {e}")
 
-    # Shutdown packet processor (socket pool, stats)
+    # Shutdown fragment reassembly buffer
+    if FRAGMENTATION_AVAILABLE:
+        try:
+            frag_stats = get_fragment_stats()
+            if frag_stats:
+                logger.info(
+                    f"Fragment stats: completed={frag_stats.get('datagrams_completed', 0)}, "
+                    f"timeout={frag_stats.get('datagrams_timeout', 0)}, "
+                    f"evicted={frag_stats.get('datagrams_evicted', 0)}"
+                )
+            shutdown_fragment_buffer()
+        except Exception as e:
+            logger.debug(f"Error shutting down fragment buffer: {e}")
+
+    # Shutdown packet processor (socket pool)
     try:
-        from .packet_processor import shutdown as shutdown_processor
-        shutdown_processor()
+        from .processing import shutdown_forwarder
+        shutdown_forwarder()
+        logger.info("Packet processing resources released")
     except ImportError:
         pass
 
@@ -783,6 +1151,43 @@ def ha_aware_forward_trap(packet):
         logger.error(f"Error in packet capture callback: {e}")
 
 
+def forward_trap_dict(packet_info: dict):
+    """
+    Queue a packet for processing from a dict (used by fragment reassembly).
+    
+    This function handles packets that have been reassembled from fragments,
+    which are passed as dicts rather than Scapy packets.
+    
+    Args:
+        packet_info: Dict with 'src_ip', 'dst_port', 'payload' keys
+    """
+    from .network import packet_queue, _queue_stats
+    import queue
+    
+    try:
+        packet_data = {
+            'src_ip': packet_info.get('src_ip', ''),
+            'dst_port': packet_info.get('dst_port', 162),
+            'payload': packet_info.get('payload', b''),
+        }
+        
+        # Log if this was a reassembled fragment
+        if packet_info.get('fragmented', False):
+            logger.debug(
+                f"Reassembled fragmented trap from {packet_data['src_ip']}, "
+                f"payload size: {len(packet_data['payload'])} bytes"
+            )
+        
+        try:
+            packet_queue.put_nowait(packet_data)
+            _queue_stats.record_queued()
+        except queue.Full:
+            _queue_stats.record_dropped()
+            
+    except Exception as e:
+        logger.error(f"Error queuing reassembled packet: {e}")
+
+
 def get_ha_status():
     """
     Get HA status from the cluster instance
@@ -834,5 +1239,14 @@ def get_service_status():
         status["metrics"] = metrics
     except Exception:
         status["metrics"] = {}
+    
+    # Add fragment reassembly stats if available
+    if FRAGMENTATION_AVAILABLE:
+        try:
+            frag_stats = get_fragment_stats()
+            if frag_stats:
+                status["fragment_reassembly"] = frag_stats
+        except Exception:
+            pass
 
     return status

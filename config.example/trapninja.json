@@ -1,0 +1,8 @@
+{
+  "_comment": "TrapNinja main configuration file",
+  "_comment2": "Set 'interface' to null or remove it to enable auto-detection",
+
+  "interface": null,
+  "capture_mode": "auto",
+  "config_check_interval": 60
+}

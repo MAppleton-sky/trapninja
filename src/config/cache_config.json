@@ -9,5 +9,17 @@
   "key_prefix": "trapninja:buffer",
   "max_entries_per_stream": 1000000,
   "socket_timeout": 5.0,
-  "socket_connect_timeout": 5.0
+  "socket_connect_timeout": 5.0,
+  
+  "_comment_failover": "Failover replay ensures zero trap loss during HA failovers",
+  "failover_replay": {
+    "enabled": true,
+    "min_gap_seconds": 1.0,
+    "max_gap_seconds": 300.0,
+    "replay_rate_limit": 2000,
+    "replay_delay_seconds": 1.0,
+    "buffer_seconds": 0.5,
+    "replay_in_background": true,
+    "mark_replayed_traps": false
+  }
 }

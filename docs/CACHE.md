@@ -4,7 +4,17 @@ The TrapNinja cache system provides Redis-based trap buffering with rolling rete
 
 ## Overview
 
-The cache system acts as a rolling buffer that captures all forwarded SNMP traps in Redis Streams. When a monitoring system outage occurs, operators can replay the cached traps for a specific time window to backfill any data loss.
+The cache system acts as a rolling buffer that **automatically captures all forwarded SNMP traps** in Redis Streams. When a monitoring system outage occurs, operators can replay the cached traps for a specific time window to backfill any data loss.
+
+### Automatic Caching
+
+Traps are automatically cached during normal packet processing:
+
+- **All forwarded traps** are cached (default destinations and redirected)
+- **All SNMP versions** are supported (v1, v2c, v3)
+- **HA secondary nodes** cache traps even when not forwarding (for gap-fill)
+- **Caching is non-blocking** - cache failures don't affect forwarding
+- **Destination-based streams** - traps are stored by destination for targeted replay
 
 ```
 Normal Operation:
@@ -110,7 +120,7 @@ Create `/opt/trapninja/config/cache_config.json`:
 ### View Cache Status
 
 ```bash
-trapninja --cache-status
+trapninja cache status
 ```
 
 Output:
@@ -140,10 +150,10 @@ Total                45,230                                 59.3 MB
 
 ```bash
 # Query with time range
-trapninja --cache-query --destination voice_noc --from "14:30" --to "15:45"
+trapninja cache query --destination voice_noc --from "14:30" --to "15:45"
 
 # Query with relative time
-trapninja --cache-query --destination default --from "-2h" --to "-1h"
+trapninja cache query --destination default --from "-2h" --to "-1h"
 ```
 
 Output:
@@ -169,24 +179,28 @@ Timestamp                Source IP        OID
 
 ```bash
 # Dry run (preview without sending)
-trapninja --cache-replay --destination voice_noc \
+trapninja cache replay --destination voice_noc \
     --from "14:30" --to "15:45" --dry-run
 
 # Actual replay with rate limiting
-trapninja --cache-replay --destination voice_noc \
+trapninja cache replay --destination voice_noc \
     --from "14:30" --to "15:45" --rate-limit 1000
 
 # Replay all destinations
-trapninja --cache-replay --destination all \
+trapninja cache replay --destination all \
     --from "-2h" --to "-1h"
 
 # Replay with OID filter
-trapninja --cache-replay --destination voice_noc \
+trapninja cache replay --destination voice_noc \
     --from "14:30" --to "15:45" \
     --oid-filter "1.3.6.1.4.1.9"
 
+# Replay to custom destination
+trapninja cache replay --destination default \
+    --from "-1h" --to now --replay-to 10.1.1.100:162
+
 # Skip confirmation prompt
-trapninja --cache-replay --destination voice_noc \
+trapninja cache replay --destination voice_noc \
     --from "14:30" --to "15:45" -y
 ```
 
@@ -194,19 +208,19 @@ trapninja --cache-replay --destination voice_noc \
 
 ```bash
 # Clear specific destination
-trapninja --cache-clear --destination voice_noc
+trapninja cache clear --destination voice_noc
 
 # Clear all cached entries
-trapninja --cache-clear
+trapninja cache clear
 
 # Skip confirmation
-trapninja --cache-clear -y
+trapninja cache clear -y
 ```
 
 ### Cache Help
 
 ```bash
-trapninja --cache-help
+trapninja cache help
 ```
 
 ## Time Format Reference
@@ -284,6 +298,23 @@ The cache system works seamlessly with TrapNinja's HA configuration:
 - **Replay from either**: Replay can be triggered from either node
 - **Shared Redis**: Both nodes can share a single Redis instance
 - **Independent Redis**: Each node can have its own Redis (no cross-node replay)
+- **Automatic Failover Replay**: Gaps during failover are automatically detected and replayed
+
+### Automatic Failover Replay
+
+With shared Redis, TrapNinja can automatically detect and replay traps that may have been missed during failover:
+
+```
+Failover Timeline (with automatic replay):
+  T=0:00:00  Primary forwarding, updating last_forwarded timestamp
+  T=0:00:05  Primary fails (last trap forwarded at T=0:00:05)
+  T=0:00:08  Secondary becomes PRIMARY
+  T=0:00:08  Gap detected: 3 seconds
+  T=0:00:09  Auto-replay starts from cache
+  T=0:00:10  All missed traps replayed - zero loss!
+```
+
+See [FAILOVER_REPLAY.md](FAILOVER_REPLAY.md) for detailed configuration.
 
 Recommended HA setup with shared Redis:
 
@@ -344,4 +375,8 @@ redis-cli XTRIM trapninja:buffer:default MINID $(date -d '2 hours ago' +%s)000
 2. **Monitor Redis memory**: Set alerts at 80% of maxmemory
 3. **Test replay before outages**: Verify replay works with `--dry-run`
 4. **Document outage procedures**: Include cache replay in runbooks
-5. **Regular cache status checks**: Include `--cache-status` in monitoring
+5. **Regular cache status checks**: Include `trapninja cache status` in monitoring
+
+---
+
+**Last Updated**: 2025-01-09

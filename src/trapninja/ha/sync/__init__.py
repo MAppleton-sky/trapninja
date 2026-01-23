@@ -2,63 +2,50 @@
 """
 TrapNinja HA Config Synchronization Module
 
-Provides configuration synchronization between HA cluster nodes using
-the existing HA TCP socket communication mechanism.
+Provides configuration synchronization between HA cluster nodes.
 
 Keeps shared configurations (destinations, blocks, redirections) in sync
 while leaving server-specific configurations (ha_config, node identity) local.
 
-Architecture:
-    - Extends existing HA message protocol for config sync
-    - Primary pushes config changes to Secondary
-    - Version checksums in heartbeats detect drift
-    - No additional dependencies (uses existing HA infrastructure)
-
 Usage:
-    from trapninja.ha.sync import (
-        ConfigSyncManager, ConfigSyncConfig, SyncedConfigType
-    )
+    from trapninja.ha.sync import ConfigSyncManager, ConfigBundle
     
-    # Create sync manager
+    # Create sync manager (called automatically by HACluster)
     sync_mgr = ConfigSyncManager(
-        config=ConfigSyncConfig(enabled=True),
         config_dir="/opt/trapninja/config",
         instance_id="node-1",
-        get_ha_state=lambda: "primary",
-        get_peer_info=lambda: ("192.168.1.102", 60006),
+        peer_host="192.168.1.102",
+        peer_port=60006,
     )
     
-    # Start sync
-    sync_mgr.start()
+    # Start sync as secondary (pulls from primary)
+    sync_mgr.start(is_primary=False)
     
-    # Manual sync
-    sync_mgr.push_all_configs()  # As PRIMARY
-    sync_mgr.pull_all_configs()  # As SECONDARY
+    # Manual operations
+    sync_mgr.pull_configs()   # As SECONDARY
+    sync_mgr.push_configs()   # As PRIMARY
 
 Author: TrapNinja Team
-Version: 1.0.0
+Version: 2.0.0
 """
 
 __all__ = [
     'ConfigSyncManager',
-    'ConfigSyncConfig',
-    'SyncedConfigType',
-    'ConfigSyncMessageType',
-    'ConfigVersionInfo',
-    'SyncStats',
+    'ConfigBundle',
+    'SHARED_CONFIG_FILES',
     'LOCAL_ONLY_CONFIGS',
-    'load_sync_config',
-    'save_sync_config',
 ]
 
 from .manager import (
     ConfigSyncManager,
-    ConfigSyncConfig,
-    SyncedConfigType,
-    ConfigSyncMessageType,
-    ConfigVersionInfo,
-    SyncStats,
+    ConfigBundle,
+    SHARED_CONFIG_FILES,
     LOCAL_ONLY_CONFIGS,
-    load_sync_config,
-    save_sync_config,
 )
+
+# Also export from config_bundle for backward compatibility
+try:
+    from .config_bundle import SharedConfig, SHARED_CONFIG_FILES as BUNDLE_SHARED_FILES
+    __all__.extend(['SharedConfig'])
+except ImportError:
+    pass
