@@ -1,0 +1,45 @@
+# TrapNinja - MANIFEST.in
+# ========================
+# Controls which files are included in source distributions (sdist)
+#
+# Note: Python files are included automatically by setuptools.
+# This file specifies additional non-Python files to include.
+
+# Include essential project files
+include LICENSE
+include README.md
+include pyproject.toml
+
+# Include version file (single source of truth)
+include src/VERSION
+
+# Include example configuration files
+recursive-include config.example *.json
+
+# Include type hints marker
+include src/trapninja/py.typed
+
+# Exclude development and build artifacts
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude *.so
+global-exclude .DS_Store
+global-exclude *.egg-info
+global-exclude .git*
+global-exclude .idea
+
+# Exclude test files from distribution
+prune dev/tests
+prune .pytest_cache
+prune .git
+prune .idea
+
+# Exclude ansible (deployment-specific, not needed in package)
+prune ansible
+
+# Exclude documentation (available in repository)
+prune docs
+
+# Exclude development files
+prune dev/scripts
+prune dev/tools

@@ -76,14 +76,48 @@ trapninja/
 - Python 3.9+
 - Root privileges (for raw socket access)
 
-### Install Python Dependencies
+### Package Installation (Recommended)
 
 ```bash
+# Install system dependencies
+sudo dnf install -y python39 python39-pip libpcap libpcap-devel
+
+# Minimal installation (basic forwarding)
+pip3.9 install --break-system-packages trapninja
+
 # Full installation (all features)
+pip3.9 install --break-system-packages "trapninja[full]"
+
+# Feature-specific installation
+pip3.9 install --break-system-packages "trapninja[cache]"      # Redis caching
+pip3.9 install --break-system-packages "trapninja[snmpv3]"     # SNMPv3 decryption
+```
+
+### Build from Source
+
+```bash
+# Clone and build
+git clone <repository-url>
+cd trapninja
+pip3.9 install --break-system-packages build
+python3.9 -m build
+
+# Install built wheel
+pip3.9 install --break-system-packages dist/trapninja-*.whl
+```
+
+### Development Installation
+
+```bash
+# Clone repository
+git clone <repository-url>
+cd trapninja
+
+# Install from requirements (all features)
 pip3.9 install --break-system-packages -r dev/requirements.txt
 
-# Minimal installation (basic forwarding only)
-pip3.9 install --break-system-packages -r dev/requirements-minimal.txt
+# Or install in editable mode
+pip3.9 install --break-system-packages -e ".[dev]"
 ```
 
 ### Install System Packages
@@ -227,7 +261,7 @@ Configuration files are stored in `/etc/trapninja/` (production) or `./config/` 
 
 ## Version
 
-TrapNinja 0.7.13 (Beta)
+Current version is read from `src/VERSION` (currently 0.7.16 Beta).
 
 See [dev/CHANGELOG.md](dev/CHANGELOG.md) for version history.
 

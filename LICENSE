@@ -1,0 +1,49 @@
+TrapNinja - Proprietary License
+================================
+
+Copyright (c) 2024-2025 Matthew Appleton. All Rights Reserved.
+
+PROPRIETARY SOFTWARE LICENSE
+
+This software and associated documentation files (the "Software") are the
+proprietary property of Matthew Appleton and are protected by copyright law.
+
+RESTRICTIONS
+------------
+
+1. COPYING: You may not copy, reproduce, or distribute this Software or any
+   portion thereof without express written permission from the copyright holder.
+
+2. MODIFICATION: You may not modify, adapt, translate, reverse engineer,
+   decompile, disassemble, or create derivative works based on this Software.
+
+3. DISTRIBUTION: You may not distribute, sublicense, lease, rent, loan, or
+   otherwise transfer this Software to any third party.
+
+4. COMMERCIAL USE: Commercial use of this Software requires a separate
+   commercial license agreement with the copyright holder.
+
+PERMITTED USE
+-------------
+
+This Software may only be used:
+- By authorized personnel within organizations that have received explicit
+  permission from the copyright holder
+- For internal network monitoring and SNMP trap forwarding purposes
+- In accordance with any additional terms specified in a separate agreement
+
+DISCLAIMER
+----------
+
+THIS SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF,
+OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+CONTACT
+-------
+
+For licensing inquiries, please contact the copyright holder.
