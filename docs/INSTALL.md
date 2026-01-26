@@ -2,16 +2,65 @@
 
 This guide covers installing TrapNinja on RHEL 8/9 and compatible systems.
 
-## Quick Install (Minimal)
+## Installation Methods
 
-For basic trap forwarding without optional features:
+TrapNinja supports three installation methods:
+
+| Method | Best For | Command |
+|--------|----------|--------|
+| Package Install | Production deployments | `pip install trapninja` |
+| Development Install | Active development | `pip install -e .` |
+| Manual Install | Air-gapped systems | Copy `src/` directory |
+
+## Quick Install (Package)
+
+For production deployments using pip:
 
 ```bash
 # Install system packages
 sudo dnf install -y python39 python39-pip libpcap libpcap-devel
 
-# Install Python packages
-pip3.9 install --break-system-packages scapy
+# Install TrapNinja (minimal - basic forwarding)
+pip3.9 install --break-system-packages trapninja
+
+# Or with all features
+pip3.9 install --break-system-packages "trapninja[full]"
+
+# Or specific features
+pip3.9 install --break-system-packages "trapninja[cache]"      # Redis caching
+pip3.9 install --break-system-packages "trapninja[snmpv3]"     # SNMPv3 decryption
+```
+
+## Building from Source
+
+To build your own package:
+
+```bash
+# Clone repository
+git clone <repository-url>
+cd trapninja
+
+# Install build tools
+pip3.9 install --break-system-packages build
+
+# Build package (creates dist/trapninja-x.x.x-py3-none-any.whl)
+python3.9 -m build
+
+# Install from built wheel
+pip3.9 install --break-system-packages dist/trapninja-*.whl
+```
+
+## Development Installation
+
+For active development with editable install:
+
+```bash
+# Clone repository
+git clone <repository-url>
+cd trapninja
+
+# Install in editable mode with dev dependencies
+pip3.9 install --break-system-packages -e ".[dev]"
 ```
 
 ## Full Installation
@@ -107,6 +156,40 @@ pip3.9 install --break-system-packages pysnmp pyasn1 cryptography pycryptodome
 ```
 
 #### Air-Gapped Installation (No Internet)
+
+**Option 1: Pre-built wheel (Recommended)**
+
+On a machine with internet access:
+
+```bash
+# Clone and build TrapNinja wheel
+git clone <repository-url>
+cd trapninja
+pip3.9 install --break-system-packages build
+python3.9 -m build --wheel
+
+# Download all dependencies
+mkdir -p /tmp/trapninja-offline
+cp dist/*.whl /tmp/trapninja-offline/
+pip3.9 download -d /tmp/trapninja-offline \
+    scapy redis pysnmp pyasn1 cryptography pycryptodome
+
+# Create tarball
+cd /tmp
+tar czvf trapninja-offline.tar.gz trapninja-offline/
+```
+
+On the air-gapped system:
+
+```bash
+# Transfer trapninja-offline.tar.gz to the system, then:
+tar xzvf trapninja-offline.tar.gz
+pip3.9 install --break-system-packages --no-index \
+    --find-links=/path/to/trapninja-offline/ \
+    trapninja
+```
+
+**Option 2: Manual dependency download**
 
 On a machine with internet access:
 
