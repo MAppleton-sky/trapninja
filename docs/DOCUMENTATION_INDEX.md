@@ -1,7 +1,7 @@
 # TrapNinja Documentation Index
 
-**Last Updated**: 2025-01-22  
-**TrapNinja Version**: 0.7.15 (Beta)
+**Last Updated**: 2025-01-27  
+**TrapNinja Version**: 0.7.16 (Beta)
 
 This index provides an overview of all documentation files and their purposes.
 
@@ -13,16 +13,16 @@ This index provides an overview of all documentation files and their purposes.
 
 | Document | Purpose | Status | Last Updated |
 |----------|---------|--------|--------------|
-| **USER_GUIDE.md** | Primary user guide with modern CLI syntax | ✅ Current | 2025-01-08 |
+| **USER_GUIDE.md** | Primary user guide with modern CLI syntax | ✅ Current | 2025-01-27 |
 | **CLI.md** | Complete CLI reference for all commands | ✅ Current | 2025-01-08 |
 | **INSTALL.md** | Installation and deployment guide | 📝 Needs Review | - |
-| **README.md** (root) | Project overview and quick start | 📝 Needs Review | - |
+| **README.md** (root) | Project overview and quick start | ✅ Current | 2025-01-27 |
 
 ### Feature Documentation
 
 | Document | Purpose | Status | Last Updated |
 |----------|---------|--------|--------------|
-| **HA.md** | High Availability configuration | ✅ Current | 2025-01-09 |
+| **HA.md** | High Availability configuration | ✅ Current | 2025-01-27 |
 | **CACHE.md** | Redis caching and replay | ✅ Current | 2025-01-09 |
 | **GRANULAR_STATS.md** | Statistics system details | ✅ Current | 2025-01-09 |
 | **METRICS.md** | Prometheus metrics reference | ✅ Current | - |
@@ -36,14 +36,14 @@ This index provides an overview of all documentation files and their purposes.
 
 | Document | Purpose | Status | Last Updated |
 |----------|---------|--------|--------------|
-| **SECURITY.md** | Security measures and CWE remediation | ✅ Current | 2025-01-22 |
+| **SECURITY.md** | Security measures and CWE remediation | ✅ Current | 2025-01-27 |
 
 ### Operational Documentation
 
 | Document | Purpose | Status | Last Updated |
 |----------|---------|--------|--------------|
 | **TROUBLESHOOTING.md** | Problem diagnosis guide | 📝 Needs Review | - |
-| **CONFIG.md** | Configuration file reference | 📝 Needs Review | - |
+| **CONFIG.md** | Configuration file reference | ✅ Current | 2025-01-27 |
 
 ---
 

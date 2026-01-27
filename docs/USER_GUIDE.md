@@ -610,6 +610,7 @@ All configuration files are in the `config/` directory.
 
 | File | Purpose |
 |------|---------|
+| `trapninja.json` | Main config (interface, bind_address, capture mode) |
 | `destinations.json` | Default forwarding destinations |
 | `listen_ports.json` | UDP ports to listen on |
 | `blocked_ips.json` | IPs to block (managed via CLI) |
