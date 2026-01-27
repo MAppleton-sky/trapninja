@@ -27,31 +27,8 @@ from scapy.all import IP, UDP, get_if_list
 from .config import stop_event, LISTEN_PORTS, INTERFACE, BIND_ADDRESS
 from .core.constants import FORWARD_SOURCE_PORT
 
-# Import HA functions for forwarding control
-# CRITICAL: These functions control whether this node should forward traps
-try:
-    from .ha import is_forwarding_enabled, notify_trap_processed
-    HA_AVAILABLE = True
-except ImportError as e:
-    # Log the import failure - this is critical for HA to work!
-    import sys
-    print(f"WARNING: Failed to import HA module: {e}", file=sys.stderr)
-    print("WARNING: HA forwarding control DISABLED - all nodes will forward!", file=sys.stderr)
-    HA_AVAILABLE = False
-    
-    # Counter to rate-limit warnings
-    _ha_warning_count = 0
-    
-    def is_forwarding_enabled():
-        """Fallback when HA module unavailable - ALWAYS returns True (unsafe for HA)"""
-        global _ha_warning_count
-        _ha_warning_count += 1
-        if _ha_warning_count <= 5:  # Only warn first 5 times
-            logger.warning("HA module not available - forwarding enabled by default")
-        return True
-    
-    def notify_trap_processed():
-        pass
+# Import HA functions for forwarding control via compatibility layer
+from .ha_compat import is_forwarding_enabled, notify_trap_processed, HA_AVAILABLE
 
 logger = logging.getLogger("trapninja")
 

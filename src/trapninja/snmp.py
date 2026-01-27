@@ -39,11 +39,7 @@ except ImportError:
     def log_parsing_failure(*args, **kwargs): pass
     def validate_snmp_basic_structure(*args, **kwargs): return True, None
 
-try:
-    from .ha import is_forwarding_enabled, notify_trap_processed
-except ImportError:
-    def is_forwarding_enabled(): return True
-    def notify_trap_processed(): pass
+from .ha_compat import is_forwarding_enabled, notify_trap_processed
 
 logger = logging.getLogger("trapninja")
 
