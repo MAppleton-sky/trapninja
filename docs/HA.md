@@ -85,6 +85,7 @@ Location: `config/ha_config.json`
     "peer_host": "192.168.1.102",
     "peer_port": 8162,
     "listen_port": 8162,
+    "listen_address": "0.0.0.0",
     "priority": 150,
     "heartbeat_interval": 1.0,
     "heartbeat_timeout": 3.0,
@@ -103,6 +104,7 @@ Location: `config/ha_config.json`
 | `peer_host` | string | - | IP address of peer node |
 | `peer_port` | int | 8162 | UDP port for HA communication |
 | `listen_port` | int | 8162 | Local UDP port for HA |
+| `listen_address` | string | "0.0.0.0" | IP address to bind HA listener (CWE-284) |
 | `priority` | int | 100 | Election priority (higher wins) |
 | `heartbeat_interval` | float | 1.0 | Seconds between heartbeats |
 | `heartbeat_timeout` | float | 3.0 | Seconds before peer is considered dead |
@@ -474,6 +476,7 @@ trapninja daemon start
 3. **Use shared secret** for production deployments
 4. **Test failover** before production deployment
 5. **Monitor ha_blocked metric** to verify SECONDARY isn't leaking traps
+6. **Set explicit listen_address** - Bind HA listener to specific IP for security (CWE-284)
 
 ### Network
 
@@ -499,6 +502,7 @@ trapninja daemon start
     "peer_host": "192.168.1.102",
     "peer_port": 8162,
     "listen_port": 8162,
+    "listen_address": "192.168.1.101",
     "priority": 150,
     "heartbeat_interval": 1.0,
     "heartbeat_timeout": 3.0,
@@ -517,6 +521,7 @@ trapninja daemon start
     "peer_host": "192.168.1.101",
     "peer_port": 8162,
     "listen_port": 8162,
+    "listen_address": "192.168.1.102",
     "priority": 100,
     "heartbeat_interval": 1.0,
     "heartbeat_timeout": 3.0,
@@ -528,4 +533,4 @@ trapninja daemon start
 
 ---
 
-**Last Updated**: 2025-01-09
+**Last Updated**: 2025-01-27

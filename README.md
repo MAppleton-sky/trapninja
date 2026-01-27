@@ -197,6 +197,7 @@ Configuration files are stored in `/etc/trapninja/` (production) or `./config/` 
 
 | File | Purpose |
 |------|---------|
+| `trapninja.json` | Main config (interface, bind_address, capture mode) |
 | `destinations.json` | Forward destinations |
 | `blocked_ips.json` | Blocked source IPs |
 | `blocked_traps.json` | Blocked OIDs |

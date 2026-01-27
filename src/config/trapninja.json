@@ -1,6 +1,7 @@
 {
-  "_comment": "TrapNinja main configuration. Remove or set 'interface' to auto-detect.",
+  "_comment": "TrapNinja main configuration. Set 'bind_address' for security (CWE-284).",
   "interface": null,
+  "bind_address": null,
   "capture_mode": "auto",
   "config_check_interval": 60
 }

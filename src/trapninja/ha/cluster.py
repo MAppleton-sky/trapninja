@@ -452,7 +452,7 @@ class HACluster:
             self.listen_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.listen_socket.settimeout(1.0)
             
-            self.listen_socket.bind(('0.0.0.0', self.config.listen_port))
+            self.listen_socket.bind((self.config.listen_address, self.config.listen_port))
             self.listen_socket.listen(5)
             
             self.listen_thread = threading.Thread(
@@ -462,7 +462,7 @@ class HACluster:
             )
             self.listen_thread.start()
             
-            logger.info(f"HA listener started on port {self.config.listen_port}")
+            logger.info(f"HA listener started on {self.config.listen_address}:{self.config.listen_port}")
             return True
             
         except Exception as e:

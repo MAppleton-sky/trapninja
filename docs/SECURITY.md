@@ -8,9 +8,64 @@ TrapNinja has been updated to address the following Common Weakness Enumerations
 
 | CWE | Description | Status |
 |-----|-------------|--------|
+| CWE-284 | Improper Access Control (Bind Address) | Fixed |
 | CWE-327 | Use of Broken or Risky Cryptographic Algorithm | Mitigated with warnings |
 | CWE-23 | Relative Path Traversal | Fixed |
 | CWE-916 | Use of Password Hash With Insufficient Computational Effort | Fixed |
+
+## CWE-284: Improper Access Control (Bind Address)
+
+### Background
+
+Binding network listeners to `0.0.0.0` (all interfaces) can expose services to unintended networks, increasing attack surface.
+
+### TrapNinja's Situation
+
+TrapNinja has two network listeners:
+1. **SNMP Trap Listener** (UDP) - Receives traps from network devices
+2. **HA Cluster Listener** (TCP) - Receives heartbeats and commands from HA peer
+
+Previously, both bound to `0.0.0.0` by default.
+
+### Remediation Applied
+
+1. **Configurable Bind Address**: Both listeners now support explicit bind address configuration
+2. **Auto-Detection**: If not explicitly configured, the bind address is auto-detected from the configured interface
+3. **Fallback Warning**: If auto-detection fails, `0.0.0.0` is used with a warning logged
+
+**Files Modified:**
+- `config.py` - Added `BIND_ADDRESS` with auto-detection from interface
+- `network.py` - Uses `BIND_ADDRESS` instead of hardcoded `0.0.0.0`
+- `ha/config.py` - Added `listen_address` field to `HAConfig`
+- `ha/cluster.py` - Uses `config.listen_address` for HA listener
+
+### Configuration
+
+**SNMP Trap Listener** (`trapninja.json`):
+```json
+{
+  "interface": "eth0",
+  "bind_address": "10.1.2.3"
+}
+```
+
+If `bind_address` is not set, TrapNinja will:
+1. Try to get the IP address of the configured `interface`
+2. Fall back to `0.0.0.0` with a warning if detection fails
+
+**HA Cluster Listener** (`ha_config.json`):
+```json
+{
+  "listen_address": "10.1.2.100",
+  "listen_port": 60006
+}
+```
+
+### Recommendations
+
+1. **Always set explicit bind addresses** in production environments
+2. **Use management VLAN IPs** for HA communication
+3. **Firewall rules** should still be applied as defense-in-depth
 
 ## CWE-327: Cryptographic Algorithm Security
 
@@ -225,6 +280,7 @@ After applying these fixes, run the security scanner again. Expected results:
 
 | Finding | Expected Status |
 |---------|-----------------|
+| CWE-284 (Bind to 0.0.0.0) | Fixed - Configurable bind address |
 | CWE-327 (MD5/SHA1/DES in SNMP) | Acknowledged - RFC 3414 requirement |
 | CWE-327 (MD5 in checksums) | Fixed - Now uses SHA-256 |
 | CWE-23 (Path traversal) | Fixed - Path validation added |
@@ -240,6 +296,7 @@ After applying these fixes, run the security scanner again. Expected results:
 
 - [RFC 3414 - User-based Security Model for SNMPv3](https://tools.ietf.org/html/rfc3414)
 - [OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
+- [CWE-284: Improper Access Control](https://cwe.mitre.org/data/definitions/284.html)
 - [CWE-327: Use of a Broken or Risky Cryptographic Algorithm](https://cwe.mitre.org/data/definitions/327.html)
 - [CWE-23: Relative Path Traversal](https://cwe.mitre.org/data/definitions/23.html)
 - [CWE-916: Use of Password Hash With Insufficient Computational Effort](https://cwe.mitre.org/data/definitions/916.html)

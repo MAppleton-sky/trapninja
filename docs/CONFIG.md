@@ -13,7 +13,7 @@ TrapNinja uses JSON configuration files stored in the configuration directory. T
 
 | File | Purpose |
 |------|---------|
-| `trapninja.json` | Main configuration (interface, capture mode) |
+| `trapninja.json` | Main configuration (interface, bind address, capture mode) |
 | `destinations.json` | Forward destinations |
 | `listen_ports.json` | UDP ports to listen on |
 | `blocked_ips.json` | Source IPs to block |
@@ -35,6 +35,7 @@ The main configuration file controls core TrapNinja settings.
 ```json
 {
   "interface": "eth0",
+  "bind_address": "10.1.2.3",
   "capture_mode": "auto",
   "config_check_interval": 60
 }
@@ -58,6 +59,22 @@ The network interface to capture SNMP traps on.
 4. Falls back to `eth0` if detection fails
 
 **Environment variable override:** `TRAPNINJA_INTERFACE`
+
+#### bind_address
+
+The IP address to bind the SNMP trap listener to. This is a security setting (CWE-284) that restricts which network interface accepts incoming traps.
+
+| Value | Description |
+|-------|-------------|
+| `"10.1.2.3"` | Specific IP address to bind to |
+| `null` or omitted | Auto-detect from configured interface |
+
+**Auto-detection behavior:**
+1. If `bind_address` is set explicitly, use that IP
+2. Otherwise, try to get the IP address of the configured `interface`
+3. Fall back to `0.0.0.0` (all interfaces) with a warning if detection fails
+
+**Security recommendation:** Always set an explicit `bind_address` in production environments to prevent trap reception on unintended network interfaces.
 
 #### capture_mode
 
@@ -84,6 +101,7 @@ How often (in seconds) to check for configuration file changes. Default: 60
 ```json
 {
   "interface": "eth0",
+  "bind_address": "10.1.2.3",
   "capture_mode": "auto"
 }
 ```
@@ -93,6 +111,7 @@ How often (in seconds) to check for configuration file changes. Default: 60
 ```json
 {
   "interface": "ens192",
+  "bind_address": "192.168.1.100",
   "capture_mode": "auto"
 }
 ```
@@ -102,6 +121,7 @@ How often (in seconds) to check for configuration file changes. Default: 60
 ```json
 {
   "interface": null,
+  "bind_address": null,
   "capture_mode": "auto"
 }
 ```
@@ -248,10 +268,12 @@ python trapninja.py --validate-config
 
 ## Best Practices
 
-1. **Use auto-detection for portability** - Set `"interface": null` to allow deployment across different server types without configuration changes.
+1. **Set explicit bind_address for security** - Always configure `bind_address` in production to restrict which interface accepts traps (CWE-284 mitigation).
 
-2. **Use environment variables for deployment** - Set `TRAPNINJA_CONFIG` and `TRAPNINJA_INTERFACE` in your systemd service file for environment-specific settings.
+2. **Use auto-detection for portability** - Set `"interface": null` to allow deployment across different server types without configuration changes.
 
-3. **Validate before deploying** - Always run `--validate-config` after making changes.
+3. **Use environment variables for deployment** - Set `TRAPNINJA_CONFIG` and `TRAPNINJA_INTERFACE` in your systemd service file for environment-specific settings.
 
-4. **Keep HA nodes in sync** - Use config sync or shared configuration management (Ansible, etc.) to keep Primary and Secondary configurations aligned.
+4. **Validate before deploying** - Always run `--validate-config` after making changes.
+
+5. **Keep HA nodes in sync** - Use config sync or shared configuration management (Ansible, etc.) to keep Primary and Secondary configurations aligned.

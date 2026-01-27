@@ -1,9 +1,10 @@
 {
+  "_comment": "TrapNinja HA Configuration - set listen_address to specific IP for security (CWE-284)",
   "enabled": false,
   "mode": "primary",
   "peer_host": "127.0.0.1",
-  "peer_port": 8162,
-  "listen_port": 8162,
+  "peer_port": 60006,
+  "listen_port": 60006,
   "listen_address": "0.0.0.0",
   "heartbeat_interval": 1.0,
   "heartbeat_timeout": 3.0,
