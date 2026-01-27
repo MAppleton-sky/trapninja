@@ -24,7 +24,7 @@ from typing import Optional, List, Dict, Any
 
 from scapy.all import IP, UDP, get_if_list
 
-from .config import stop_event, LISTEN_PORTS, INTERFACE
+from .config import stop_event, LISTEN_PORTS, INTERFACE, BIND_ADDRESS
 from .core.constants import FORWARD_SOURCE_PORT
 
 # Import HA functions for forwarding control
@@ -210,7 +210,7 @@ def start_udp_listener(port: int) -> bool:
         except Exception:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16777216)  # 16MB fallback
         
-        sock.bind(('0.0.0.0', port))
+        sock.bind((BIND_ADDRESS, port))
         sock.settimeout(1.0)
         
         udp_sockets[port] = sock
@@ -218,7 +218,7 @@ def start_udp_listener(port: int) -> bool:
         future = udp_thread_pool.submit(_udp_receive_loop, sock, port)
         udp_threads[port] = future
         
-        logger.info(f"UDP listener started on port {port}")
+        logger.info(f"UDP listener started on {BIND_ADDRESS}:{port}")
         return True
         
     except socket.error as e:

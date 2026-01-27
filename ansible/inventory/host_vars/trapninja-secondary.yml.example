@@ -9,6 +9,7 @@ trapninja_ha_config:
   peer_host: "10.234.83.133"    # IP of primary server
   peer_port: 60006
   listen_port: 60006
+  listen_address: "0.0.0.0"     # IP to bind HA listener (CWE-284: set to specific IP in production)
   priority: 100                  # Lower priority than primary
   heartbeat_interval: 1.0
   heartbeat_timeout: 3.0

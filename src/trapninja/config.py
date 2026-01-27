@@ -195,6 +195,54 @@ INTERFACE = (
 )
 
 LISTEN_PORTS = [162]  # Default listening port for SNMP traps
+
+
+def _get_bind_address():
+    """
+    Determine the IP address to bind listeners to.
+    
+    Security Note (CWE-284): Binding to a specific IP rather than 0.0.0.0
+    restricts which interfaces accept traffic, reducing attack surface.
+    
+    Priority:
+    1. Explicit bind_address in config
+    2. IP address of configured interface
+    3. Fall back to 0.0.0.0 (all interfaces) - logs warning
+    
+    Returns:
+        str: IP address to bind to
+    """
+    log = logging.getLogger("trapninja")
+    
+    # 1. Explicit bind_address in config
+    explicit_addr = _main_config.get('bind_address')
+    if explicit_addr:
+        log.info(f"Using configured bind_address: {explicit_addr}")
+        return explicit_addr
+    
+    # 2. Get IP from configured interface
+    try:
+        from scapy.all import get_if_addr
+        
+        addr = get_if_addr(INTERFACE)
+        if addr and addr != '0.0.0.0' and not addr.startswith('127.'):
+            log.info(f"Binding to interface {INTERFACE} IP: {addr}")
+            return addr
+    except ImportError:
+        log.debug("Scapy not available for interface IP lookup")
+    except Exception as e:
+        log.debug(f"Could not get IP for interface {INTERFACE}: {e}")
+    
+    # 3. Fall back to all interfaces (with warning)
+    log.warning(
+        "Could not determine specific bind address - binding to 0.0.0.0 (all interfaces). "
+        "Consider setting 'bind_address' in trapninja.json for improved security."
+    )
+    return '0.0.0.0'
+
+
+# Bind address for listeners (CWE-284 mitigation)
+BIND_ADDRESS = _get_bind_address()
 CONFIG_CHECK_INTERVAL = _main_config.get('config_check_interval', 60)
 
 # Packet capture mode configuration
@@ -278,8 +326,9 @@ def ensure_config_dir():
         # Main configuration file
         if not os.path.exists(MAIN_CONFIG_FILE):
             example_main_config = {
-                "_comment": "TrapNinja main configuration. Remove or set 'interface' to auto-detect.",
+                "_comment": "TrapNinja main configuration. Set 'bind_address' for security (CWE-284).",
                 "interface": None,
+                "bind_address": None,
                 "capture_mode": "auto",
                 "config_check_interval": 60
             }

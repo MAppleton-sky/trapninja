@@ -28,6 +28,7 @@ class HAConfig:
         peer_host: Hostname/IP of peer node
         peer_port: Port for peer HA communication
         listen_port: Port to listen for peer connections
+        listen_address: IP address to bind HA listener (default 0.0.0.0)
         heartbeat_interval: Seconds between heartbeats
         heartbeat_timeout: Seconds before peer is considered dead
         failover_delay: Seconds to wait before completing failover
@@ -44,6 +45,7 @@ class HAConfig:
     peer_host: str = "127.0.0.1"
     peer_port: int = 60006
     listen_port: int = 60006
+    listen_address: str = "0.0.0.0"  # IP to bind HA listener (CWE-284)
     heartbeat_interval: float = 1.0
     heartbeat_timeout: float = 3.0
     failover_delay: float = 2.0
