@@ -300,6 +300,47 @@ class PacketWorker:
             # Non-blocking - don't let cache errors affect forwarding
             logger.debug(f"Cache store failed: {e}")
     
+    def _complete_forward(
+        self,
+        source_ip: str,
+        payload: bytes,
+        destinations: list,
+        trap_oid: str = None,
+        destination_tag: str = 'default',
+        action: str = 'forwarded'
+    ):
+        """
+        Complete a forward operation with all bookkeeping.
+        
+        Consolidates: forward, stats increment, granular stats, cache, HA notification.
+        This is the single point of change for adding new bookkeeping operations.
+        
+        Args:
+            source_ip: Source IP address
+            payload: Raw SNMP PDU bytes
+            destinations: List of (ip, port) tuples to forward to
+            trap_oid: Extracted trap OID (if available)
+            destination_tag: Tag for stats/cache (e.g., 'default', redirection tag)
+            action: Stats action - 'forwarded' or 'redirected'
+        """
+        # Forward the packet
+        forward_packet(source_ip, payload, destinations)
+        
+        # Update stats
+        if action == 'forwarded':
+            self.stats.increment_forwarded()
+        elif action == 'redirected':
+            self.stats.increment_redirected()
+        
+        # Record granular statistics
+        self._record_granular_stats(source_ip, trap_oid, action, destination_tag)
+        
+        # Store in cache for replay
+        self._store_trap_in_cache(source_ip, payload, trap_oid, destination_tag)
+        
+        # Notify HA system of activity
+        notify_trap_processed()
+    
     def start(self) -> threading.Thread:
         """
         Start worker thread.
@@ -476,37 +517,30 @@ class PacketWorker:
                     if source_ip in config['redirected_ips']:
                         tag = config['redirected_ips'][source_ip]
                         if tag in config['redirected_destinations']:
-                            forward_packet(
+                            self._complete_forward(
                                 source_ip, payload,
-                                config['redirected_destinations'][tag]
+                                config['redirected_destinations'][tag],
+                                trap_oid, tag, 'redirected'
                             )
-                            self.stats.increment_redirected()
-                            self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
-                            self._store_trap_in_cache(source_ip, payload, trap_oid, tag)
-                            notify_trap_processed()  # Notify HA system of activity
                             return
                     
                     # Check OID redirection
                     if trap_oid in config['redirected_oids']:
                         tag = config['redirected_oids'][trap_oid]
                         if tag in config['redirected_destinations']:
-                            forward_packet(
+                            self._complete_forward(
                                 source_ip, payload,
-                                config['redirected_destinations'][tag]
+                                config['redirected_destinations'][tag],
+                                trap_oid, tag, 'redirected'
                             )
-                            self.stats.increment_redirected()
-                            self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
-                            self._store_trap_in_cache(source_ip, payload, trap_oid, tag)
-                            notify_trap_processed()  # Notify HA system of activity
                             return
                     
                     # Forward to normal destinations
                     if config['destinations']:
-                        forward_packet(source_ip, payload, config['destinations'])
-                        self.stats.increment_forwarded()
-                        self._record_granular_stats(source_ip, trap_oid, 'forwarded', 'default')
-                        self._store_trap_in_cache(source_ip, payload, trap_oid, 'default')
-                        notify_trap_processed()  # Notify HA system of activity
+                        self._complete_forward(
+                            source_ip, payload, config['destinations'],
+                            trap_oid, 'default', 'forwarded'
+                        )
                     
                     return
             
@@ -536,11 +570,10 @@ class PacketWorker:
         # Parsing failed - forward anyway
         if not snmp_packet:
             if config['destinations']:
-                forward_packet(source_ip, payload, config['destinations'])
-                self.stats.increment_forwarded()
-                self._record_granular_stats(source_ip, None, 'forwarded', 'default')
-                self._store_trap_in_cache(source_ip, payload, None, 'default')
-                notify_trap_processed()  # Notify HA system of activity
+                self._complete_forward(
+                    source_ip, payload, config['destinations'],
+                    None, 'default', 'forwarded'
+                )
             return
         
         # Extract OID using slow method
@@ -553,11 +586,10 @@ class PacketWorker:
         
         if not trap_oid:
             if config['destinations']:
-                forward_packet(source_ip, payload, config['destinations'])
-                self.stats.increment_forwarded()
-                self._record_granular_stats(source_ip, None, 'forwarded', 'default')
-                self._store_trap_in_cache(source_ip, payload, None, 'default')
-                notify_trap_processed()  # Notify HA system of activity
+                self._complete_forward(
+                    source_ip, payload, config['destinations'],
+                    None, 'default', 'forwarded'
+                )
             return
         
         # Check blocking
@@ -572,36 +604,29 @@ class PacketWorker:
         if source_ip in config['redirected_ips']:
             tag = config['redirected_ips'][source_ip]
             if tag in config['redirected_destinations']:
-                forward_packet(
+                self._complete_forward(
                     source_ip, payload,
-                    config['redirected_destinations'][tag]
+                    config['redirected_destinations'][tag],
+                    trap_oid, tag, 'redirected'
                 )
-                self.stats.increment_redirected()
-                self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
-                self._store_trap_in_cache(source_ip, payload, trap_oid, tag)
-                notify_trap_processed()  # Notify HA system of activity
                 return
         
         if trap_oid in config['redirected_oids']:
             tag = config['redirected_oids'][trap_oid]
             if tag in config['redirected_destinations']:
-                forward_packet(
+                self._complete_forward(
                     source_ip, payload,
-                    config['redirected_destinations'][tag]
+                    config['redirected_destinations'][tag],
+                    trap_oid, tag, 'redirected'
                 )
-                self.stats.increment_redirected()
-                self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
-                self._store_trap_in_cache(source_ip, payload, trap_oid, tag)
-                notify_trap_processed()  # Notify HA system of activity
                 return
         
         # Forward normally
         if config['destinations']:
-            forward_packet(source_ip, payload, config['destinations'])
-            self.stats.increment_forwarded()
-            self._record_granular_stats(source_ip, trap_oid, 'forwarded', 'default')
-            self._store_trap_in_cache(source_ip, payload, trap_oid, 'default')
-            notify_trap_processed()  # Notify HA system of activity
+            self._complete_forward(
+                source_ip, payload, config['destinations'],
+                trap_oid, 'default', 'forwarded'
+            )
     
     def _process_v2c_payload(
         self,
@@ -648,11 +673,10 @@ class PacketWorker:
             tag = config['redirected_ips'][source_ip]
             if tag in config['redirected_destinations']:
                 dest_list = config['redirected_destinations'][tag]
-                forward_packet(source_ip, payload, dest_list)
-                self.stats.increment_redirected()
-                self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
-                self._store_trap_in_cache(source_ip, payload, trap_oid, tag)
-                notify_trap_processed()
+                self._complete_forward(
+                    source_ip, payload, dest_list,
+                    trap_oid, tag, 'redirected'
+                )
                 if is_decrypted_v3:
                     logger.info(
                         f"{log_prefix}Forwarded from {source_ip} to '{tag}' "
@@ -665,11 +689,10 @@ class PacketWorker:
             tag = config['redirected_oids'][trap_oid]
             if tag in config['redirected_destinations']:
                 dest_list = config['redirected_destinations'][tag]
-                forward_packet(source_ip, payload, dest_list)
-                self.stats.increment_redirected()
-                self._record_granular_stats(source_ip, trap_oid, 'redirected', tag)
-                self._store_trap_in_cache(source_ip, payload, trap_oid, tag)
-                notify_trap_processed()
+                self._complete_forward(
+                    source_ip, payload, dest_list,
+                    trap_oid, tag, 'redirected'
+                )
                 if is_decrypted_v3:
                     logger.info(
                         f"{log_prefix}OID {trap_oid} redirected to '{tag}' "
@@ -679,11 +702,10 @@ class PacketWorker:
         
         # Forward to default destinations
         if config['destinations']:
-            forward_packet(source_ip, payload, config['destinations'])
-            self.stats.increment_forwarded()
-            self._record_granular_stats(source_ip, trap_oid, 'forwarded', 'default')
-            self._store_trap_in_cache(source_ip, payload, trap_oid, 'default')
-            notify_trap_processed()
+            self._complete_forward(
+                source_ip, payload, config['destinations'],
+                trap_oid, 'default', 'forwarded'
+            )
             if is_decrypted_v3:
                 logger.info(
                     f"{log_prefix}Forwarded from {source_ip} "
@@ -860,12 +882,10 @@ class PacketWorker:
             f"(no credentials configured for engine {engine_id})"
         )
         if config['destinations']:
-            forward_packet(source_ip, payload, config['destinations'])
-            self.stats.increment_forwarded()
-            # Use 'forwarded' action for proper stats counting
-            self._record_granular_stats(source_ip, None, 'forwarded', 'default')
-            self._store_trap_in_cache(source_ip, payload, None, 'default')
-            notify_trap_processed()
+            self._complete_forward(
+                source_ip, payload, config['destinations'],
+                None, 'default', 'forwarded'
+            )
 
 
 # =============================================================================

@@ -363,84 +363,31 @@ def cleanup_udp_sockets():
 def start_packet_processors(num_workers: int = None) -> List[threading.Thread]:
     """
     Start packet processing workers.
-    Uses the optimized processing module.
+    
+    Uses the optimized processing module which provides:
+    - Batch processing with adaptive batch sizes
+    - Cached configuration (30s TTL)
+    - Fast path for SNMPv2c (direct byte scanning)
+    - Minimal per-packet logging
+    - HA integration with forwarding control
+    - Cache integration for trap replay
+    - Granular statistics collection
+    
+    Args:
+        num_workers: Number of worker threads (default: 2x CPU cores, max 32)
+        
+    Returns:
+        List of worker threads
+        
+    Raises:
+        ImportError: If processing module is not available
     """
-    try:
-        from .processing import start_workers
-        
-        # Start workers
-        # IMPORTANT: Use keyword argument for num_workers to avoid
-        # passing it as stop_event (which is the 2nd positional parameter)
-        workers = start_workers(packet_queue, num_workers=num_workers)
-        
-        return workers
-        
-    except ImportError:
-        # Fallback to legacy worker implementation
-        logger.warning("Using legacy packet processor (processing module not found)")
-        return _start_legacy_workers(num_workers or 4)
-
-
-def _start_legacy_workers(num_workers: int) -> List[threading.Thread]:
-    """Legacy worker implementation for backward compatibility"""
-    from .snmp import process_captured_packet
+    from .processing import start_workers
     
-    # Import cache module if available
-    try:
-        from .cache import get_cache
-        import base64
-        from datetime import datetime
-        CACHE_AVAILABLE = True
-    except ImportError:
-        CACHE_AVAILABLE = False
-        def get_cache():
-            return None
-    
-    def worker(worker_id):
-        logger.info(f"Legacy worker {worker_id} started")
-        
-        while not stop_event.is_set():
-            try:
-                packet = packet_queue.get(timeout=0.5)
-                
-                # Check HA state for forwarding decision (but always cache)
-                ha_forwarding_enabled = is_forwarding_enabled()
-                
-                # Cache the trap regardless of HA state
-                if CACHE_AVAILABLE:
-                    cache = get_cache()
-                    if cache and cache.available:
-                        try:
-                            trap_data = {
-                                'timestamp': datetime.now().isoformat(),
-                                'source_ip': packet.get('src_ip', ''),
-                                'trap_oid': '',  # Legacy doesn't extract OID
-                                'pdu_base64': base64.b64encode(packet.get('payload', b'')).decode('ascii'),
-                            }
-                            cache.store('default', trap_data)
-                        except Exception:
-                            pass
-                
-                # Only process/forward if HA allows
-                if ha_forwarding_enabled:
-                    process_captured_packet(packet)
-                    notify_trap_processed()
-                else:
-                    logger.debug("Packet cached but forwarding disabled by HA (secondary mode)")
-                
-                packet_queue.task_done()
-            except queue.Empty:
-                continue
-            except Exception as e:
-                logger.error(f"Worker {worker_id} error: {e}")
-        
-        logger.info(f"Legacy worker {worker_id} stopped")
-    
-    workers = []
-    for i in range(num_workers):
-        t = threading.Thread(target=worker, args=(i,), daemon=True)
-        t.start()
-        workers.append(t)
+    # Start workers
+    # IMPORTANT: Use keyword argument for num_workers to avoid
+    # passing it as stop_event (which is the 2nd positional parameter)
+    workers = start_workers(packet_queue, num_workers=num_workers)
     
     return workers
 
