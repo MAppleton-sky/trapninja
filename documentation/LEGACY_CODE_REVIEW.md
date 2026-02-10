@@ -14,8 +14,8 @@ This document identifies legacy, redundant, or deprecated code that could be rem
 |----------|------|-------|------|--------|
 | Redundant Shim | `metrics.py` | ~80 | LOW | ✅ REMOVED |
 | Unused Module | `cli/stats.py` | ~430 | LOW | ✅ REMOVED |
-| Duplicate Functions | `redirection.py` validation | ~50 | MEDIUM | Pending Phase 2 |
-| Duplicate Config Loading | `config.py` + `redirection.py` | ~200 | MEDIUM | Pending Phase 2 |
+| Duplicate Functions | `redirection.py` validation | ~50 | MEDIUM | ✅ REMOVED |
+| Duplicate Config Loading | `config.py` + `redirection.py` | ~200 | MEDIUM | ✅ CONSOLIDATED |
 | Legacy CLI Args | `cli/parser.py` | ~250 | DEFER | Keep for backward compatibility |
 
 **Estimated Total Removable Lines:** ~560 lines (excluding legacy CLI args)
@@ -260,22 +260,23 @@ trapninja ha status
 pytest dev/tests/ -v
 ```
 
-### Phase 2: Consolidation (Medium Risk)
+### Phase 2: Consolidation (Medium Risk) - ✅ COMPLETED
 
-3. **Update `redirection.py` to use `InputValidator`**
-   ```python
-   # In redirection.py
-   from .cli.validation import InputValidator
-   
-   # Replace:
-   #   valid_ip = validate_ip(ip)
-   # With:
-   #   valid_ip = InputValidator.validate_ip(ip)
-   ```
+**Implemented:** 2025-01-30
 
-4. **Remove duplicate loading from `redirection.py`**
-   - Keep: `check_for_redirection()`, `clear_redirection_caches()`
-   - Remove: `load_redirected_ips()`, `load_redirected_oids()`, `load_redirected_destinations()`, `load_redirection_config()`
+3. **Consolidated `redirection.py`** ✅
+   - Removed: `validate_ip()`, `validate_oid()`, `safe_load_json()`
+   - Removed: `load_redirected_ips()`, `load_redirected_oids()`, `load_redirected_destinations()`
+   - Removed: All duplicate global variables
+   - Kept: `get_config_path()`, `lookup_redirection_tag()`, `check_for_redirection()`
+   - Kept: `clear_redirection_caches()`, `schedule_config_check()`, `load_redirection_config()`
+   - Module now delegates to `config.py` for all config loading
+   - Net reduction: ~150 lines (~280 → ~130)
+
+4. **Updated test file** ✅
+   - Rewrote `test_redirection.py` to test consolidated module
+   - Tests now mock `config.py` globals instead of local globals
+   - Removed tests for deleted functions
 
 ### Phase 3: Future (Version 1.0.0)
 
@@ -341,5 +342,5 @@ See documentation/LEGACY_CODE_REVIEW.md for full analysis.
 | `cli/parser.py` | 900 | Arg parsing + legacy | Keep (defer legacy) |
 | `cli/executor.py` | 650 | Command routing | Keep |
 | `cli/validation.py` | 250 | Input validation | Keep |
-| `redirection.py` | 280 | Redirect logic | Pending Phase 2 |
+| `redirection.py` | 280 → 130 | Redirect logic | ✅ **CONSOLIDATED** |
 | `config.py` | 600 | Config loading | Keep (merge redirect) |

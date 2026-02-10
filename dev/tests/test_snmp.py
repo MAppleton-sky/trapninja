@@ -145,9 +145,9 @@ class TestProcessingStats:
         assert stats.packets_forwarded == 0
         assert stats.packets_blocked == 0
         assert stats.packets_redirected == 0
-        assert stats.errors == 0
-        assert stats.fast_path_count == 0
-        assert stats.slow_path_count == 0
+        assert stats.processing_errors == 0
+        assert stats.fast_path_hits == 0
+        assert stats.slow_path_hits == 0
 
 
 class TestIsSnmpv2c:
@@ -389,8 +389,8 @@ class TestParseSnmpPacket:
         from trapninja.processing.parser import parse_snmp_packet
         
         # Use a real minimal SNMPv2c packet
-        # This would need Scapy to be available
-        with patch('trapninja.processing.parser.SNMP') as mock_snmp:
+        # Mock where SNMP is imported inside the function
+        with patch('scapy.layers.snmp.SNMP') as mock_snmp:
             mock_packet = MagicMock()
             mock_packet.version.val = 1  # SNMPv2c
             mock_snmp.return_value = mock_packet
@@ -403,7 +403,7 @@ class TestParseSnmpPacket:
         """Test parsing SNMPv1 packet."""
         from trapninja.processing.parser import parse_snmp_packet
         
-        with patch('trapninja.processing.parser.SNMP') as mock_snmp:
+        with patch('scapy.layers.snmp.SNMP') as mock_snmp:
             mock_packet = MagicMock()
             mock_packet.version.val = 0  # SNMPv1
             mock_snmp.return_value = mock_packet
@@ -416,7 +416,7 @@ class TestParseSnmpPacket:
         """Test parsing SNMPv3 packet."""
         from trapninja.processing.parser import parse_snmp_packet
         
-        with patch('trapninja.processing.parser.SNMP') as mock_snmp:
+        with patch('scapy.layers.snmp.SNMP') as mock_snmp:
             mock_packet = MagicMock()
             mock_packet.version.val = 3  # SNMPv3
             mock_snmp.return_value = mock_packet
@@ -429,7 +429,7 @@ class TestParseSnmpPacket:
         """Test parsing failure returns None."""
         from trapninja.processing.parser import parse_snmp_packet
         
-        with patch('trapninja.processing.parser.SNMP', side_effect=Exception("Parse error")):
+        with patch('scapy.layers.snmp.SNMP', side_effect=Exception("Parse error")):
             snmp, version = parse_snmp_packet(b'invalid')
             
             assert snmp is None
