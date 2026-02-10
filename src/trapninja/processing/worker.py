@@ -24,54 +24,12 @@ from .parser import is_snmpv2c, is_snmpv3, extract_trap_oid_fast, parse_snmp_pac
 from .forwarder import forward_packet
 from .stats import ProcessingStats, StatsCollector, get_global_stats
 
-# Import granular statistics collector
-try:
-    from ..stats import get_stats_collector as get_granular_stats
-    GRANULAR_STATS_AVAILABLE = True
-except ImportError:
-    GRANULAR_STATS_AVAILABLE = False
-    def get_granular_stats():
-        return None
+# Import optional modules registry - provides lazy loading with automatic fallbacks
+from ..core.optional_modules import modules
 
-# Import cache module for trap buffering
-try:
-    from ..cache import get_cache
-    import base64
-    from datetime import datetime
-    CACHE_AVAILABLE = True
-except ImportError:
-    CACHE_AVAILABLE = False
-    def get_cache():
-        return None
-
-# Import HA functions for forwarding control
-# CRITICAL: These functions control whether this node should forward traps
-try:
-    from ..ha import is_forwarding_enabled, notify_trap_processed
-    HA_AVAILABLE = True
-except ImportError as e:
-    # Log the import failure - this is critical for HA to work!
-    import sys
-    print(f"WARNING: Failed to import HA module: {e}", file=sys.stderr)
-    print("WARNING: HA forwarding control DISABLED - all nodes will forward!", file=sys.stderr)
-    HA_AVAILABLE = False
-    
-    # Counter to rate-limit warnings
-    _ha_warning_count = 0
-    
-    def is_forwarding_enabled():
-        """Fallback when HA module unavailable - ALWAYS returns True (unsafe for HA)"""
-        global _ha_warning_count
-        _ha_warning_count += 1
-        if _ha_warning_count <= 5:  # Only warn first 5 times
-            import logging
-            logging.getLogger("trapninja").warning(
-                "HA module not available - forwarding enabled by default"
-            )
-        return True
-    
-    def notify_trap_processed():
-        pass
+# Import base64 and datetime for cache operations (always available)
+import base64
+from datetime import datetime
 
 logger = logging.getLogger("trapninja")
 
@@ -212,8 +170,8 @@ class PacketWorker:
         """
         # Lazy initialization of collector reference with retry logic
         if self._granular_collector is None:
-            if GRANULAR_STATS_AVAILABLE:
-                self._granular_collector = get_granular_stats()
+            if modules.stats.available:
+                self._granular_collector = modules.stats.get_collector()
                 if self._granular_collector:
                     if self._granular_retries > 0:
                         # Log success after retries
@@ -228,14 +186,14 @@ class PacketWorker:
                     self._granular_retries += 1
                     if self._granular_retries == self._granular_max_retries:
                         logger.warning(
-                            f"Worker {self.worker_id}: get_granular_stats() still returning None "
+                            f"Worker {self.worker_id}: get_collector() still returning None "
                             f"after {self._granular_retries} attempts - stats may not be initialized"
                         )
             else:
                 # Log once per worker that granular stats are not available
                 if not hasattr(self, '_granular_warning_logged'):
                     logger.debug(
-                        f"Worker {self.worker_id}: GRANULAR_STATS_AVAILABLE is False - "
+                        f"Worker {self.worker_id}: stats module not available - "
                         f"granular statistics disabled"
                     )
                     self._granular_warning_logged = True
@@ -266,12 +224,12 @@ class PacketWorker:
             trap_oid: Extracted trap OID (if available)
             destination: Destination tag/name for stream organization
         """
-        if not CACHE_AVAILABLE:
+        if not modules.cache.available:
             return
         
         # Lazy initialization of cache reference
         if not self._cache_checked:
-            self._cache = get_cache()
+            self._cache = modules.cache.get_cache()
             self._cache_checked = True
             if self._cache and self._cache.available:
                 logger.debug(f"Worker {self.worker_id}: Cache connected")
@@ -339,7 +297,7 @@ class PacketWorker:
         self._store_trap_in_cache(source_ip, payload, trap_oid, destination_tag)
         
         # Notify HA system of activity
-        notify_trap_processed()
+        modules.ha.notify_trap_processed()
     
     def start(self) -> threading.Thread:
         """
@@ -435,7 +393,7 @@ class PacketWorker:
             # Only the PRIMARY node should forward traps
             # But ALWAYS record stats and cache so we can see what's arriving
             # and replay if we become PRIMARY
-            ha_forwarding_enabled = is_forwarding_enabled()
+            ha_forwarding_enabled = modules.ha.is_forwarding_enabled()
             
             if not ha_forwarding_enabled:
                 # Track blocked packets for monitoring

@@ -24,131 +24,17 @@ from .ha import (
     HAState
 )
 
-# Import cache module with fallback if not available
+# Import optional modules registry - provides lazy loading with automatic fallbacks
+# This eliminates 100+ lines of try/except boilerplate while providing the same functionality
+from .core.optional_modules import modules
+
+# Import cache config loader (always available from config module)
 try:
-    from .cache import initialize_cache, shutdown_cache, get_cache
     from .config import load_cache_config, CACHE_CONFIG_FILE
-    CACHE_MODULE_AVAILABLE = True
 except ImportError:
-    CACHE_MODULE_AVAILABLE = False
     CACHE_CONFIG_FILE = None
-    def initialize_cache(config, config_file=None):
-        return None
-    def shutdown_cache():
-        pass
-    def get_cache():
-        return None
     def load_cache_config():
         return None
-
-# Import granular statistics module with fallback if not available
-try:
-    from .stats import (
-        initialize_stats, shutdown_stats, get_stats_collector,
-        CollectorConfig
-    )
-    GRANULAR_STATS_AVAILABLE = True
-except ImportError:
-    GRANULAR_STATS_AVAILABLE = False
-    def initialize_stats(config=None):
-        return None
-    def shutdown_stats():
-        pass
-    def get_stats_collector():
-        return None
-    class CollectorConfig:
-        pass
-
-# Import shadow mode module with fallback if not available
-try:
-    from .shadow import (
-        initialize_shadow_mode, shutdown_shadow_mode,
-        is_shadow_mode, is_observe_only, should_use_sniff_mode,
-        get_effective_capture_mode, get_shadow_summary,
-        load_shadow_config, load_capture_config,
-        ShadowConfig, CaptureConfig
-    )
-    SHADOW_MODULE_AVAILABLE = True
-except ImportError:
-    SHADOW_MODULE_AVAILABLE = False
-    def initialize_shadow_mode(shadow_config=None, capture_config=None):
-        return False
-    def shutdown_shadow_mode():
-        pass
-    def is_shadow_mode():
-        return False
-    def is_observe_only():
-        return False
-    def should_use_sniff_mode():
-        return False
-    def get_effective_capture_mode():
-        return "auto"
-    def get_shadow_summary():
-        return {'enabled': False}
-    def load_shadow_config():
-        return None
-    def load_capture_config():
-        return None
-    class ShadowConfig:
-        pass
-    class CaptureConfig:
-        pass
-
-# Import control socket module with fallback if not available
-try:
-    from .control import initialize_control_socket, shutdown_control_socket
-    CONTROL_SOCKET_AVAILABLE = True
-except ImportError:
-    CONTROL_SOCKET_AVAILABLE = False
-    def initialize_control_socket():
-        return False
-    def shutdown_control_socket():
-        pass
-
-# Import eBPF module with fallback if not available
-try:
-    from .ebpf import is_ebpf_supported, check_ebpf_dependencies, create_capture
-
-    EBPF_AVAILABLE = True
-except ImportError:
-    EBPF_AVAILABLE = False
-
-# Import fragmentation support with fallback
-try:
-    from .core.fragmentation import (
-        initialize_fragment_buffer,
-        shutdown_fragment_buffer,
-        get_fragment_buffer,
-        get_fragment_stats,
-        generate_fragment_aware_filter,
-        generate_simple_filter,
-    )
-    FRAGMENTATION_AVAILABLE = True
-except ImportError:
-    FRAGMENTATION_AVAILABLE = False
-    def initialize_fragment_buffer(**kwargs):
-        return None
-    def shutdown_fragment_buffer():
-        pass
-    def get_fragment_buffer():
-        return None
-    def get_fragment_stats():
-        return {}
-    def generate_fragment_aware_filter(ports, exclude_sport=None, local_ip=None):
-        # Fallback to simple filter
-        port_filter = " or ".join([f"udp dst port {p}" for p in ports])
-        if local_ip:
-            port_filter = f"({port_filter} and dst host {local_ip})"
-        if exclude_sport:
-            return f"({port_filter}) and not (udp src port {exclude_sport})"
-        return port_filter
-    def generate_simple_filter(ports, exclude_sport=None, local_ip=None):
-        port_filter = " or ".join([f"udp dst port {p}" for p in ports])
-        if local_ip:
-            port_filter = f"({port_filter} and dst host {local_ip})"
-        if exclude_sport:
-            return f"({port_filter}) and not (udp src port {exclude_sport})"
-        return port_filter
 
 # Get logger instance
 logger = logging.getLogger("trapninja")
@@ -293,7 +179,7 @@ def validate_configuration() -> tuple:
     # =======================================================================
     # Validate Cache Configuration (if enabled)
     # =======================================================================
-    if CACHE_MODULE_AVAILABLE:
+    if modules.cache.available:
         try:
             cache_config = load_cache_config()
             if cache_config and cache_config.enabled:
@@ -358,8 +244,8 @@ def handle_signal(signum, frame):
 
     # Shutdown control socket
     try:
-        if CONTROL_SOCKET_AVAILABLE:
-            shutdown_control_socket()
+        if modules.control.available:
+            modules.control.shutdown()
     except Exception as e:
         logger.error(f"Error shutting down control socket: {e}")
 
@@ -367,9 +253,9 @@ def handle_signal(signum, frame):
     shutdown_ha()
 
     # Shutdown granular statistics
-    if GRANULAR_STATS_AVAILABLE:
+    if modules.stats.available:
         try:
-            shutdown_stats()
+            modules.stats.shutdown()
         except Exception as e:
             logger.error(f"Error shutting down granular stats: {e}")
 
@@ -467,18 +353,18 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
             logger.info("="*60)
         
         # Initialize shadow mode if available
-        if SHADOW_MODULE_AVAILABLE:
-            shadow_config = ShadowConfig(
+        if modules.shadow.available:
+            shadow_config = modules.shadow.ShadowConfig(
                 enabled=shadow_mode,
                 observe_only=observe_only,
                 log_all_traps=bool(log_traps),
                 log_file=log_traps
             )
-            capture_config = CaptureConfig(
+            capture_config = modules.shadow.CaptureConfig(
                 mode="sniff" if force_sniff_mode else (capture_mode or "auto"),
                 allow_parallel=force_sniff_mode
             )
-            initialize_shadow_mode(shadow_config, capture_config)
+            modules.shadow.initialize(shadow_config, capture_config)
     
     # Override capture mode if specified via CLI
     if capture_mode:
@@ -521,10 +407,10 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
     # =======================================================================
     # Initialize Control Socket (for CLI communication)
     # =======================================================================
-    if CONTROL_SOCKET_AVAILABLE:
+    if modules.control.available:
         logger.info("Initializing control socket for CLI communication...")
         try:
-            if not initialize_control_socket():
+            if not modules.control.initialize():
                 logger.warning("Failed to initialize control socket - CLI commands may not work")
                 logger.warning("Service will continue without control socket support")
             else:
@@ -604,13 +490,13 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
     # =======================================================================
     # Initialize Cache System (Redis-based trap buffering)
     # =======================================================================
-    if CACHE_MODULE_AVAILABLE:
+    if modules.cache.available:
         logger.info("Initializing cache system...")
         try:
             cache_config = load_cache_config()
             if cache_config and cache_config.enabled:
                 # Pass config file path for hot-reload support
-                cache = initialize_cache(cache_config, config_file=CACHE_CONFIG_FILE)
+                cache = modules.cache.initialize(cache_config, CACHE_CONFIG_FILE)
                 if cache and cache.available:
                     logger.info(f"Cache enabled: Redis at {cache_config.host}:{cache_config.port}")
                     logger.info(f"Cache retention: {cache_config.retention_hours} hours")
@@ -630,7 +516,7 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
     # =======================================================================
     # Initialize Granular Statistics System
     # =======================================================================
-    if GRANULAR_STATS_AVAILABLE:
+    if modules.stats.available:
         logger.info("Initializing granular statistics system...")
         try:
             # Get global labels from metrics config (if available)
@@ -639,7 +525,7 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
                 global_labels = metrics_config.global_labels
             
             # Configure the collector
-            stats_config = CollectorConfig(
+            stats_config = modules.stats.CollectorConfig(
                 max_ips=10000,      # Track up to 10,000 unique source IPs
                 max_oids=5000,      # Track up to 5,000 unique OIDs
                 max_destinations=100,
@@ -652,7 +538,7 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
             )
             
             # Initialize the collector
-            collector = initialize_stats(stats_config)
+            collector = modules.stats.initialize(stats_config)
             
             if collector:
                 logger.info("Granular statistics collector initialized successfully")
@@ -801,16 +687,16 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
     # and cannot coexist with other trap receivers. These modes require sniff capture.
     if force_sniff_mode:
         logger.info("Skipping eBPF - parallel/shadow/mirror mode requires sniff capture")
-    elif EBPF_AVAILABLE:
+    elif modules.ebpf.available:
         logger.info("Checking for eBPF support...")
 
         # Check if eBPF is supported
-        if is_ebpf_supported() and check_ebpf_dependencies():
+        if modules.ebpf.is_supported() and modules.ebpf.check_dependencies():
             logger.info("eBPF support available - creating capture instance")
 
             try:
                 # Create capture instance
-                capture_instance = create_capture(
+                capture_instance = modules.ebpf.create_capture(
                     interface=INTERFACE,
                     listen_ports=LISTEN_PORTS,
                     queue_ref=packet_queue,
@@ -894,7 +780,7 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
             fragment_reassembly_enabled = False
             fragment_buffer = None
             
-            if FRAGMENTATION_AVAILABLE:
+            if modules.fragmentation.available:
                 # Load capture config to check if fragmentation is enabled
                 try:
                     import json
@@ -911,7 +797,7 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
                             max_buffer_mb = frag_cfg.get('max_buffer_mb', 100.0)
                             max_datagrams = frag_cfg.get('max_datagrams', 10000)
                             
-                            fragment_buffer = initialize_fragment_buffer(
+                            fragment_buffer = modules.fragmentation.initialize(
                                 timeout_seconds=timeout_seconds,
                                 max_buffer_mb=max_buffer_mb,
                                 max_datagrams=max_datagrams,
@@ -954,7 +840,7 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
                     # Fragment-aware filter captures:
                     # 1. Complete UDP packets destined to our ports
                     # 2. Non-first IP fragments (which don't have UDP header visible)
-                    port_filter = generate_fragment_aware_filter(
+                    port_filter = modules.fragmentation.generate_fragment_aware_filter(
                         LISTEN_PORTS, 
                         exclude_sport=FORWARD_SOURCE_PORT,
                         local_ip=local_ip
@@ -962,7 +848,7 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
                     logger.info("Using fragment-aware BPF filter")
                 else:
                     # Standard filter only captures complete packets
-                    port_filter = generate_simple_filter(
+                    port_filter = modules.fragmentation.generate_simple_filter(
                         LISTEN_PORTS,
                         exclude_sport=FORWARD_SOURCE_PORT,
                         local_ip=local_ip
@@ -1039,23 +925,23 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
     logger.info("Stopping packet processing workers...")
 
     # Shutdown shadow mode
-    if SHADOW_MODULE_AVAILABLE:
+    if modules.shadow.available:
         try:
-            shutdown_shadow_mode()
+            modules.shadow.shutdown()
         except Exception as e:
             logger.error(f"Error shutting down shadow mode: {e}")
 
     # Shutdown fragment reassembly buffer
-    if FRAGMENTATION_AVAILABLE:
+    if modules.fragmentation.available:
         try:
-            frag_stats = get_fragment_stats()
+            frag_stats = modules.fragmentation.get_stats()
             if frag_stats:
                 logger.info(
                     f"Fragment stats: completed={frag_stats.get('datagrams_completed', 0)}, "
                     f"timeout={frag_stats.get('datagrams_timeout', 0)}, "
                     f"evicted={frag_stats.get('datagrams_evicted', 0)}"
                 )
-            shutdown_fragment_buffer()
+            modules.fragmentation.shutdown()
         except Exception as e:
             logger.debug(f"Error shutting down fragment buffer: {e}")
 
@@ -1068,24 +954,24 @@ def run_service(debug=False, shadow_mode=False, mirror_mode=False,
         pass
 
     # Shutdown cache
-    if CACHE_MODULE_AVAILABLE:
+    if modules.cache.available:
         try:
-            shutdown_cache()
+            modules.cache.shutdown()
         except Exception as e:
             logger.error(f"Error shutting down cache: {e}")
 
     # Shutdown granular statistics
-    if GRANULAR_STATS_AVAILABLE:
+    if modules.stats.available:
         try:
             logger.info("Shutting down granular statistics...")
-            shutdown_stats()
+            modules.stats.shutdown()
         except Exception as e:
             logger.error(f"Error shutting down granular stats: {e}")
 
     # Shutdown control socket
     try:
-        if CONTROL_SOCKET_AVAILABLE:
-            shutdown_control_socket()
+        if modules.control.available:
+            modules.control.shutdown()
     except Exception as e:
         logger.error(f"Error shutting down control socket: {e}")
 
@@ -1241,9 +1127,9 @@ def get_service_status():
         status["metrics"] = {}
     
     # Add fragment reassembly stats if available
-    if FRAGMENTATION_AVAILABLE:
+    if modules.fragmentation.available:
         try:
-            frag_stats = get_fragment_stats()
+            frag_stats = modules.fragmentation.get_stats()
             if frag_stats:
                 status["fragment_reassembly"] = frag_stats
         except Exception:
