@@ -3,10 +3,10 @@
 TrapNinja CLI Module
 
 Provides command-line interface functionality organized by concern:
+- parsers/      Modular argument parser definitions (per command category)
 - daemon_commands: Service control (start, stop, restart, status)
 - filtering_commands: IP and OID blocking/unblocking
 - ha_commands: High Availability configuration
-- parser: Argument parsing setup
 - validation: Input validation and sanitization
 """
 
@@ -17,6 +17,6 @@ __all__ = [
     'parse_size',
 ]
 
-from .parser import create_argument_parser
+from .parsers import create_argument_parser
 from .validation import InputValidator, parse_size
 from .executor import execute_command

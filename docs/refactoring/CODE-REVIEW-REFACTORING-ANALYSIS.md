@@ -278,7 +278,9 @@ if getattr(args, 'block_ip', None):
 
 ---
 
-#### B1. Monolithic run_service() Function (CRITICAL)
+#### B1. Monolithic run_service() Function (CRITICAL) — ✅ COMPLETED
+
+**Status:** Refactored on 2026-02-10. See `core/service_init.py`.
 
 **Location:** `service.py` lines 250-1100 (~850 lines)
 
@@ -531,8 +533,8 @@ class ConfigPaths:
 | ID | Recommendation | Files Affected | Effort | Risk | Benefit |
 |----|----------------|----------------|--------|------|---------|
 | R1.1 | Extract Optional Module System | Create `core/optional_modules.py`, update `service.py`, `daemon.py`, `worker.py` | 3-4h | Low | Eliminate 200+ lines boilerplate |
-| R1.2 | Refactor run_service() | `service.py`, create `core/service_init.py` | 6-8h | Medium | Testable components, clearer flow |
-| R1.3 | Consolidate CLI Command Patterns | `cli/filtering_commands.py`, create `cli/command_base.py` | 3-4h | Low | Reduce 400 lines to ~100 |
+| R1.2 | ~~Refactor run_service()~~ | ~~`service.py`, create `core/service_init.py`~~ | ~~6-8h~~ | ~~Medium~~ | ✅ **COMPLETED 2026-02-10** |
+| R1.3 | ~~Consolidate CLI Command Patterns~~ | ~~`cli/filtering_commands.py`, create `cli/command_base.py`~~ | ~~3-4h~~ | ~~Low~~ | ✅ **COMPLETED 2026-02-10** |
 
 ### Priority 2: Maintainability (Medium-Term)
 
@@ -878,27 +880,32 @@ def block_oid(oid: str) -> bool:
    - Move all validators to `core/validation.py`
    - Update imports throughout codebase
 
-### Phase 2: Service Refactor (Week 2)
+### Phase 2: Service Refactor (Week 2) — ✅ COMPLETED 2026-02-10
 
-1. **Create `core/service_init.py`** (R1.2)
-   - Extract phases from `run_service()`
-   - Create `ServiceInitializer` class
-   - Add unit tests for each phase
+1. **Create `core/service_init.py`** (R1.2) ✅
+   - Extracted 15 phases from `run_service()`
+   - Created `ServiceInitializer` class with `RuntimeConfig` and `SubsystemHandles`
+   - Added unit tests in `tests/unit/test_service_init.py` (40+ test cases)
 
-2. **Refactor `run_service()`**
-   - Delegate to `ServiceInitializer`
-   - Verify behavior unchanged
+2. **Refactor `run_service()`** ✅
+   - Delegated to `ServiceInitializer`
+   - Preserved all external interfaces (get_ha_status, get_service_status, etc.)
+   - Global state synced via `_sync_globals_from_initializer()`
 
-### Phase 3: CLI Refactor (Week 3)
+### Phase 3: CLI Refactor (Week 3) — PARTIALLY COMPLETED 2026-02-10
 
-1. **Create `cli/command_base.py`** (R1.3)
-   - Implement `ConfigListManager`
-   - Implement `ConfigDictManager`
-   - Add comprehensive tests
+1. **Create `cli/command_base.py`** (R1.3) ✅
+   - Implemented `ConfigFileIO` (centralised JSON I/O with atomic writes, caching)
+   - Implemented `ConfigListManager` (block/unblock patterns)
+   - Implemented `ConfigPairListManager` (redirection pair patterns)
+   - Implemented `ConfigGroupManager` (destination group patterns)
+   - Added comprehensive tests in `tests/unit/test_command_base.py` (45+ test cases)
 
-2. **Refactor `cli/filtering_commands.py`**
-   - Use new manager classes
-   - Verify all commands work
+2. **Refactor `cli/filtering_commands.py`** ✅
+   - All 15 command functions delegate to manager instances
+   - ~400 lines of duplicate code reduced to ~100 lines of configuration
+   - Backward-compatible `ConfigManager` wrapper preserved for external consumers
+   - 100% API compatibility — all function names and signatures unchanged
 
 3. **Create `cli/registry.py`** (R2.1)
    - Implement command registry
@@ -984,10 +991,10 @@ def block_oid(oid: str) -> bool:
 | File | Purpose |
 |------|---------|
 | `core/optional_modules.py` | Lazy-loading module registry |
-| `core/service_init.py` | Service initialization phases |
+| `core/service_init.py` | Service initialization phases ✅ **CREATED** |
 | `core/config_io.py` | Centralized config loading |
 | `core/validation.py` | Consolidated validators |
-| `cli/command_base.py` | Generic command patterns |
+| `cli/command_base.py` | Generic command patterns ✅ **CREATED** |
 | `cli/registry.py` | Command registration and dispatch |
 
 ---
