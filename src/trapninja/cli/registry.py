@@ -135,6 +135,58 @@ def _daemon_queue_stats(args: Namespace) -> int:
 
 
 # -----------------------------------------------------------------------------
+# Config — all return int directly
+# -----------------------------------------------------------------------------
+
+def _config_show(args: Namespace) -> int:
+    from . import config_commands
+    return config_commands.show_config(
+        json_output=getattr(args, 'json', False),
+        brief=getattr(args, 'brief', False),
+    )
+
+
+def _config_destinations(args: Namespace) -> int:
+    from . import config_commands
+    return config_commands.show_destinations(json_output=getattr(args, 'json', False))
+
+
+def _config_blocked_ips(args: Namespace) -> int:
+    from . import config_commands
+    return config_commands.show_blocked_ips(json_output=getattr(args, 'json', False))
+
+
+def _config_blocked_oids(args: Namespace) -> int:
+    from . import config_commands
+    return config_commands.show_blocked_oids(json_output=getattr(args, 'json', False))
+
+
+def _config_redirected_ips(args: Namespace) -> int:
+    from . import config_commands
+    return config_commands.show_redirected_ips(json_output=getattr(args, 'json', False))
+
+
+def _config_redirected_oids(args: Namespace) -> int:
+    from . import config_commands
+    return config_commands.show_redirected_oids(json_output=getattr(args, 'json', False))
+
+
+def _config_redirect_dests(args: Namespace) -> int:
+    from . import config_commands
+    return config_commands.show_redirect_dests(json_output=getattr(args, 'json', False))
+
+
+def _config_listen_ports(args: Namespace) -> int:
+    from . import config_commands
+    return config_commands.show_listen_ports(json_output=getattr(args, 'json', False))
+
+
+def _config_validate(args: Namespace) -> int:
+    from . import config_commands
+    return config_commands.validate_config()
+
+
+# -----------------------------------------------------------------------------
 # Filter — all return bool, converted to exit code
 # -----------------------------------------------------------------------------
 
@@ -549,6 +601,17 @@ SUBCOMMANDS: Dict[Tuple[str, str], CommandDef] = {
     ('daemon', 'config'):        CommandDef(_daemon_config),
     ('daemon', 'queue-stats'):   CommandDef(_daemon_queue_stats),
 
+    # ----- config -----
+    ('config', 'show'):             CommandDef(_config_show),
+    ('config', 'destinations'):     CommandDef(_config_destinations),
+    ('config', 'blocked-ips'):      CommandDef(_config_blocked_ips),
+    ('config', 'blocked-oids'):     CommandDef(_config_blocked_oids),
+    ('config', 'redirected-ips'):   CommandDef(_config_redirected_ips),
+    ('config', 'redirected-oids'):  CommandDef(_config_redirected_oids),
+    ('config', 'redirect-dests'):   CommandDef(_config_redirect_dests),
+    ('config', 'listen-ports'):     CommandDef(_config_listen_ports),
+    ('config', 'validate'):         CommandDef(_config_validate),
+
     # ----- filter -----
     ('filter', 'block-ip'):           CommandDef(_filter_block_ip, returns_bool=True),
     ('filter', 'unblock-ip'):         CommandDef(_filter_unblock_ip, returns_bool=True),
@@ -785,6 +848,7 @@ SUBCOMMANDS[('daemon', 'validate-config')] = CommandDef(_daemon_validate_config)
 # Register help-only commands that map to category help
 # These are handled in the "help" special case but we add registry
 # entries for completeness for categories that have dedicated help handlers
+SUBCOMMANDS[('config', 'help')]    = CommandDef(_config_show)  # default to show
 SUBCOMMANDS[('ha', 'help')]       = CommandDef(_ha_help, returns_bool=True)
 SUBCOMMANDS[('filter', 'help')]   = CommandDef(_filter_redirection_help, returns_bool=True)
 SUBCOMMANDS[('cache', 'help')]    = CommandDef(_cache_help, returns_bool=True)

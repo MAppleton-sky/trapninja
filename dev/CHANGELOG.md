@@ -22,7 +22,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.8.0] - 2025-02-11
 
+### Added
+
+#### New `config` Command Category
+- **Added `trapninja config` top-level command category** for viewing all running
+  configuration state including actual rule data, not just counts.
+- Subcommands: `show`, `destinations`, `blocked-ips`, `blocked-oids`,
+  `redirected-ips`, `redirected-oids`, `redirect-dests`, `listen-ports`, `validate`
+- `trapninja config show` displays full configuration overview with all rules listed
+- `trapninja config show --brief` shows counts only (compact summary)
+- `trapninja config show --json` outputs full config as machine-readable JSON
+- Individual subcommands (`blocked-ips`, `redirected-oids`, etc.) support `--json`
+  for integration with automation scripts
+
+#### Feature Flags
+- Added `unified_v2c_pipeline`, `shadow_mode`, and `config_sync` feature flags
+  in version metadata for 0.8.0
+
 ### Fixed
+
+#### CLI Help Text - Updated to Subcommand Format
+- **Fixed redirection help text** (`trapninja filter help`) which still showed
+  old `--flag` style commands (e.g. `--redirect-ip`, `--list-blocked-ips`)
+- All examples and command references now use the modern subcommand format
+  (e.g. `trapninja filter redirect-ip`, `trapninja config show`)
 
 #### SNMPv3 Decrypted Traps - Unified v2c Processing Pipeline
 - **Fixed OID statistics not being recorded for SNMPv3 decrypted traps**. Previously,

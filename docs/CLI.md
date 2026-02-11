@@ -27,6 +27,7 @@ trapninja stats summary             # View statistics
 | Category  | Description |
 |-----------|-------------|
 | `daemon`  | Service control (start, stop, restart, status) |
+| `config`  | View running configuration, rules, and destinations |
 | `filter`  | IP and OID blocking/redirection |
 | `ha`      | High Availability configuration |
 | `snmpv3`  | SNMPv3 credential management |
@@ -46,6 +47,7 @@ trapninja/cli/
 ├── executor.py              # Command routing and execution
 ├── validation.py            # Input validation and sanitization
 ├── output.py                # Unified output formatting
+├── config_commands.py       # Configuration display commands
 ├── daemon_commands.py       # Daemon control commands
 ├── filtering_commands.py    # IP/OID filtering commands
 ├── ha_commands.py           # High Availability commands

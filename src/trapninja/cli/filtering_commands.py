@@ -359,15 +359,15 @@ This is useful for:
 CONCEPTS
 --------
 
-1. DESTINATION GROUPS (--list-redirect-dests)
+1. DESTINATION GROUPS (trapninja filter list-redirect-dests)
    Named groups of IP:port destinations. Create these first.
    Example: "security" group with destinations 10.1.1.100:162, 10.1.1.101:162
 
-2. IP REDIRECTIONS (--list-redirected-ips)
+2. IP REDIRECTIONS (trapninja filter list-redirected-ips)
    Map source IPs to destination groups.
    Example: Traps from 192.168.10.50 -> "security" group
 
-3. OID REDIRECTIONS (--list-redirected-oids)
+3. OID REDIRECTIONS (trapninja filter list-redirected-oids)
    Map trap OIDs to destination groups.
    Example: OID 1.3.6.1.4.1.9.9.41.2.0.1 -> "config" group
 
@@ -375,53 +375,65 @@ WORKFLOW
 --------
 
 Step 1: Create destination group
-  trapninja --add-redirect-dest --tag security --ip 10.1.1.100 --port 162
-  trapninja --add-redirect-dest --tag security --ip 10.1.1.101 --port 162
+  trapninja filter add-redirect-dest --tag security --ip 10.1.1.100 --port 162
+  trapninja filter add-redirect-dest --tag security --ip 10.1.1.101 --port 162
 
 Step 2: Add redirection rules
   # Redirect by source IP
-  trapninja --redirect-ip 192.168.10.50 --tag security
+  trapninja filter redirect-ip 192.168.10.50 --tag security
 
   # Redirect by OID
-  trapninja --redirect-oid 1.3.6.1.4.1.9.9.41.2.0.1 --tag security
+  trapninja filter redirect-oid 1.3.6.1.4.1.9.9.41.2.0.1 --tag security
 
 Step 3: Verify configuration
-  trapninja --list-redirect-dests
-  trapninja --list-redirected-ips
-  trapninja --list-redirected-oids
+  trapninja filter list-redirect-dests
+  trapninja filter list-redirected-ips
+  trapninja filter list-redirected-oids
+
+  # Or view all config at once:
+  trapninja config show
 
 COMMANDS REFERENCE
 ------------------
 
 Destination Groups:
-  --add-redirect-dest --tag TAG --ip IP --port PORT
+  trapninja filter add-redirect-dest --tag TAG --ip IP --port PORT
       Add a destination to a redirect group
 
-  --remove-redirect-dest --tag TAG --ip IP --port PORT
+  trapninja filter remove-redirect-dest --tag TAG --ip IP --port PORT
       Remove a destination from a redirect group
 
-  --list-redirect-dests
+  trapninja filter list-redirect-dests
       List all redirect destination groups
 
 IP Redirection:
-  --redirect-ip IP --tag TAG
+  trapninja filter redirect-ip IP --tag TAG
       Redirect traps from IP to destination group
 
-  --unredirect-ip IP
+  trapninja filter unredirect-ip IP
       Remove IP redirection rule
 
-  --list-redirected-ips
+  trapninja filter list-redirected-ips
       List all IP redirection rules
 
 OID Redirection:
-  --redirect-oid OID --tag TAG
+  trapninja filter redirect-oid OID --tag TAG
       Redirect traps with OID to destination group
 
-  --unredirect-oid OID
+  trapninja filter unredirect-oid OID
       Remove OID redirection rule
 
-  --list-redirected-oids
+  trapninja filter list-redirected-oids
       List all OID redirection rules
+
+Viewing Configuration:
+  trapninja config show               Full configuration overview
+  trapninja config blocked-ips        Show blocked IPs
+  trapninja config blocked-oids       Show blocked OIDs
+  trapninja config redirected-ips     Show IP redirection rules
+  trapninja config redirected-oids    Show OID redirection rules
+  trapninja config redirect-dests     Show redirect destination groups
+  trapninja config destinations       Show forwarding destinations
 
 PRIORITY
 --------

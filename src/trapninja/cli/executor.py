@@ -75,6 +75,13 @@ def _show_missing_command_help(category: str) -> int:
             ('daemon status', 'Check service status'),
             ('daemon foreground', 'Run in foreground'),
         ],
+        'config': [
+            ('config show', 'Full configuration overview'),
+            ('config destinations', 'Show forwarding destinations'),
+            ('config blocked-ips', 'Show blocked IP addresses'),
+            ('config blocked-oids', 'Show blocked OIDs'),
+            ('config redirected-ips', 'Show IP redirection rules'),
+        ],
         'filter': [
             ('filter block-ip 10.0.0.1', 'Block an IP'),
             ('filter list-blocked-ips', 'List blocked IPs'),

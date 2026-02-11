@@ -42,6 +42,7 @@ from .metrics import add_metrics_subcommands
 from .shadow import add_shadow_subcommands
 from .failover import add_failover_subcommands
 from .sync import add_sync_subcommands
+from .config import add_config_subcommands
 from .legacy import add_legacy_arguments
 
 __all__ = ['create_argument_parser']
@@ -72,6 +73,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
             \033[1mQuick Start:\033[0m
               trapninja daemon start              Start the service
               trapninja daemon status             Check service status
+              trapninja config show               View full configuration
               trapninja filter block-ip 10.0.0.1  Block an IP
               trapninja stats summary             View statistics
 
@@ -91,6 +93,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
 
     # Add each command category (order determines help listing order)
     add_daemon_subcommands(subparsers)
+    add_config_subcommands(subparsers)
     add_filter_subcommands(subparsers)
     add_ha_subcommands(subparsers)
     add_snmpv3_subcommands(subparsers)
