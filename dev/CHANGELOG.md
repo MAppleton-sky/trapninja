@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.8.0] - 2025-02-11
+
 ### Fixed
 
 #### SNMPv3 Decrypted Traps - Unified v2c Processing Pipeline

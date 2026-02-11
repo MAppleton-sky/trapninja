@@ -9,7 +9,7 @@
 #   python -m build --wheel      # Wheel only
 #
 # Install from built package:
-#   pip install dist/trapninja-0.7.16-py3-none-any.whl
+#   pip install dist/trapninja-0.8.0-py3-none-any.whl
 #
 # Install in development mode:
 #   pip install -e .
