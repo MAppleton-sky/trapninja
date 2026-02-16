@@ -60,7 +60,14 @@ class TestSNMPVersionConstants:
 
 
 class TestConfigCache:
-    """Tests for ConfigCache class in worker module."""
+    """Tests for ConfigCache class.
+    
+    Updated for v0.8.0: ConfigCache moved to processing.config_cache
+    and is re-exported from worker. Internal attributes changed:
+      ttl     → _ttl
+      _cache  → _cache (now initializes as {} not None)
+      _cache_time → _last_refresh
+    """
 
     def test_cache_initialization(self):
         """Test ConfigCache initializes with defaults."""
@@ -68,9 +75,9 @@ class TestConfigCache:
         
         cache = ConfigCache(ttl=30.0)
         
-        assert cache.ttl == 30.0
-        assert cache._cache is None
-        assert cache._cache_time == 0
+        assert cache._ttl == 30.0
+        assert cache._cache == {}
+        assert cache._last_refresh == 0
 
     def test_cache_custom_ttl(self):
         """Test ConfigCache with custom TTL."""
@@ -78,7 +85,7 @@ class TestConfigCache:
         
         cache = ConfigCache(ttl=60.0)
         
-        assert cache.ttl == 60.0
+        assert cache._ttl == 60.0
 
     def test_cache_returns_cached_value_within_ttl(self):
         """Test that cached value is returned within TTL."""
@@ -86,7 +93,7 @@ class TestConfigCache:
         
         cache = ConfigCache(ttl=30.0)
         cache._cache = {'test': 'value'}
-        cache._cache_time = time.time()
+        cache._last_refresh = time.time()
         
         result = cache.get()
         
@@ -98,11 +105,11 @@ class TestConfigCache:
         
         cache = ConfigCache(ttl=30.0)
         cache._cache = {'test': 'value'}
-        cache._cache_time = time.time()
+        cache._last_refresh = time.time()
         
         cache.invalidate()
         
-        assert cache._cache_time == 0
+        assert cache._last_refresh == 0
 
     def test_cache_thread_safety(self):
         """Test cache is thread-safe."""
@@ -117,7 +124,7 @@ class TestConfigCache:
             try:
                 for _ in range(100):
                     cache._cache = {'test': time.time()}
-                    cache._cache_time = time.time()
+                    cache._last_refresh = time.time()
                     result = cache.get()
                     results.append(result)
             except Exception as e:
@@ -623,8 +630,8 @@ class TestCompleteForwardHelper:
         worker._record_granular_stats = MagicMock()
         worker._store_trap_in_cache = MagicMock()
         
-        with patch('trapninja.processing.worker.forward_packet') as mock_forward:
-            with patch('trapninja.processing.worker.notify_trap_processed') as mock_notify:
+        with patch('trapninja.processing.packet_handler.forward_packet') as mock_forward:
+            with patch('trapninja.processing.packet_handler.modules.ha.notify_trap_processed') as mock_notify:
                 worker._complete_forward(
                     source_ip='192.168.1.1',
                     payload=b'test',
@@ -661,8 +668,8 @@ class TestCompleteForwardHelper:
         worker._record_granular_stats = MagicMock()
         worker._store_trap_in_cache = MagicMock()
         
-        with patch('trapninja.processing.worker.forward_packet'):
-            with patch('trapninja.processing.worker.notify_trap_processed'):
+        with patch('trapninja.processing.packet_handler.forward_packet'):
+            with patch('trapninja.processing.packet_handler.modules.ha.notify_trap_processed'):
                 worker._complete_forward(
                     source_ip='192.168.1.1',
                     payload=b'test',

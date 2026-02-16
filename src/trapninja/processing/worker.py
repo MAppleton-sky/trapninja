@@ -30,6 +30,13 @@ from typing import Optional, List, Dict, Any
 from .stats import StatsCollector, get_global_stats
 from .packet_handler import PacketHandler
 
+# Re-export from submodules for backward-compatible import paths.
+# Tests and downstream code may import these from worker rather than
+# the specific submodule.  The canonical implementations live in
+# config_cache.py and forwarder.py respectively.
+from .config_cache import ConfigCache, _config_cache      # noqa: F401
+from .forwarder import forward_packet                      # noqa: F401
+
 logger = logging.getLogger("trapninja")
 
 

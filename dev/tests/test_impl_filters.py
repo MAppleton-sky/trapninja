@@ -697,8 +697,8 @@ class TestFilterChainOrder:
         worker = PacketWorker(0, pq, stop)
         
         with patch.object(_config_cache, 'get', return_value=config), \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True), \
-             patch('trapninja.processing.worker.extract_trap_oid_fast') as mock_extract:
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True), \
+             patch('trapninja.processing.packet_handler.extract_trap_oid_fast') as mock_extract:
             
             # Build minimal payload
             payload = bytes([0x30, 0x10, 0x02, 0x01, 0x01, 0x04, 0x06]) + b'public'
@@ -739,8 +739,8 @@ class TestFilterChainOrder:
         payload = build_snmpv2c_trap(trap_oid='1.3.6.1.4.1.9999.1')
         
         with patch.object(_config_cache, 'get', return_value=config), \
-             patch('trapninja.processing.worker.forward_packet') as mock_forward, \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True):
+             patch('trapninja.processing.packet_handler.forward_packet') as mock_forward, \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True):
             
             packet_data = {
                 'src_ip': '192.168.1.50',  # Not blocked
@@ -790,8 +790,8 @@ class TestFilterChainOrder:
         payload = build_snmpv2c_trap(trap_oid='1.3.6.1.4.1.9999.1')
         
         with patch.object(_config_cache, 'get', return_value=config), \
-             patch('trapninja.processing.worker.forward_packet') as mock_forward, \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True):
+             patch('trapninja.processing.packet_handler.forward_packet') as mock_forward, \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True):
             
             packet_data = {
                 'src_ip': '192.168.10.50',  # Would redirect to security

@@ -176,9 +176,9 @@ class TestDestinationGroups:
             forwarded_to.append(destinations)
         
         with patch.object(_config_cache, 'get', return_value=mock_config), \
-             patch('trapninja.processing.worker.forward_packet', side_effect=capture_forward), \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True), \
-             patch('trapninja.processing.worker.notify_trap_processed'):
+             patch('trapninja.processing.packet_handler.forward_packet', side_effect=capture_forward), \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True), \
+             patch('trapninja.processing.packet_handler.modules.ha.notify_trap_processed'):
             
             packet_data = {
                 # SampleIPs.REDIRECT_SECURITY_1 ('192.168.10.50') -> 'security' tag
@@ -212,9 +212,9 @@ class TestDestinationGroups:
         payload = build_snmpv2c_trap(trap_oid=SampleOIDs.REDIRECT_VOICE)
         
         with patch.object(_config_cache, 'get', return_value=mock_config), \
-             patch('trapninja.processing.worker.forward_packet', side_effect=capture_forward), \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True), \
-             patch('trapninja.processing.worker.notify_trap_processed'):
+             patch('trapninja.processing.packet_handler.forward_packet', side_effect=capture_forward), \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True), \
+             patch('trapninja.processing.packet_handler.modules.ha.notify_trap_processed'):
             
             packet_data = {
                 'src_ip': SampleIPs.NORMAL_1,  # Not IP-redirected
@@ -244,9 +244,9 @@ class TestDestinationGroups:
             forwarded_to.append(destinations)
         
         with patch.object(_config_cache, 'get', return_value=mock_config), \
-             patch('trapninja.processing.worker.forward_packet', side_effect=capture_forward), \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True), \
-             patch('trapninja.processing.worker.notify_trap_processed'):
+             patch('trapninja.processing.packet_handler.forward_packet', side_effect=capture_forward), \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True), \
+             patch('trapninja.processing.packet_handler.modules.ha.notify_trap_processed'):
             
             packet_data = {
                 'src_ip': '192.168.1.50',  # Normal, non-redirected
@@ -287,8 +287,8 @@ class TestBlockedDestinationRouting:
         payload = build_snmpv2c_trap(trap_oid='1.3.6.1.4.1.9999.1')
         
         with patch.object(_config_cache, 'get', return_value=mock_config), \
-             patch('trapninja.processing.worker.forward_packet', side_effect=capture_forward), \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True):
+             patch('trapninja.processing.packet_handler.forward_packet', side_effect=capture_forward), \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True):
             
             packet_data = {
                 'src_ip': '192.168.1.50',
@@ -314,8 +314,8 @@ class TestBlockedDestinationRouting:
         worker = PacketWorker(0, pq, stop)
         
         with patch.object(_config_cache, 'get', return_value=mock_config), \
-             patch('trapninja.processing.worker.forward_packet') as mock_forward, \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True):
+             patch('trapninja.processing.packet_handler.forward_packet') as mock_forward, \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True):
             
             packet_data = {
                 'src_ip': '10.0.0.99',  # Blocked IP
@@ -352,8 +352,8 @@ class TestBlockedDestinationRouting:
         payload = build_snmpv2c_trap(trap_oid='1.3.6.1.4.1.9999.1')
         
         with patch.object(_config_cache, 'get', return_value=config), \
-             patch('trapninja.processing.worker.forward_packet') as mock_forward, \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True):
+             patch('trapninja.processing.packet_handler.forward_packet') as mock_forward, \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True):
             
             packet_data = {
                 'src_ip': '192.168.1.50',
@@ -783,8 +783,8 @@ class TestRoutingPriority:
         worker = PacketWorker(0, pq, stop)
         
         with patch.object(_config_cache, 'get', return_value=config), \
-             patch('trapninja.processing.worker.forward_packet') as mock_forward, \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True):
+             patch('trapninja.processing.packet_handler.forward_packet') as mock_forward, \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True):
             
             packet_data = {
                 'src_ip': '192.168.10.50',  # Both blocked and redirected
@@ -819,9 +819,9 @@ class TestRoutingPriority:
         payload = build_snmpv2c_trap(trap_oid=SampleOIDs.REDIRECT_SECURITY)
         
         with patch.object(_config_cache, 'get', return_value=mock_config), \
-             patch('trapninja.processing.worker.forward_packet', side_effect=capture_forward), \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True), \
-             patch('trapninja.processing.worker.notify_trap_processed'):
+             patch('trapninja.processing.packet_handler.forward_packet', side_effect=capture_forward), \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True), \
+             patch('trapninja.processing.packet_handler.modules.ha.notify_trap_processed'):
             
             packet_data = {
                 # SampleIPs.REDIRECT_VOICE ('192.168.20.50') -> 'voice' tag
@@ -856,9 +856,9 @@ class TestRoutingPriority:
         payload = build_snmpv2c_trap(trap_oid=SampleOIDs.REDIRECT_VOICE)
         
         with patch.object(_config_cache, 'get', return_value=mock_config), \
-             patch('trapninja.processing.worker.forward_packet', side_effect=capture_forward), \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True), \
-             patch('trapninja.processing.worker.notify_trap_processed'):
+             patch('trapninja.processing.packet_handler.forward_packet', side_effect=capture_forward), \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True), \
+             patch('trapninja.processing.packet_handler.modules.ha.notify_trap_processed'):
             
             packet_data = {
                 'src_ip': SampleIPs.NORMAL_1,  # Not IP-redirected
@@ -908,9 +908,9 @@ class TestConfigurationEdgeCases:
             forwarded_to.append(destinations)
         
         with patch.object(_config_cache, 'get', return_value=config), \
-             patch('trapninja.processing.worker.forward_packet', side_effect=capture_forward), \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True), \
-             patch('trapninja.processing.worker.notify_trap_processed'):
+             patch('trapninja.processing.packet_handler.forward_packet', side_effect=capture_forward), \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True), \
+             patch('trapninja.processing.packet_handler.modules.ha.notify_trap_processed'):
             
             packet_data = {
                 'src_ip': '192.168.10.50',  # IP maps to nonexistent tag
@@ -945,8 +945,8 @@ class TestConfigurationEdgeCases:
         worker = PacketWorker(0, pq, stop)
         
         with patch.object(_config_cache, 'get', return_value=config), \
-             patch('trapninja.processing.worker.forward_packet') as mock_forward, \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True):
+             patch('trapninja.processing.packet_handler.forward_packet') as mock_forward, \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True):
             
             packet_data = {
                 'src_ip': '192.168.1.50',

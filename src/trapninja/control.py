@@ -145,8 +145,11 @@ class ControlSocket(ControlHandlers):
             )
 
         # Check parent directory is allowed
+        # Resolve allowed dirs too so symlinks (e.g. /tmp → /private/tmp on macOS)
+        # are compared consistently.
         parent = str(path.parent)
-        if parent not in cls.ALLOWED_SOCKET_DIRS:
+        resolved_allowed = {str(Path(d).resolve()) for d in cls.ALLOWED_SOCKET_DIRS}
+        if parent not in cls.ALLOWED_SOCKET_DIRS and parent not in resolved_allowed:
             raise SocketPathError(
                 f"Socket path not in allowed directory: {parent}\n"
                 f"Allowed: {', '.join(sorted(cls.ALLOWED_SOCKET_DIRS))}"

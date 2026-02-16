@@ -48,7 +48,7 @@ The codebase is **functional and well-structured at the module level**, but suff
 
 ---
 
-#### A1. Conditional Import Boilerplate (CRITICAL)
+#### A1. Conditional Import Boilerplate (CRITICAL) — ✅ RESOLVED (R1.1)
 
 **Location:** `service.py` lines 1-140, `daemon.py`, `processing/worker.py`
 
@@ -189,7 +189,7 @@ oid_blocker = ConfigListManager(BLOCKED_TRAPS_FILE, validate_oid, "OID")
 
 ---
 
-#### A4. CLI Executor Dispatch Logic (MEDIUM)
+#### A4. CLI Executor Dispatch Logic (MEDIUM) — ✅ RESOLVED (R2.1)
 
 **Location:** `cli/executor.py` lines 200-950
 
@@ -228,7 +228,7 @@ def block_ip_command(args):
 
 ---
 
-#### A5. Legacy CLI Support Duplication (MEDIUM)
+#### A5. Legacy CLI Support Duplication (MEDIUM) — ✅ RESOLVED (R2.1)
 
 **Location:** `cli/executor.py` lines 550-950 (`_execute_legacy_command`)
 
@@ -278,7 +278,7 @@ if getattr(args, 'block_ip', None):
 
 ---
 
-#### B1. Monolithic run_service() Function (CRITICAL) — ✅ COMPLETED
+#### B1. Monolithic run_service() Function (CRITICAL) — ✅ RESOLVED (R1.2)
 
 **Status:** Refactored on 2026-02-10. See `core/service_init.py`.
 
@@ -532,7 +532,7 @@ class ConfigPaths:
 
 | ID | Recommendation | Files Affected | Effort | Risk | Benefit |
 |----|----------------|----------------|--------|------|---------|
-| R1.1 | Extract Optional Module System | Create `core/optional_modules.py`, update `service.py`, `daemon.py`, `worker.py` | 3-4h | Low | Eliminate 200+ lines boilerplate |
+| R1.1 | ~~Extract Optional Module System~~ | ~~Create `core/optional_modules.py`, update `service.py`, `daemon.py`, `worker.py`~~ | ~~3-4h~~ | ~~Low~~ | ✅ **COMPLETED 2026-02-11** |
 | R1.2 | ~~Refactor run_service()~~ | ~~`service.py`, create `core/service_init.py`~~ | ~~6-8h~~ | ~~Medium~~ | ✅ **COMPLETED 2026-02-10** |
 | R1.3 | ~~Consolidate CLI Command Patterns~~ | ~~`cli/filtering_commands.py`, create `cli/command_base.py`~~ | ~~3-4h~~ | ~~Low~~ | ✅ **COMPLETED 2026-02-10** |
 
@@ -540,7 +540,7 @@ class ConfigPaths:
 
 | ID | Recommendation | Files Affected | Effort | Risk | Benefit |
 |----|----------------|----------------|--------|------|---------|
-| R2.1 | Command Registry System | `cli/parser.py`, `cli/executor.py`, create `cli/registry.py` | 6-8h | Medium | Reduce 2000 lines to ~500 |
+| R2.1 | ~~Command Registry System~~ | ~~`cli/parser.py`, `cli/executor.py`, create `cli/registry.py`~~ | ~~6-8h~~ | ~~Medium~~ | ✅ **COMPLETED 2026-02-11** |
 | R2.2 | Centralized Configuration I/O | `config.py`, `cli/filtering_commands.py`, create `core/config_io.py` | 3-4h | Low | Single implementation |
 | R2.3 | Validation Consolidation | `cli/validation.py`, `config.py`, `control.py` | 2-3h | Low | Consistent validation |
 
@@ -892,7 +892,7 @@ def block_oid(oid: str) -> bool:
    - Preserved all external interfaces (get_ha_status, get_service_status, etc.)
    - Global state synced via `_sync_globals_from_initializer()`
 
-### Phase 3: CLI Refactor (Week 3) — PARTIALLY COMPLETED 2026-02-10
+### Phase 3: CLI Refactor (Week 3) — ✅ COMPLETED 2026-02-11
 
 1. **Create `cli/command_base.py`** (R1.3) ✅
    - Implemented `ConfigFileIO` (centralised JSON I/O with atomic writes, caching)
@@ -907,10 +907,10 @@ def block_oid(oid: str) -> bool:
    - Backward-compatible `ConfigManager` wrapper preserved for external consumers
    - 100% API compatibility — all function names and signatures unchanged
 
-3. **Create `cli/registry.py`** (R2.1)
-   - Implement command registry
-   - Add decorator-based registration
-   - Migrate commands incrementally
+3. **Create `cli/registry.py`** (R2.1) ✅
+   - Implemented declarative command registry with `CommandDef` dataclass
+   - `SUBCOMMANDS` dict maps all ~70 commands, `LEGACY_COMMANDS` handles backward compat
+   - `executor.py` reduced from ~950 to ~350 lines via `dispatch_subcommand()`/`dispatch_legacy()`
 
 ### Phase 4: Testing & Documentation (Week 4)
 
@@ -990,12 +990,12 @@ def block_oid(oid: str) -> bool:
 
 | File | Purpose |
 |------|---------|
-| `core/optional_modules.py` | Lazy-loading module registry |
+| `core/optional_modules.py` | Lazy-loading module registry ✅ **CREATED** |
 | `core/service_init.py` | Service initialization phases ✅ **CREATED** |
 | `core/config_io.py` | Centralized config loading |
 | `core/validation.py` | Consolidated validators |
 | `cli/command_base.py` | Generic command patterns ✅ **CREATED** |
-| `cli/registry.py` | Command registration and dispatch |
+| `cli/registry.py` | Command registration and dispatch ✅ **CREATED** |
 
 ---
 

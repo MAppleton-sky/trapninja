@@ -61,10 +61,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   any source (native v2c or decrypted v3)
 - Removed duplicated forwarding logic from `_process_snmpv3()` (~60 lines)
 
+### Refactoring — All Phases Complete
+- **R1.1: Optional Modules System** — Created `core/optional_modules.py` with lazy-loading
+  registry replacing ~280 lines of scattered `try/except ImportError` boilerplate.
+  Thread-safe typed wrappers for cache, stats, shadow, control, eBPF, fragmentation, and HA.
+- **R1.2: Service Initializer** — Broke 850-line `run_service()` into 15 testable
+  lifecycle phases in `core/service_init.py` (40+ tests)
+- **R1.3: CLI Command Patterns** — Eliminated ~400 lines of duplicate block/unblock/redirect
+  code via generic managers in `cli/command_base.py` (45+ tests)
+- **R2.1: Command Registry** — Replaced ~700 lines of if/elif routing in `executor.py`
+  with declarative registry in `cli/registry.py`. Executor reduced from ~950 to ~350 lines.
+- **Phase 2: Legacy Removal** — Removed `cli/stats.py` (~430 lines), `metrics.py` (~80 lines),
+  consolidated `redirection.py` (~280 → ~130 lines)
+- See `docs/refactoring/REFACTORING-STATUS.md` for full details
+
 ### Documentation
 - Updated GRANULAR_STATS.md with SNMPv3 OID tracking support
 - Added troubleshooting section for SNMPv3 OIDs not appearing in stats
 - Clarified that `--oid` query searches all tracked OIDs (not just top 100)
+- Updated refactoring documentation to reflect all-phases-complete status
 
 ---
 
@@ -1026,7 +1041,9 @@ Before releasing 1.0.0, we need:
 
 | Version | Date | Type | Key Features | Status |
 |---------|------|------|--------------|--------|
-| **0.7.13** | 2025-12-31 | Cleanup | Code cleanup, removed ~76KB redundant code | **Current** |
+| **0.8.0** | 2026-02-11 | Feature/Refactor | Config category, SNMPv3 pipeline fix, refactoring complete | **Current** |
+| 0.7.14 | 2026-01-07 | Fix | Prometheus node_exporter compatibility | Beta |
+| 0.7.13 | 2025-12-31 | Cleanup | Code cleanup, removed ~76KB redundant code | Beta |
 | 0.7.12 | 2025-12-29 | Fix | Daemon restart crash fix, startup verification improvements | Beta |
 | 0.7.11 | 2025-12-24 | Fix | Config sync init fix, pass config_dir to HACluster | Beta |
 | 0.7.10 | 2025-12-24 | Fix | HA config sync working, Secondary pulls on startup | Beta |
