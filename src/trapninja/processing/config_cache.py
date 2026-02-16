@@ -61,15 +61,31 @@ class ConfigCache:
             from .. import config as cfg
 
             self._cache = {
-                'destinations': getattr(cfg, 'DESTINATIONS', []),
-                'blocked_ips': getattr(cfg, 'BLOCKED_IPS', set()),
-                'blocked_traps': getattr(cfg, 'BLOCKED_TRAPS', set()),
-                'blocked_dest': getattr(cfg, 'BLOCKED_DEST', None),
-                'redirected_ips': getattr(cfg, 'REDIRECTED_IPS', {}),
-                'redirected_oids': getattr(cfg, 'REDIRECTED_OIDS', {}),
-                'redirected_destinations': getattr(cfg, 'REDIRECTED_DESTINATIONS', {}),
+                'destinations': getattr(cfg, 'destinations', []),
+                'blocked_ips': getattr(cfg, 'blocked_ips', set()),
+                'blocked_traps': getattr(cfg, 'blocked_traps', set()),
+                'blocked_dest': getattr(cfg, 'blocked_dest', None),
+                'redirected_ips': getattr(cfg, 'redirected_ips', {}),
+                'redirected_oids': getattr(cfg, 'redirected_oids', {}),
+                'redirected_destinations': getattr(cfg, 'redirected_destinations', {}),
             }
             self._last_refresh = time.time()
+
+            # Safety check: warn if no destinations are configured
+            # This is a critical operational signal — traps will be
+            # processed but silently not forwarded anywhere
+            dest_count = len(self._cache['destinations'])
+            if dest_count == 0:
+                logger.warning(
+                    "Config cache refresh: NO destinations configured — "
+                    "traps will be processed but NOT forwarded"
+                )
+            else:
+                logger.debug(
+                    f"Config cache refreshed: {dest_count} destination(s), "
+                    f"{len(self._cache['blocked_ips'])} blocked IPs, "
+                    f"{len(self._cache['blocked_traps'])} blocked traps"
+                )
 
         except Exception as e:
             logger.warning(f"Config cache refresh failed: {e}")
