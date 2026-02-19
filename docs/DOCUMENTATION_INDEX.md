@@ -1,7 +1,7 @@
 # TrapNinja Documentation Index
 
-**Last Updated**: 2026-02-11  
-**TrapNinja Version**: 0.7.16 (Beta)
+**Last Updated**: 2026-02-19
+**TrapNinja Version**: 0.8.0 (Beta)
 
 All project documentation lives in this `docs/` directory. The `documentation/` directory has been consolidated here.
 
@@ -42,10 +42,10 @@ All project documentation lives in this `docs/` directory. The `documentation/` 
 
 | Document | Purpose | Status |
 |----------|---------|--------|
-| [ARCHITECTURE_BRIEF.md](ARCHITECTURE_BRIEF.md) | Quick architecture overview | 📝 Needs Review |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Detailed system design | 📝 Needs Review |
-| [DIRECTORY_STRUCTURE.md](DIRECTORY_STRUCTURE.md) | Code organisation | 📝 Needs Review |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture, design, directory structure, and deployment | ✅ Current |
 | [CLI_MODULE.md](CLI_MODULE.md) | CLI module internals | ✅ Current |
+
+*Note: ARCHITECTURE_BRIEF.md and DIRECTORY_STRUCTURE.md were consolidated into ARCHITECTURE.md.*
 
 ### Code Quality & Refactoring
 
@@ -56,8 +56,9 @@ All project documentation lives in this `docs/` directory. The `documentation/` 
 | [refactoring/OPTIONAL-MODULES-SYSTEM.md](refactoring/OPTIONAL-MODULES-SYSTEM.md) | Optional modules registry design | ✅ Implemented |
 | [refactoring/LEGACY_CODE_REVIEW.md](refactoring/LEGACY_CODE_REVIEW.md) | Legacy code identification (Phase 1) | ✅ Complete |
 | [refactoring/PHASE2_LEGACY_CODE_REVIEW.md](refactoring/PHASE2_LEGACY_CODE_REVIEW.md) | Legacy code identification (Phase 2) | ✅ Complete |
-| [refactoring/REFACTORING_PLAN.md](refactoring/REFACTORING_PLAN.md) | Original refactoring roadmap | Superseded by CODE-REVIEW-REFACTORING-ANALYSIS.md |
-| [refactoring/CLEANUP_SUMMARY.md](refactoring/CLEANUP_SUMMARY.md) | Cleanup tasks summary | ✅ Complete |
+| [refactoring/REFACTORING-STATUS.md](refactoring/REFACTORING-STATUS.md) | Current refactoring status and verification | ✅ Current |
+| [refactoring/REFACTORING_PLAN.md](refactoring/REFACTORING_PLAN.md) | Original refactoring roadmap (v0.7.13) | Superseded |
+| [refactoring/CLEANUP_SUMMARY.md](refactoring/CLEANUP_SUMMARY.md) | Cleanup tasks summary (v0.7.13) | ✅ Complete |
 | [fixes/CACHE_INTEGRATION_FIX.md](fixes/CACHE_INTEGRATION_FIX.md) | Cache integration bug fix | ✅ Complete |
 
 ---
@@ -92,9 +93,9 @@ See [refactoring/CODE-REVIEW-REFACTORING-ANALYSIS.md](refactoring/CODE-REVIEW-RE
 
 ### For Developers
 
-1. [ARCHITECTURE_BRIEF.md](ARCHITECTURE_BRIEF.md) → System overview
-2. [DIRECTORY_STRUCTURE.md](DIRECTORY_STRUCTURE.md) → Code layout
-3. [refactoring/CODE-REVIEW-REFACTORING-ANALYSIS.md](refactoring/CODE-REVIEW-REFACTORING-ANALYSIS.md) → Active refactoring plan
+1. [ARCHITECTURE.md](ARCHITECTURE.md) → System design, directory structure, deployment
+2. [refactoring/CODE-REVIEW-REFACTORING-ANALYSIS.md](refactoring/CODE-REVIEW-REFACTORING-ANALYSIS.md) → Active refactoring plan
+3. [refactoring/REFACTORING-STATUS.md](refactoring/REFACTORING-STATUS.md) → Verification and current status
 
 ---
 
@@ -108,9 +109,7 @@ docs/
 ├── INSTALL.md                      # Installation guide
 ├── CONFIG.md                       # Configuration reference
 ├── TROUBLESHOOTING.md              # Problem diagnosis
-├── ARCHITECTURE.md                 # Detailed architecture
-├── ARCHITECTURE_BRIEF.md           # Quick architecture overview
-├── DIRECTORY_STRUCTURE.md          # Code organisation
+├── ARCHITECTURE.md                 # Architecture, design, directory structure, deployment
 ├── HA.md                           # High Availability
 ├── CACHE.md                        # Trap caching
 ├── FAILOVER_REPLAY.md              # Automatic replay
@@ -125,11 +124,12 @@ docs/
 ├── CODE_REVIEW.md                  # Security code review
 ├── refactoring/                    # Refactoring documentation
 │   ├── CODE-REVIEW-REFACTORING-ANALYSIS.md  # Active refactoring plan
+│   ├── REFACTORING-STATUS.md                # Current status & verification
 │   ├── OPTIONAL-MODULES-SYSTEM.md           # Optional modules design
 │   ├── LEGACY_CODE_REVIEW.md                # Legacy code Phase 1
 │   ├── PHASE2_LEGACY_CODE_REVIEW.md         # Legacy code Phase 2
-│   ├── REFACTORING_PLAN.md                  # Original roadmap
-│   └── CLEANUP_SUMMARY.md                   # Cleanup tasks
+│   ├── REFACTORING_PLAN.md                  # Original roadmap (superseded)
+│   └── CLEANUP_SUMMARY.md                   # Cleanup tasks (v0.7.13)
 └── fixes/
     └── CACHE_INTEGRATION_FIX.md             # Cache fix details
 ```

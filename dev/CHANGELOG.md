@@ -1025,15 +1025,19 @@ Before releasing 1.0.0, we need:
 - [ ] User feedback on API design
 - [ ] Documentation validated by users
 
-**Current Status: Beta (0.5.0)**
+**Current Status: Beta (0.8.0)**
 - ✅ Core features implemented
 - ✅ HA and SNMPv3 working
 - ✅ Performance optimized with eBPF
+- ✅ Granular statistics system
+- ✅ Redis caching with failover replay
+- ✅ Comprehensive pytest test suite (~1,830 tests)
+- ✅ Python packaging infrastructure (pip installable)
+- ✅ Security hardening (CWE-284, HMAC-SHA256, input validation)
+- ✅ Major refactoring complete (optional modules, service init, CLI registry)
 - ⏳ Field testing in progress
 - ⏳ Documentation being refined
-- ⏳ Security audit planned
-
-**Target 1.0.0 Release: Q2 2025**
+- ⏳ Formal security audit planned
 
 ---
 
@@ -1136,7 +1140,10 @@ When contributing, please:
 
 ---
 
-[Unreleased]: https://github.com/yourusername/trapninja/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/yourusername/trapninja/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/yourusername/trapninja/compare/v0.7.14...v0.8.0
+[0.7.14]: https://github.com/yourusername/trapninja/compare/v0.7.13...v0.7.14
+[0.7.13]: https://github.com/yourusername/trapninja/compare/v0.7.12...v0.7.13
 [0.5.0]: https://github.com/yourusername/trapninja/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/yourusername/trapninja/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/yourusername/trapninja/compare/v0.2.0...v0.3.0

@@ -1,6 +1,13 @@
-# TrapNinja Directory Structure
+# TrapNinja Directory Structure (Consolidated -- Superseded)
 
-**Version:** 0.7.13  
+> **This document has been consolidated into [ARCHITECTURE.md](ARCHITECTURE.md).**
+> The current directory structure, module responsibilities, and deployment layout
+> are maintained in the [Directory Structure](ARCHITECTURE.md#directory-structure)
+> section of that document.
+>
+> **Version covered here:** 0.7.13 (historical)
+
+**Version:** 0.7.13
 **Last Updated:** December 31, 2025
 
 This document describes the repository layout and deployment architecture.

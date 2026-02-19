@@ -1,7 +1,13 @@
-# TrapNinja Architecture Brief
+# TrapNinja Architecture Brief (Consolidated -- Superseded)
 
-**Version:** 0.7.13 (Beta)  
-**Last Updated:** January 2, 2026  
+> **This document has been consolidated into [ARCHITECTURE.md](ARCHITECTURE.md).**
+> All content from this brief, including the C4 diagrams, data model, API reference,
+> and deployment architecture, is now maintained there.
+>
+> **Version covered here:** 0.7.13 (historical)
+
+**Version:** 0.7.13 (Beta)
+**Last Updated:** January 2, 2026
 **Document Type:** Architecture Brief
 
 ---

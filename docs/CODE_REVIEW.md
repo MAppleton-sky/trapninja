@@ -1,8 +1,8 @@
 # TrapNinja Code Review - Security Fixes Implemented
 
-**Review Date:** December 2024  
-**Version:** Post-Security Hardening  
-**Status:** ✅ All HIGH and MEDIUM Priority Issues Resolved
+**Review Date:** December 2024 (updated February 2026)
+**Version:** 0.8.0 (Beta)
+**Status:** All HIGH and MEDIUM Priority Issues Resolved
 
 ---
 
@@ -34,7 +34,7 @@ All HIGH and MEDIUM priority security and usability issues identified in the cod
 ### 🟡 MEDIUM Priority - ALL RESOLVED
 
 #### 2. HA Message Authentication Upgraded to HMAC-SHA256 (FIXED)
-**Location:** `ha.py`  
+**Location:** `ha/cluster.py` (formerly `ha.py`, removed in v0.7.13)
 **Issue:** HA messages used MD5 for checksums (cryptographically broken).
 
 **Implementation:**
@@ -57,7 +57,7 @@ def calculate_checksum(self, shared_secret: str = "") -> str:
 ```
 
 #### 3. JSON Deserialization Size Limits (FIXED)
-**Locations:** `control.py`, `ha.py`  
+**Locations:** `control.py`, `ha/cluster.py`
 **Issue:** No size limits on JSON payloads could enable memory exhaustion attacks.
 
 **Implementation:**
@@ -161,13 +161,13 @@ New CLI commands added for operational validation:
 
 ```bash
 # Validate configuration without starting daemon
-trapninja --validate-config
+trapninja config validate
 
 # Show effective configuration
-trapninja --show-config
+trapninja config show
 
 # Show configuration as JSON
-trapninja --show-config --json
+trapninja config show --json
 ```
 
 ---
@@ -225,7 +225,7 @@ trapninja --validate-config
 | File | Changes |
 |------|---------|
 | `control.py` | Path validation, rate limiting, size limits, show_config handler |
-| `ha.py` | HMAC-SHA256 auth, size limits, backward compatibility |
+| `ha/cluster.py` | HMAC-SHA256 auth, size limits, backward compatibility |
 | `daemon.py` | Startup verification with control socket ping |
 | `daemon_commands.py` | Added validate_config and show_config commands |
 | `service.py` | (Already had validation - no changes needed) |
@@ -248,5 +248,9 @@ These items are nice-to-have improvements but not critical for production:
 
 ---
 
-**Review Completed:** All HIGH and MEDIUM priority security issues resolved.  
-**Production Status:** ✅ Ready for deployment
+**Review Completed:** All HIGH and MEDIUM priority security issues resolved.
+**Production Status:** Ready for deployment
+
+**Note:** The monolithic `ha.py` was removed in v0.7.13. All HA functionality is now
+in the `ha/` package. v0.8.0 added configurable `bind_address` for network listeners
+(CWE-284 remediation) and `security.py` utilities. See [SECURITY.md](SECURITY.md) for details.
