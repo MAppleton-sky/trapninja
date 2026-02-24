@@ -1,6 +1,6 @@
 # TrapNinja Documentation Index
 
-**Last Updated**: 2026-02-19
+**Last Updated**: 2026-02-24
 **TrapNinja Version**: 0.8.0 (Beta)
 
 All project documentation lives in this `docs/` directory. The `documentation/` directory has been consolidated here.
@@ -17,7 +17,7 @@ All project documentation lives in this `docs/` directory. The `documentation/` 
 | [CLI.md](CLI.md) | Complete CLI reference for all commands | ✅ Current |
 | [INSTALL.md](INSTALL.md) | Installation and deployment guide | 📝 Needs Review |
 | [CONFIG.md](CONFIG.md) | Configuration file reference | ✅ Current |
-| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Problem diagnosis guide | 📝 Needs Review |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Problem diagnosis guide | ✅ Current |
 
 ### Features
 
@@ -45,7 +45,7 @@ All project documentation lives in this `docs/` directory. The `documentation/` 
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture, design, directory structure, and deployment | ✅ Current |
 | [CLI_MODULE.md](CLI_MODULE.md) | CLI module internals | ✅ Current |
 
-*Note: ARCHITECTURE_BRIEF.md and DIRECTORY_STRUCTURE.md were consolidated into ARCHITECTURE.md.*
+*Note: DIRECTORY_STRUCTURE.md was consolidated into ARCHITECTURE.md.*
 
 ### Code Quality & Refactoring
 
@@ -110,6 +110,7 @@ docs/
 ├── CONFIG.md                       # Configuration reference
 ├── TROUBLESHOOTING.md              # Problem diagnosis
 ├── ARCHITECTURE.md                 # Architecture, design, directory structure, deployment
+├── CLI_MODULE.md                   # CLI module internals
 ├── HA.md                           # High Availability
 ├── CACHE.md                        # Trap caching
 ├── FAILOVER_REPLAY.md              # Automatic replay
@@ -120,8 +121,8 @@ docs/
 ├── SHADOW_MODE.md                  # Testing modes
 ├── FRAGMENTATION.md                # Packet fragmentation
 ├── SECURITY.md                     # Security measures
-├── CLI_MODULE.md                   # CLI module internals
 ├── CODE_REVIEW.md                  # Security code review
+├── DIRECTORY_STRUCTURE.md          # Historical (superseded by ARCHITECTURE.md)
 ├── refactoring/                    # Refactoring documentation
 │   ├── CODE-REVIEW-REFACTORING-ANALYSIS.md  # Active refactoring plan
 │   ├── REFACTORING-STATUS.md                # Current status & verification

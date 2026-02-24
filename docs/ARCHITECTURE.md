@@ -651,12 +651,12 @@ trapninja/
 │   │   │       ├── manager.py        # FailoverReplayManager
 │   │   │       └── tracker.py        # FailoverTracker
 │   │   │
-│   │   ├── cli/                      # CLI command modules (18 files)
+│   │   ├── cli/                      # CLI command modules (19 files + parsers/ package)
 │   │   │   ├── __init__.py
 │   │   │   ├── command_base.py       # Generic config managers
 │   │   │   ├── registry.py           # Declarative command registry
 │   │   │   ├── config_commands.py    # Config subcommand
-│   │   │   ├── parser.py             # Argument parsing
+│   │   │   ├── parser.py             # Compatibility shim → re-exports from cli/parsers/
 │   │   │   ├── validation.py         # Input validation
 │   │   │   ├── executor.py           # Command dispatch
 │   │   │   ├── output.py             # Output formatting
@@ -669,7 +669,22 @@ trapninja/
 │   │   │   ├── snmpv3_commands.py    # SNMPv3 credentials
 │   │   │   ├── sync_commands.py      # Config sync
 │   │   │   ├── failover_commands.py  # Failover replay
-│   │   │   └── metrics_commands.py   # Metrics display
+│   │   │   ├── metrics_commands.py   # Metrics display
+│   │   │   └── parsers/              # Modular argument parser definitions (14 files)
+│   │   │       ├── __init__.py       # create_argument_parser() assembly
+│   │   │       ├── base.py           # Formatters, type validators, TrapNinjaArgumentParser
+│   │   │       ├── daemon.py         # daemon subcommands
+│   │   │       ├── config.py         # config subcommands
+│   │   │       ├── filtering.py      # filter subcommands
+│   │   │       ├── ha.py             # ha subcommands
+│   │   │       ├── snmpv3.py         # snmpv3 subcommands
+│   │   │       ├── cache.py          # cache subcommands
+│   │   │       ├── stats.py          # stats subcommands
+│   │   │       ├── metrics.py        # metrics subcommands
+│   │   │       ├── shadow.py         # shadow subcommands
+│   │   │       ├── failover.py       # failover subcommands
+│   │   │       ├── sync.py           # sync subcommands
+│   │   │       └── legacy.py         # hidden backward-compatible flat flags
 │   │   │
 │   │   ├── core/                     # Types, constants, exceptions (8 files)
 │   │   │   ├── __init__.py
@@ -761,7 +776,7 @@ trapninja/
 | Package | Files | Purpose |
 |---------|-------|---------|
 | `cache/` | 6 | Redis-based trap caching with failover replay |
-| `cli/` | 18 | Command-line interface modules |
+| `cli/` | 19 + 14 (parsers/) | Command-line interface modules and modular argument parsers |
 | `core/` | 8 | Shared constants, types, exceptions, optional module registry |
 | `ha/` | 9 | High availability with config sync |
 | `metrics/` | 4 | Prometheus-compatible metrics collection and export |
@@ -818,21 +833,40 @@ Modular CLI with security-focused input validation and declarative command regis
 |--------|---------|
 | `command_base.py` | Generic ConfigListManager, ConfigPairListManager, ConfigGroupManager |
 | `registry.py` | Declarative CommandDef registry replacing if/elif dispatch |
-| `config_commands.py` | `trapninja config` subcommand |
-| `parser.py` | ArgumentParser configuration, all CLI arguments |
+| `config_commands.py` | `trapninja config` subcommand handlers |
+| `parser.py` | Compatibility shim; re-exports from `cli/parsers/` |
 | `validation.py` | InputValidator with security patterns, sanitization |
 | `executor.py` | Command dispatch based on parsed arguments |
 | `output.py` | Formatted output helpers, table generation |
-| `daemon_commands.py` | --start, --stop, --restart, --status |
-| `filtering_commands.py` | --block-ip, --unblock-ip, --block-oid, --unblock-oid |
-| `ha_commands.py` | --ha-status, --promote, --demote, --force-failover |
-| `cache_commands.py` | --cache-status, --cache-query, --cache-replay |
-| `stats_commands.py` | --stats-summary, --stats-top-ips, --stats-top-oids |
-| `shadow_commands.py` | --shadow-mode, --mirror-mode |
-| `snmpv3_commands.py` | --snmpv3-add-user, --snmpv3-list-users |
-| `sync_commands.py` | --ha-sync, config synchronization |
-| `failover_commands.py` | --failover-status, --failover-replay |
-| `metrics_commands.py` | --metrics-status, metrics display |
+| `daemon_commands.py` | `trapninja daemon` subcommand handlers |
+| `filtering_commands.py` | `trapninja filter` subcommand handlers |
+| `ha_commands.py` | `trapninja ha` subcommand handlers |
+| `cache_commands.py` | `trapninja cache` subcommand handlers |
+| `stats_commands.py` | `trapninja stats` subcommand handlers |
+| `shadow_commands.py` | `trapninja shadow` subcommand handlers |
+| `snmpv3_commands.py` | `trapninja snmpv3` subcommand handlers |
+| `sync_commands.py` | `trapninja sync` subcommand handlers |
+| `failover_commands.py` | `trapninja failover` subcommand handlers |
+| `metrics_commands.py` | `trapninja metrics` subcommand handlers |
+
+**`cli/parsers/` — Argument Parser Definitions**
+
+| Module | Purpose |
+|--------|---------|
+| `__init__.py` | `create_argument_parser()` — assembles all category parsers |
+| `base.py` | `TrapNinjaArgumentParser`, formatters, `validated_ip/oid/tag/port` validators |
+| `daemon.py` | `daemon` category argument definitions |
+| `config.py` | `config` category argument definitions |
+| `filtering.py` | `filter` category argument definitions |
+| `ha.py` | `ha` category argument definitions |
+| `snmpv3.py` | `snmpv3` category argument definitions |
+| `cache.py` | `cache` category argument definitions |
+| `stats.py` | `stats` category argument definitions |
+| `metrics.py` | `metrics` category argument definitions |
+| `shadow.py` | `shadow` category argument definitions |
+| `failover.py` | `failover` category argument definitions |
+| `sync.py` | `sync` category argument definitions |
+| `legacy.py` | Hidden backward-compatible flat flags (suppressed from help) |
 
 #### `core/` - Core Definitions
 
@@ -1146,54 +1180,190 @@ graph TD
 
 ## API / CLI Reference Summary
 
-TrapNinja exposes functionality through a command-line interface (CLI) and Unix socket control interface for programmatic access.
+TrapNinja exposes functionality through a hierarchical subcommand CLI and a Unix socket control interface for programmatic access.
 
-**Daemon Control:**
-- `--start` - Start TrapNinja service (daemonized)
-- `--stop` - Stop TrapNinja service gracefully
-- `--restart` - Restart TrapNinja service
-- `--status` - Show service status, uptime, and basic metrics
+> **Note on legacy flags:** Hidden backward-compatible flat flags (`--start`, `--block-ip`, `--ha-status`, etc.) are supported for existing automation but do not appear in `--help` output. All new usage and documentation should use the subcommand interface below.
 
-**Configuration Commands:**
-- `trapninja config show` - Display current configuration
-- `trapninja config validate` - Validate configuration files
-- `trapninja config paths` - Show configuration file paths
+### Command Structure
 
-**Filtering Commands:**
-- `--block-ip <IP>` - Block source IP address
-- `--unblock-ip <IP>` - Remove IP from block list
-- `--list-blocked-ips` - Show all blocked IPs
-- `--block-oid <OID>` - Block trap OID
-- `--unblock-oid <OID>` - Remove OID from block list
-- `--list-blocked-oids` - Show all blocked OIDs
+```
+trapninja <category> <command> [options]
+```
 
-**Statistics Commands:**
-- `--stats-summary` - Show processing statistics summary
-- `--stats-top-ips [N]` - Show top N source IPs by trap count
-- `--stats-top-oids [N]` - Show top N OIDs by trap count
-- `--stats-details <IP|OID>` - Show detailed stats for specific IP or OID
+Use `trapninja --help` for a category overview or `trapninja <category> --help` for category-specific detail.
 
-**High Availability Commands:**
-- `--ha-status` - Show HA cluster status
-- `--promote` - Manually promote to PRIMARY
-- `--demote` - Manually demote to SECONDARY
-- `--force-failover` - Force immediate failover
-- `--config-sync-status` - Show configuration sync status
-- `--config-sync` - Trigger manual config synchronization
+---
 
-**Cache Commands:**
-- `--cache-status` - Show cache connection and statistics
-- `--cache-query <destination> --start <time> --end <time>` - Query cached traps
-- `--cache-replay <destination> --start <time> --end <time>` - Replay cached traps
-- `--cache-clear [destination]` - Clear cache entries
+### `daemon` — Service Control
 
-**SNMPv3 Commands:**
-- `--snmpv3-add-user` - Add SNMPv3 credentials
-- `--snmpv3-list-users` - List configured SNMPv3 users
-- `--snmpv3-remove-user <engine_id> <username>` - Remove SNMPv3 credentials
+```
+trapninja daemon start [--interface IF] [--ports PORTS] [--shadow-mode] [--mirror-mode] [--parallel] [--log-level LEVEL]
+trapninja daemon stop
+trapninja daemon restart
+trapninja daemon status
+trapninja daemon foreground
+trapninja daemon config [--validate]
+trapninja daemon queue-stats
+```
 
-**Prometheus Metrics Endpoint:**
-- `GET /metrics` - Prometheus-format metrics export (HTTP)
+---
+
+### `config` — View Configuration
+
+```
+trapninja config show [--json] [--brief]
+trapninja config destinations [--json]
+trapninja config blocked-ips [--json]
+trapninja config blocked-oids [--json]
+trapninja config redirected-ips [--json]
+trapninja config redirected-oids [--json]
+trapninja config redirect-dests [--json]
+trapninja config listen-ports [--json]
+trapninja config validate
+```
+
+---
+
+### `filter` — IP and OID Filtering / Redirection
+
+```
+# IP blocking
+trapninja filter block-ip <IP>
+trapninja filter unblock-ip <IP>
+trapninja filter list-blocked-ips
+
+# OID blocking
+trapninja filter block-oid <OID>
+trapninja filter unblock-oid <OID>
+trapninja filter list-blocked-oids
+
+# IP redirection
+trapninja filter redirect-ip <IP> --tag <TAG>
+trapninja filter unredirect-ip <IP>
+trapninja filter list-redirected-ips
+
+# OID redirection
+trapninja filter redirect-oid <OID> --tag <TAG>
+trapninja filter unredirect-oid <OID>
+trapninja filter list-redirected-oids
+
+# Redirect destination groups
+trapninja filter add-redirect-dest --tag <TAG> --ip <IP> --port <PORT>
+trapninja filter remove-redirect-dest --tag <TAG> --ip <IP> --port <PORT>
+trapninja filter list-redirect-dests
+```
+
+---
+
+### `ha` — High Availability
+
+```
+trapninja ha configure --mode <primary|secondary> --peer <IP> [--peer-port PORT] [--listen-port PORT] [--priority N]
+trapninja ha status
+trapninja ha promote [--force]
+trapninja ha demote
+trapninja ha force-failover
+trapninja ha disable
+```
+
+---
+
+### `sync` — Configuration Synchronisation (HA)
+
+```
+trapninja sync now [--force]
+trapninja sync status
+```
+
+---
+
+### `cache` — Trap Caching and Replay
+
+```
+trapninja cache status
+trapninja cache query --destination <NAME> --from <TIME> --to <TIME> [--limit N]
+trapninja cache replay --destination <NAME> --from <TIME> --to <TIME> [--replay-to HOST:PORT] [--rate-limit N] [--dry-run] [--oid-filter OID] [--source-filter IP] [--exclude-oid OID]
+trapninja cache clear [--destination <NAME>]
+trapninja cache trim
+```
+
+Time values accept relative formats (e.g. `"-2h"`, `"14:30"`) and `now`.
+
+---
+
+### `failover` — Failover Gap Detection and Replay
+
+```
+trapninja failover status
+trapninja failover detect
+trapninja failover replay [--destination NAME] [--from TIME] [--to TIME] [--rate-limit N] [--dry-run]
+```
+
+---
+
+### `stats` — Granular Statistics
+
+```
+trapninja stats summary
+trapninja stats top-ips [-n COUNT] [-s SORT]
+trapninja stats top-oids [-n COUNT] [-s SORT]
+trapninja stats ip <IP> [--oids N]
+trapninja stats oid <OID> [--sources N]
+trapninja stats destinations
+trapninja stats dashboard
+trapninja stats export [-f json|prometheus] [-o FILE]
+trapninja stats reset
+trapninja stats debug
+```
+
+Sort options: `total` (default), `rate`, `peak`, `blocked`, `recent`.
+
+---
+
+### `metrics` — Prometheus Metrics Configuration
+
+```
+trapninja metrics config
+trapninja metrics set-dir <DIRECTORY>
+trapninja metrics add-label --name <NAME> --value <VALUE>
+trapninja metrics remove-label <NAME>
+trapninja metrics set-interval <SECONDS>
+```
+
+---
+
+### `shadow` — Shadow / Mirror Mode
+
+```
+trapninja shadow status
+trapninja shadow export
+```
+
+Shadow and mirror modes are started via `trapninja daemon start --shadow-mode` or `--mirror-mode`.
+
+---
+
+### `snmpv3` — SNMPv3 Credential Management
+
+```
+trapninja snmpv3 add-user --username <USER> --engine-id <HEX> [--auth-protocol PROTO] [--auth-passphrase PASS] [--priv-protocol PROTO] [--priv-passphrase PASS]
+trapninja snmpv3 remove-user --username <USER> --engine-id <HEX>
+trapninja snmpv3 list-users
+trapninja snmpv3 show-user --username <USER> --engine-id <HEX>
+trapninja snmpv3 status
+trapninja snmpv3 test-decrypt --trap-file <PATH> [--community COMMUNITY] [--convert] [--output FILE]
+```
+
+Auth protocols: `NONE`, `MD5`, `SHA` (default), `SHA224`, `SHA256`, `SHA384`, `SHA512`.
+Privacy protocols: `NONE`, `DES`, `3DES`, `AES128` (default), `AES192`, `AES256`.
+
+---
+
+### Prometheus Metrics Endpoint
+
+```
+GET /metrics    Prometheus-format metrics export (HTTP)
+```
 
 Key metrics exposed:
 

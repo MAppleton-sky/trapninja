@@ -207,13 +207,13 @@ Existing encrypted credentials will need to be re-encrypted after updating, as t
 To re-encrypt credentials:
 ```bash
 # Export existing credentials
-trapninja --list-v3-users > credentials_backup.txt
+trapninja snmpv3 list-users > credentials_backup.txt
 
 # Remove old credentials
 rm /etc/trapninja/snmpv3_credentials.json
 
 # Re-add credentials (will use new iteration count)
-trapninja --add-v3-user ... 
+trapninja snmpv3 add-user ...
 ```
 
 ## Security Module Reference
