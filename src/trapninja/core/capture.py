@@ -201,6 +201,8 @@ def get_packet_handler(handles: 'SubsystemHandles') -> Callable:
 def try_ebpf_capture(handles: 'SubsystemHandles') -> bool:
     """
     Attempt to start eBPF-accelerated packet capture.
+    Initialises fragment reassembly (if configured) before starting capture
+    so that fragmented SNMP traps are handled the same way as in sniff mode.
 
     Args:
         handles: SubsystemHandles to update with capture instance
@@ -218,12 +220,28 @@ def try_ebpf_capture(handles: 'SubsystemHandles') -> bool:
 
     logger.info("eBPF support available - creating capture instance")
 
+    # Initialise fragment reassembly from capture_config.json (same config path
+    # as sniff mode).  Must happen before create_capture so we can hand the
+    # buffer to the capture instance.
+    initialize_fragment_reassembly(handles)
+    if handles.fragment_reassembly_enabled:
+        logger.info(
+            "eBPF capture: fragment reassembly enabled "
+            "(fragmented SNMP traps will be reassembled)"
+        )
+    else:
+        logger.debug(
+            "eBPF capture: fragment reassembly not enabled "
+            "(large traps >1472 bytes will be logged as warnings if fragmented)"
+        )
+
     try:
         capture_instance = modules.ebpf.create_capture(
             interface=INTERFACE,
             listen_ports=LISTEN_PORTS,
             queue_ref=packet_queue,
             stop_event_ref=stop_event,
+            fragment_buffer=handles.fragment_buffer,
         )
 
         if capture_instance.start():

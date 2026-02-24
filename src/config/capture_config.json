@@ -12,5 +12,12 @@
   "allow_parallel": false,
   "buffer_size_mb": 64,
   "batch_size": 100,
-  "worker_count": 0
+  "worker_count": 0,
+  "fragment_reassembly": {
+    "_comment": "IP fragment reassembly for SNMP traps exceeding MTU (~1472 bytes). Applies to both sniff and eBPF capture modes.",
+    "enabled": false,
+    "timeout_seconds": 5.0,
+    "max_buffer_mb": 100.0,
+    "max_datagrams": 10000
+  }
 }
