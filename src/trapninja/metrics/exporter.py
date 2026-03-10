@@ -236,7 +236,7 @@ def export_metrics(metrics_summary: Dict[str, Any] = None) -> bool:
 
         lines.append(format_prometheus(
             "trapninja_traps_received_60s",
-            metrics_summary["window_60s_received"],
+            metrics_summary.get("window_60s_received", 0),
             global_labels=global_labels,
             help_text="Traps received in the last 60 seconds",
             metric_type="gauge"
@@ -244,7 +244,7 @@ def export_metrics(metrics_summary: Dict[str, Any] = None) -> bool:
 
         lines.append(format_prometheus(
             "trapninja_traps_forwarded_60s",
-            metrics_summary["window_60s_forwarded"],
+            metrics_summary.get("window_60s_forwarded", 0),
             global_labels=global_labels,
             help_text="Traps successfully forwarded in the last 60 seconds",
             metric_type="gauge"
@@ -252,7 +252,7 @@ def export_metrics(metrics_summary: Dict[str, Any] = None) -> bool:
 
         lines.append(format_prometheus(
             "trapninja_traps_dropped_60s",
-            metrics_summary["window_60s_dropped"],
+            metrics_summary.get("window_60s_dropped", 0),
             global_labels=global_labels,
             help_text="Traps dropped (queue full) in the last 60 seconds",
             metric_type="gauge"
@@ -260,7 +260,7 @@ def export_metrics(metrics_summary: Dict[str, Any] = None) -> bool:
 
         lines.append(format_prometheus(
             "trapninja_processing_errors_60s",
-            metrics_summary["window_60s_errors"],
+            metrics_summary.get("window_60s_errors", 0),
             global_labels=global_labels,
             help_text="Processing errors in the last 60 seconds",
             metric_type="gauge"
