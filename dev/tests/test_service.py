@@ -389,38 +389,61 @@ class TestRunService:
     and HA init failures are detected by the ServiceInitializer.run() path.
     """
 
-    def test_returns_one_on_init_failure(self):
-        """Test returns 1 when ServiceInitializer.run() fails."""
-        from trapninja.service import run_service
-        
+    def _make_mock_initializer(self, return_code=1):
+        """Build a mock ServiceInitializer with all required attributes."""
         mock_initializer = MagicMock()
-        mock_initializer.run.return_value = 1
+        mock_initializer.run.return_value = return_code
         mock_initializer.handles = MagicMock()
         mock_initializer.handles.capture_instance = None
         mock_initializer.handles.use_ebpf = False
         mock_initializer.start_time = None
-        
-        with patch('trapninja.core.service_init.ServiceInitializer', return_value=mock_initializer):
-            result = run_service()
-        
+        return mock_initializer
+
+    def test_returns_one_on_init_failure(self):
+        """
+        Test returns 1 when ServiceInitializer.run() signals failure.
+
+        run_service() imports ServiceInitializer and RuntimeConfig locally
+        (inside the function body), so the correct patch target is the
+        module where they are defined: trapninja.core.service_init.
+
+        The previous test used 'patch(..., return_value=mock)' directly on
+        the patch() call, which sets the *replacement object's* return_value
+        rather than the *class's* return_value.  Calling
+        ServiceInitializer(config) would then return a fresh MagicMock, not
+        mock_initializer, so .run() never returned 1 and the test hung.
+
+        The fix: assign mock_cls.return_value *after* entering the context.
+        """
+        from trapninja.service import run_service
+
+        mock_initializer = self._make_mock_initializer(return_code=1)
+
+        with patch('trapninja.core.service_init.ServiceInitializer') as mock_cls:
+            mock_cls.return_value = mock_initializer
+            with patch('trapninja.core.service_init.RuntimeConfig', MagicMock()):
+                result = run_service()
+
         assert result == 1
 
     def test_delegates_to_service_initializer(self):
-        """Test run_service creates a ServiceInitializer and calls run()."""
+        """
+        Test run_service creates a ServiceInitializer and calls run().
+
+        Same patch-target reasoning as test_returns_one_on_init_failure.
+        """
         from trapninja.service import run_service
-        
-        mock_initializer = MagicMock()
-        mock_initializer.run.return_value = 0
-        mock_initializer.handles = MagicMock()
-        mock_initializer.handles.capture_instance = None
-        mock_initializer.handles.use_ebpf = False
-        mock_initializer.start_time = None
-        
-        with patch('trapninja.core.service_init.ServiceInitializer', return_value=mock_initializer) as mock_cls:
-            result = run_service(debug=True, shadow_mode=True)
-        
+
+        mock_initializer = self._make_mock_initializer(return_code=0)
+
+        with patch('trapninja.core.service_init.ServiceInitializer') as mock_cls:
+            mock_cls.return_value = mock_initializer
+            with patch('trapninja.core.service_init.RuntimeConfig', MagicMock()):
+                result = run_service(debug=True, shadow_mode=True)
+
         mock_cls.assert_called_once()
         mock_initializer.run.assert_called_once()
+        assert result == 0
 
     def test_shadow_mode_forces_sniff_capture(self):
         """Test shadow mode forces sniff capture."""
