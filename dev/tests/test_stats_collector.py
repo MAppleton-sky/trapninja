@@ -356,41 +356,189 @@ class TestGranularStatsCollector:
 class TestCollectorExport:
     """Tests for collector export methods."""
 
-    def test_export_prometheus(self):
-        """Test export_prometheus method."""
+    def test_export_prometheus_contains_required_counters(self):
+        """export_prometheus emits all required counter metrics."""
         from trapninja.stats.collector import GranularStatsCollector
-        
+
         collector = GranularStatsCollector()
-        collector.record_trap(source_ip="10.0.0.1", oid="test_oid")
-        
+        collector.record_trap(source_ip="10.0.0.1", oid="1.3.6.1.4.1.9.1",
+                              action="forwarded", destination="default")
+        collector.record_trap(source_ip="10.0.0.2", oid="1.3.6.1.4.1.9.1",
+                              action="blocked")
+
         result = collector.export_prometheus()
-        
-        assert isinstance(result, str)
+
+        # Global counters
         assert "trapninja_traps_total" in result
+        assert "trapninja_traps_forwarded_total" in result
+        assert "trapninja_traps_blocked_total" in result
+        assert "trapninja_traps_redirected_total" in result
+
+        # Global gauges
+        assert "trapninja_unique_sources" in result
+        assert "trapninja_unique_oids" in result
+        assert "trapninja_uptime_seconds" in result
+
+        # Per-IP counters
+        assert "trapninja_ip_traps_total" in result
+        assert "trapninja_ip_blocked_total" in result
+
+        # Per-IP peak gauge (must NOT be a rate-per-minute current gauge)
+        assert "trapninja_ip_peak_rate_per_minute" in result
+
+        # Per-OID counters
+        assert "trapninja_oid_traps_total" in result
+        assert "trapninja_oid_blocked_total" in result
+
+        # Per-OID gauges
+        assert "trapninja_oid_unique_sources" in result
+        assert "trapninja_oid_peak_rate_per_minute" in result
+
+        # Destination counters
+        assert "trapninja_dest_forwards_total" in result
+
+        # IP+OID combination counter
+        assert "trapninja_ip_oid_traps_total" in result
+
+        # Prometheus formatting
         assert "# HELP" in result
         assert "# TYPE" in result
 
+    def test_export_prometheus_does_not_contain_removed_metrics(self):
+        """
+        Metrics derivable by Grafana must NOT appear in the Prometheus export.
+
+        These were removed because Grafana calculates them natively:
+          trapninja_ip_rate_per_minute   -> rate(trapninja_ip_traps_total[1m]) * 60
+          trapninja_oid_rate_per_minute  -> rate(trapninja_oid_traps_total[1m]) * 60
+          trapninja_dest_forwards_60s    -> increase(trapninja_dest_forwards_total[60s])
+        """
+        from trapninja.stats.collector import GranularStatsCollector
+
+        collector = GranularStatsCollector()
+        collector.record_trap(source_ip="10.0.0.1", oid="1.3.6.1.4.1.9.1",
+                              action="forwarded", destination="default")
+
+        result = collector.export_prometheus()
+
+        assert "trapninja_ip_rate_per_minute" not in result
+        assert "trapninja_oid_rate_per_minute" not in result
+        assert "trapninja_dest_forwards_60s" not in result
+
+    def test_export_prometheus_ip_label_present(self):
+        """Per-IP metrics include ip label with correct value."""
+        from trapninja.stats.collector import GranularStatsCollector
+
+        collector = GranularStatsCollector()
+        collector.record_trap(source_ip="10.0.0.1", oid="1.3.6.1.4.1.9.1")
+
+        result = collector.export_prometheus()
+
+        assert 'ip="10.0.0.1"' in result
+
+    def test_export_prometheus_oid_label_present(self):
+        """Per-OID metrics include oid label with correct value."""
+        from trapninja.stats.collector import GranularStatsCollector
+
+        collector = GranularStatsCollector()
+        collector.record_trap(source_ip="10.0.0.1", oid="1.3.6.1.4.1.9.1")
+
+        result = collector.export_prometheus()
+
+        assert 'oid="1.3.6.1.4.1.9.1"' in result
+
+    def test_export_prometheus_blocked_ip_appears_in_ip_blocked_total(self):
+        """trapninja_ip_blocked_total only appears for IPs that have blocked traps."""
+        from trapninja.stats.collector import GranularStatsCollector
+
+        collector = GranularStatsCollector()
+        collector.record_trap(source_ip="10.0.0.1", action="forwarded")
+        collector.record_trap(source_ip="10.0.0.2", action="blocked")
+
+        result = collector.export_prometheus()
+
+        # Only the blocked IP should appear under ip_blocked_total
+        assert 'trapninja_ip_blocked_total{ip="10.0.0.2"}' in result
+        assert 'trapninja_ip_blocked_total{ip="10.0.0.1"}' not in result
+
+    def test_export_prometheus_blocked_oid_appears_in_oid_blocked_total(self):
+        """trapninja_oid_blocked_total only appears for OIDs with blocked traps."""
+        from trapninja.stats.collector import GranularStatsCollector
+
+        collector = GranularStatsCollector()
+        collector.record_trap(source_ip="10.0.0.1", oid="oid.forwarded", action="forwarded")
+        collector.record_trap(source_ip="10.0.0.2", oid="oid.blocked", action="blocked")
+
+        result = collector.export_prometheus()
+
+        assert 'trapninja_oid_blocked_total{oid="oid.blocked"}' in result
+        assert 'trapninja_oid_blocked_total{oid="oid.forwarded"}' not in result
+
+    def test_export_prometheus_dest_failures_only_when_nonzero(self):
+        """trapninja_dest_failures_total only emitted for destinations with failures."""
+        from trapninja.stats.collector import GranularStatsCollector
+
+        collector = GranularStatsCollector()
+        collector.record_trap(source_ip="10.0.0.1", action="forwarded",
+                              destination="healthy")
+        collector.record_forward_failure(destination="broken", source_ip="10.0.0.1")
+
+        result = collector.export_prometheus()
+
+        assert 'destination="broken"' in result
+        assert 'trapninja_dest_failures_total{destination="healthy"}' not in result
+
+    def test_export_prometheus_ip_oid_combination_present(self):
+        """trapninja_ip_oid_traps_total emitted for IP+OID combinations."""
+        from trapninja.stats.collector import GranularStatsCollector
+
+        collector = GranularStatsCollector()
+        collector.record_trap(source_ip="10.0.0.1", oid="1.3.6.1.4.1.9.1")
+
+        result = collector.export_prometheus()
+
+        assert 'trapninja_ip_oid_traps_total{ip="10.0.0.1",oid="1.3.6.1.4.1.9.1"}' in result
+
     def test_export_prometheus_with_global_labels(self):
-        """Test export_prometheus includes global labels."""
+        """Global labels are applied to all metrics."""
         from trapninja.stats.collector import GranularStatsCollector, CollectorConfig
-        
+
         config = CollectorConfig(global_labels={"env": "test"})
         collector = GranularStatsCollector(config)
         collector.record_trap(source_ip="10.0.0.1")
-        
+
         result = collector.export_prometheus()
-        
+
         assert 'env="test"' in result
+        # Global labels must appear on the unlabelled global metrics
+        assert 'trapninja_traps_total{env="test"}' in result
+
+    def test_export_prometheus_counter_values_are_correct(self):
+        """Counter values in the Prometheus output match recorded counts."""
+        from trapninja.stats.collector import GranularStatsCollector
+
+        collector = GranularStatsCollector()
+        for _ in range(3):
+            collector.record_trap(source_ip="10.0.0.1", action="forwarded",
+                                  destination="default")
+        for _ in range(2):
+            collector.record_trap(source_ip="10.0.0.1", action="blocked")
+
+        result = collector.export_prometheus()
+
+        assert "trapninja_traps_total 5" in result
+        assert "trapninja_traps_forwarded_total 3" in result
+        assert "trapninja_traps_blocked_total 2" in result
 
     def test_export_json(self):
         """Test export_json method."""
         from trapninja.stats.collector import GranularStatsCollector
-        
+
         collector = GranularStatsCollector()
         collector.record_trap(source_ip="10.0.0.1")
-        
+
         result = collector.export_json()
-        
+
         assert isinstance(result, dict)
         assert 'summary' in result
 
