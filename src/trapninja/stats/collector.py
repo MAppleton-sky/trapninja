@@ -715,7 +715,16 @@ class GranularStatsCollector:
             if dest_stat.failed > 0:
                 labels = self._format_labels({"destination": dest_stat.destination})
                 lines.append(f'trapninja_dest_failures_total{labels} {dest_stat.failed}')
-        
+
+        lines.append("")
+        lines.append("# HELP trapninja_dest_forwards_60s Traps forwarded to destination in last 60 seconds")
+        lines.append("# TYPE trapninja_dest_forwards_60s gauge")
+        for dest_stat in dest_stats_list:
+            labels = self._format_labels({"destination": dest_stat.destination})
+            # Use the 60-second window count — this is a gauge, not a counter
+            count_60s = dest_stat._rate_tracker.get_count(60)
+            lines.append(f'trapninja_dest_forwards_60s{labels} {count_60s}')
+
         # =================================================================
         # IP+OID COMBINATION METRICS (top 100 combinations)
         # =================================================================

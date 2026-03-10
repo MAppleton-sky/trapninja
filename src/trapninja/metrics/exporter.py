@@ -227,6 +227,46 @@ def export_metrics(metrics_summary: Dict[str, Any] = None) -> bool:
         ))
 
         # =================================================================
+        # SLIDING WINDOW METRICS (last 60 seconds) — Grafana-friendly gauges
+        # =================================================================
+        #
+        # These are gauges representing trap counts over a rolling 60-second
+        # window. Unlike the _total counters above, these give instant visibility
+        # into current activity without requiring rate() calculations in Grafana.
+
+        lines.append(format_prometheus(
+            "trapninja_traps_received_60s",
+            metrics_summary["window_60s_received"],
+            global_labels=global_labels,
+            help_text="Traps received in the last 60 seconds",
+            metric_type="gauge"
+        ))
+
+        lines.append(format_prometheus(
+            "trapninja_traps_forwarded_60s",
+            metrics_summary["window_60s_forwarded"],
+            global_labels=global_labels,
+            help_text="Traps successfully forwarded in the last 60 seconds",
+            metric_type="gauge"
+        ))
+
+        lines.append(format_prometheus(
+            "trapninja_traps_dropped_60s",
+            metrics_summary["window_60s_dropped"],
+            global_labels=global_labels,
+            help_text="Traps dropped (queue full) in the last 60 seconds",
+            metric_type="gauge"
+        ))
+
+        lines.append(format_prometheus(
+            "trapninja_processing_errors_60s",
+            metrics_summary["window_60s_errors"],
+            global_labels=global_labels,
+            help_text="Processing errors in the last 60 seconds",
+            metric_type="gauge"
+        ))
+
+        # =================================================================
         # HA METRICS
         # =================================================================
         

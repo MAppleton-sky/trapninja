@@ -11,7 +11,86 @@ Version: 2.0.0
 import time
 import threading
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
+
+
+SLIDING_WINDOW_SECONDS = 60
+SLIDING_WINDOW_BUCKETS = 12
+
+
+class SlidingWindowCounter:
+    """
+    Thread-safe sliding-window event counter using fixed-width time buckets.
+
+    The 60-second window is divided into SLIDING_WINDOW_BUCKETS (12) slots of
+    bucket_width seconds each (5 s by default).  Each slot is addressed by
+    ``int(now / bucket_width) % num_buckets`` — a modular index that wraps
+    around naturally as time advances.
+
+    Rotation is *lazy*: no background thread is needed.  On every ``increment``
+    call the slot's stored timestamp is checked; if it falls outside the
+    current window the slot is silently reset before the new count is added.
+    This makes ``increment`` O(1) and keeps the lock's critical section to a
+    single conditional reset + integer add.
+
+    Thread-safety guarantee
+    -----------------------
+    All mutations of ``_buckets`` and ``_bucket_timestamps`` are serialised
+    through ``_lock``.  ``get_value`` acquires the same lock so it always
+    observes a consistent snapshot.  The index computation (``time.time()``
+    call + arithmetic) is done *outside* the lock because it is read-only and
+    the worst case — two threads landing on the same slot simultaneously — is
+    handled correctly by the in-lock timestamp comparison.
+    """
+
+    def __init__(
+        self,
+        window_seconds: int = SLIDING_WINDOW_SECONDS,
+        num_buckets: int = SLIDING_WINDOW_BUCKETS,
+    ) -> None:
+        self._num_buckets: int = num_buckets
+        self._window_seconds: float = float(window_seconds)
+        self._bucket_width: float = self._window_seconds / self._num_buckets
+        self._buckets: List[int] = [0] * self._num_buckets
+        self._bucket_timestamps: List[float] = [0.0] * self._num_buckets
+        self._lock = threading.Lock()
+
+    def increment(self, count: int = 1) -> None:
+        """
+        Record *count* events against the current time bucket.
+
+        O(1).  Lock hold time is a single comparison + two assignments + one
+        addition — typically sub-microsecond.
+
+        Args:
+            count: Number of events to add (default 1).
+        """
+        now = time.time()
+        idx = int(now / self._bucket_width) % self._num_buckets
+        with self._lock:
+            if now - self._bucket_timestamps[idx] >= self._window_seconds:
+                self._buckets[idx] = 0
+                self._bucket_timestamps[idx] = now
+            self._buckets[idx] += count
+
+    def get_value(self) -> int:
+        """
+        Return the total number of events recorded in the last 60 seconds.
+
+        Iterates all 12 buckets under lock; only includes buckets whose
+        timestamp falls within the current window.
+
+        Returns:
+            Sum of counts across all valid buckets.
+        """
+        now = time.time()
+        cutoff = now - self._window_seconds
+        total = 0
+        with self._lock:
+            for i in range(self._num_buckets):
+                if self._bucket_timestamps[i] > cutoff:
+                    total += self._buckets[i]
+        return total
 
 
 @dataclass
@@ -48,31 +127,49 @@ class ProcessingStats:
     # Timing
     _start_time: float = field(default_factory=time.time)
     _last_summary_time: float = field(default_factory=time.time)
-    
+
+    # Sliding-window counters (last 60 seconds)
+    _window_received: SlidingWindowCounter = field(
+        default_factory=lambda: SlidingWindowCounter()
+    )
+    _window_forwarded: SlidingWindowCounter = field(
+        default_factory=lambda: SlidingWindowCounter()
+    )
+    _window_dropped: SlidingWindowCounter = field(
+        default_factory=lambda: SlidingWindowCounter()
+    )
+    _window_errors: SlidingWindowCounter = field(
+        default_factory=lambda: SlidingWindowCounter()
+    )
+
     def increment_processed(self):
         """Record a processed packet."""
         self.packets_processed += 1
-    
+        self._window_received.increment()
+
     def increment_forwarded(self):
         """Record a forwarded packet."""
         self.packets_forwarded += 1
-    
+        self._window_forwarded.increment()
+
     def increment_blocked(self):
         """Record a blocked packet."""
         self.packets_blocked += 1
-    
+
     def increment_redirected(self):
         """Record a redirected packet."""
         self.packets_redirected += 1
-    
+
     def increment_dropped(self):
         """Record a dropped packet."""
         self.packets_dropped += 1
         self.queue_full_events += 1
-    
+        self._window_dropped.increment()
+
     def increment_error(self):
         """Record a processing error."""
         self.processing_errors += 1
+        self._window_errors.increment()
     
     def increment_ha_blocked(self):
         """Record a packet blocked by HA (secondary mode)."""
@@ -116,7 +213,27 @@ class ProcessingStats:
         if elapsed <= 0:
             return 0.0
         return self.packets_processed / elapsed
-    
+
+    @property
+    def received_last_60s(self) -> int:
+        """Count of traps received in the last 60 seconds."""
+        return self._window_received.get_value()
+
+    @property
+    def forwarded_last_60s(self) -> int:
+        """Count of traps forwarded in the last 60 seconds."""
+        return self._window_forwarded.get_value()
+
+    @property
+    def dropped_last_60s(self) -> int:
+        """Count of traps dropped in the last 60 seconds."""
+        return self._window_dropped.get_value()
+
+    @property
+    def errors_last_60s(self) -> int:
+        """Count of processing errors in the last 60 seconds."""
+        return self._window_errors.get_value()
+
     def should_log_summary(self, interval: float = 30.0) -> bool:
         """
         Check if it's time to log a summary.
@@ -150,6 +267,12 @@ class ProcessingStats:
             'max_queue_depth': self.max_queue_depth,
             'uptime_seconds': round(self.uptime, 1),
             'processing_rate': round(self.processing_rate, 1),
+            'window_60s': {
+                'received':  self.received_last_60s,
+                'forwarded': self.forwarded_last_60s,
+                'dropped':   self.dropped_last_60s,
+                'errors':    self.errors_last_60s,
+            },
         }
     
     def reset(self):
@@ -167,6 +290,10 @@ class ProcessingStats:
         self.max_queue_depth = 0
         self._start_time = time.time()
         self._last_summary_time = time.time()
+        self._window_received  = SlidingWindowCounter()
+        self._window_forwarded = SlidingWindowCounter()
+        self._window_dropped   = SlidingWindowCounter()
+        self._window_errors    = SlidingWindowCounter()
 
 
 # Global statistics instance
@@ -202,44 +329,52 @@ def reset_global_stats():
 class StatsCollector:
     """
     Thread-local statistics collector.
-    
+
     Collects stats locally and periodically flushes to global.
     Reduces contention on global counters.
+
+    Window counters bypass the local buffer to preserve accurate event timing
+    for the 60-second sliding window.  All other counters are batched and
+    flushed to the global instance every flush_interval operations.
     """
-    
+
     def __init__(self, flush_interval: int = 1000):
         """
         Initialize collector.
-        
+
         Args:
             flush_interval: Flush after this many operations
         """
         self._local = ProcessingStats()
         self._flush_interval = flush_interval
         self._ops_since_flush = 0
-    
+
     def increment_processed(self):
         self._local.increment_processed()
+        get_global_stats()._window_received.increment()
         self._maybe_flush()
-    
+
     def increment_forwarded(self):
         self._local.increment_forwarded()
+        get_global_stats()._window_forwarded.increment()
         self._maybe_flush()
-    
+
     def increment_blocked(self):
         self._local.increment_blocked()
         self._maybe_flush()
-    
+
     def increment_redirected(self):
         self._local.increment_redirected()
         self._maybe_flush()
-    
+
     def increment_dropped(self):
         self._local.increment_dropped()
+        get_global_stats()._window_dropped.increment()
         self._maybe_flush()
-    
+
     def increment_error(self):
         self._local.increment_error()
+        get_global_stats()._window_errors.increment()
         self._maybe_flush()
     
     def increment_ha_blocked(self):

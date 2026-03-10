@@ -330,17 +330,19 @@ def get_metrics_summary() -> Dict[str, Any]:
     config = get_current_config()
     
     # Build summary from processor stats
+    window_60s = processor_stats.get('window_60s', {})
+
     summary = {
         "timestamp": datetime.now().isoformat(),
         "uptime_seconds": round(uptime, 1),
         "interval_seconds": config.export_interval_seconds,
-        
+
         # Configuration info (for reference)
         "metrics_config": {
             "directory": config.directory,
             "global_labels": config.global_labels,
         },
-        
+
         # Core trap processing metrics (from packet processor)
         "total_traps_received": processor_stats.get('processed', 0),
         "total_traps_forwarded": processor_stats.get('forwarded', 0),
@@ -348,7 +350,13 @@ def get_metrics_summary() -> Dict[str, Any]:
         "total_traps_redirected": processor_stats.get('redirected', 0),
         "total_traps_dropped": processor_stats.get('dropped', 0),
         "processing_errors": processor_stats.get('errors', 0),
-        
+
+        # Sliding 60-second window counts
+        "window_60s_received":  window_60s.get('received',  0),
+        "window_60s_forwarded": window_60s.get('forwarded', 0),
+        "window_60s_dropped":   window_60s.get('dropped',   0),
+        "window_60s_errors":    window_60s.get('errors',    0),
+
         # HA-specific metrics
         "ha_blocked": processor_stats.get('ha_blocked', 0),
         
