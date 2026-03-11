@@ -638,11 +638,12 @@ class GranularStatsCollector:
             labels = self._format_labels({"ip": ip_stat.ip_address})
             lines.append(f'trapninja_ip_traps_total{labels} {ip_stat.total_traps}')
 
-        lines.append("")
-        lines.append("# HELP trapninja_ip_blocked_total Total traps blocked from source IP")
-        lines.append("# TYPE trapninja_ip_blocked_total counter")
-        for ip_stat in top_ips:
-            if ip_stat.blocked > 0:
+        blocked_ips = [s for s in top_ips if s.blocked > 0]
+        if blocked_ips:
+            lines.append("")
+            lines.append("# HELP trapninja_ip_blocked_total Total traps blocked from source IP")
+            lines.append("# TYPE trapninja_ip_blocked_total counter")
+            for ip_stat in blocked_ips:
                 labels = self._format_labels({"ip": ip_stat.ip_address})
                 lines.append(f'trapninja_ip_blocked_total{labels} {ip_stat.blocked}')
 
@@ -650,12 +651,14 @@ class GranularStatsCollector:
         # and can detect bursts that occur between Prometheus scrape intervals.
         # Once a source goes silent, Prometheus counters stop changing and
         # rate() returns 0 — the historical peak is lost. This gauge preserves it.
-        lines.append("")
-        lines.append("# HELP trapninja_ip_peak_rate_per_minute Highest trap rate ever observed from source IP")
-        lines.append("# TYPE trapninja_ip_peak_rate_per_minute gauge")
-        for ip_stat in sorted(ip_stats_list,
-                              key=lambda x: x.peak_rate_per_minute, reverse=True)[:50]:
-            if ip_stat.peak_rate_per_minute > 0:
+        peak_ips = [s for s in sorted(ip_stats_list,
+                    key=lambda x: x.peak_rate_per_minute, reverse=True)[:50]
+                    if s.peak_rate_per_minute > 0]
+        if peak_ips:
+            lines.append("")
+            lines.append("# HELP trapninja_ip_peak_rate_per_minute Highest trap rate ever observed from source IP")
+            lines.append("# TYPE trapninja_ip_peak_rate_per_minute gauge")
+            for ip_stat in peak_ips:
                 labels = self._format_labels({"ip": ip_stat.ip_address})
                 lines.append(f'trapninja_ip_peak_rate_per_minute{labels} {ip_stat.peak_rate_per_minute:.2f}')
 
@@ -671,11 +674,12 @@ class GranularStatsCollector:
             labels = self._format_labels({"oid": oid_stat.oid})
             lines.append(f'trapninja_oid_traps_total{labels} {oid_stat.total_traps}')
 
-        lines.append("")
-        lines.append("# HELP trapninja_oid_blocked_total Total traps blocked with this OID")
-        lines.append("# TYPE trapninja_oid_blocked_total counter")
-        for oid_stat in top_oids:
-            if oid_stat.blocked > 0:
+        blocked_oids = [s for s in top_oids if s.blocked > 0]
+        if blocked_oids:
+            lines.append("")
+            lines.append("# HELP trapninja_oid_blocked_total Total traps blocked with this OID")
+            lines.append("# TYPE trapninja_oid_blocked_total counter")
+            for oid_stat in blocked_oids:
                 labels = self._format_labels({"oid": oid_stat.oid})
                 lines.append(f'trapninja_oid_blocked_total{labels} {oid_stat.blocked}')
 
@@ -690,12 +694,14 @@ class GranularStatsCollector:
             lines.append(f'trapninja_oid_unique_sources{labels} {len(oid_stat.ip_counts)}')
 
         # Peak rate kept for the same reason as per-IP peak rate above.
-        lines.append("")
-        lines.append("# HELP trapninja_oid_peak_rate_per_minute Highest trap rate ever observed for this OID")
-        lines.append("# TYPE trapninja_oid_peak_rate_per_minute gauge")
-        for oid_stat in sorted(oid_stats_list,
-                               key=lambda x: x.peak_rate_per_minute, reverse=True)[:50]:
-            if oid_stat.peak_rate_per_minute > 0:
+        peak_oids = [s for s in sorted(oid_stats_list,
+                     key=lambda x: x.peak_rate_per_minute, reverse=True)[:50]
+                     if s.peak_rate_per_minute > 0]
+        if peak_oids:
+            lines.append("")
+            lines.append("# HELP trapninja_oid_peak_rate_per_minute Highest trap rate ever observed for this OID")
+            lines.append("# TYPE trapninja_oid_peak_rate_per_minute gauge")
+            for oid_stat in peak_oids:
                 labels = self._format_labels({"oid": oid_stat.oid})
                 lines.append(f'trapninja_oid_peak_rate_per_minute{labels} {oid_stat.peak_rate_per_minute:.2f}')
 
@@ -709,11 +715,12 @@ class GranularStatsCollector:
             labels = self._format_labels({"destination": dest_stat.destination})
             lines.append(f'trapninja_dest_forwards_total{labels} {dest_stat.total_forwarded}')
 
-        lines.append("")
-        lines.append("# HELP trapninja_dest_failures_total Total failed forwards to destination")
-        lines.append("# TYPE trapninja_dest_failures_total counter")
-        for dest_stat in dest_stats_list:
-            if dest_stat.failed > 0:
+        failed_dests = [s for s in dest_stats_list if s.failed > 0]
+        if failed_dests:
+            lines.append("")
+            lines.append("# HELP trapninja_dest_failures_total Total failed forwards to destination")
+            lines.append("# TYPE trapninja_dest_failures_total counter")
+            for dest_stat in failed_dests:
                 labels = self._format_labels({"destination": dest_stat.destination})
                 lines.append(f'trapninja_dest_failures_total{labels} {dest_stat.failed}')
 

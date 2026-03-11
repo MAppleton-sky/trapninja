@@ -357,7 +357,15 @@ class TestCollectorExport:
     """Tests for collector export methods."""
 
     def test_export_prometheus_contains_required_counters(self):
-        """export_prometheus emits all required counter metrics."""
+        """
+        export_prometheus emits all required counter and gauge metrics.
+
+        Peak-rate gauges (trapninja_ip_peak_rate_per_minute,
+        trapninja_oid_peak_rate_per_minute) are conditional: they are only
+        emitted when a non-zero peak has been recorded.  RateTracker only
+        updates its peak every 5 seconds, so we inject a manual peak via
+        _rate_tracker._peak_rate rather than relying on wall-clock timing.
+        """
         from trapninja.stats.collector import GranularStatsCollector
 
         collector = GranularStatsCollector()
@@ -365,6 +373,14 @@ class TestCollectorExport:
                               action="forwarded", destination="default")
         collector.record_trap(source_ip="10.0.0.2", oid="1.3.6.1.4.1.9.1",
                               action="blocked")
+
+        # Seed a non-zero peak so the conditional peak-rate metric families
+        # are included in this export.  This avoids a wall-clock dependency
+        # on RateTracker's 5-second check interval.
+        for ip_stat in collector._ip_stats.values():
+            ip_stat._rate_tracker._peak_rate = 10
+        for oid_stat in collector._oid_stats.values():
+            oid_stat._rate_tracker._peak_rate = 10
 
         result = collector.export_prometheus()
 
@@ -383,7 +399,7 @@ class TestCollectorExport:
         assert "trapninja_ip_traps_total" in result
         assert "trapninja_ip_blocked_total" in result
 
-        # Per-IP peak gauge (must NOT be a rate-per-minute current gauge)
+        # Per-IP peak gauge — present because we seeded a non-zero peak above
         assert "trapninja_ip_peak_rate_per_minute" in result
 
         # Per-OID counters
