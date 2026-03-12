@@ -512,8 +512,12 @@ def export_metrics(metrics_summary: Dict[str, Any] = None) -> bool:
         temp_path = f"{prom_path}.tmp"
         
         with open(temp_path, 'w') as f:
+            # Prometheus textfile format requires the file to end with a
+            # blank line (two consecutive newlines after the last sample).
+            # A single trailing \n only terminates the last line; node_exporter
+            # requires \n\n to correctly close the final metric family.
             f.write("\n".join(lines))
-            f.write("\n")  # Trailing newline required for node_exporter
+            f.write("\n\n")
         
         os.rename(temp_path, prom_path)
         logger.debug(f"Metrics exported to {prom_path}")

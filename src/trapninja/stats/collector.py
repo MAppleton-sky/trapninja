@@ -838,8 +838,11 @@ class GranularStatsCollector:
 
             content = self.export_prometheus()
 
-            # Ensure exactly one trailing newline
-            content = content.rstrip('\n') + '\n'
+            # Prometheus textfile format requires the file to end with a
+            # blank line (two consecutive newlines after the last sample).
+            # A single trailing \n only terminates the last line; node_exporter
+            # requires \n\n to correctly close the final metric family.
+            content = content.rstrip('\n') + '\n\n'
 
             with open(prom_path, 'w') as f:
                 f.write(content)
