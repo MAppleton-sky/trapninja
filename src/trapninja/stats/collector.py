@@ -557,7 +557,7 @@ class GranularStatsCollector:
                       uptime.
 
         What is NOT exported (use Grafana queries instead):
-          trapninja_ip_rate_per_minute   → rate(trapninja_ip_traps_total[1m]) * 60
+          trapninja_ip_rate_per_minute   → rate(trapninja_src_ip_traps_total[1m]) * 60
           trapninja_oid_rate_per_minute  → rate(trapninja_oid_traps_total[1m]) * 60
           trapninja_dest_forwards_60s    → increase(trapninja_dest_forwards_total[60s])
 
@@ -632,20 +632,20 @@ class GranularStatsCollector:
         top_ips = sorted(ip_stats_list, key=lambda x: x.total_traps, reverse=True)[:50]
 
         lines.append("")
-        lines.append("# HELP trapninja_ip_traps_total Total traps received from source IP")
-        lines.append("# TYPE trapninja_ip_traps_total counter")
+        lines.append("# HELP trapninja_src_ip_traps_total Total traps received from source IP")
+        lines.append("# TYPE trapninja_src_ip_traps_total counter")
         for ip_stat in top_ips:
             labels = self._format_labels({"ip": ip_stat.ip_address})
-            lines.append(f'trapninja_ip_traps_total{labels} {ip_stat.total_traps}')
+            lines.append(f'trapninja_src_ip_traps_total{labels} {ip_stat.total_traps}')
 
         blocked_ips = [s for s in top_ips if s.blocked > 0]
         if blocked_ips:
             lines.append("")
-            lines.append("# HELP trapninja_ip_blocked_total Total traps blocked from source IP")
-            lines.append("# TYPE trapninja_ip_blocked_total counter")
+            lines.append("# HELP trapninja_src_ip_blocked_total Total traps blocked from source IP")
+            lines.append("# TYPE trapninja_src_ip_blocked_total counter")
             for ip_stat in blocked_ips:
                 labels = self._format_labels({"ip": ip_stat.ip_address})
-                lines.append(f'trapninja_ip_blocked_total{labels} {ip_stat.blocked}')
+                lines.append(f'trapninja_src_ip_blocked_total{labels} {ip_stat.blocked}')
 
         # Peak rate is kept as a gauge: TrapNinja observes every individual trap
         # and can detect bursts that occur between Prometheus scrape intervals.
@@ -656,11 +656,11 @@ class GranularStatsCollector:
                     if s.peak_rate_per_minute > 0]
         if peak_ips:
             lines.append("")
-            lines.append("# HELP trapninja_ip_peak_rate_per_minute Highest trap rate ever observed from source IP")
-            lines.append("# TYPE trapninja_ip_peak_rate_per_minute gauge")
+            lines.append("# HELP trapninja_src_ip_peak_rate_per_minute Highest trap rate ever observed from source IP")
+            lines.append("# TYPE trapninja_src_ip_peak_rate_per_minute gauge")
             for ip_stat in peak_ips:
                 labels = self._format_labels({"ip": ip_stat.ip_address})
-                lines.append(f'trapninja_ip_peak_rate_per_minute{labels} {ip_stat.peak_rate_per_minute:.2f}')
+                lines.append(f'trapninja_src_ip_peak_rate_per_minute{labels} {ip_stat.peak_rate_per_minute:.2f}')
 
         # =================================================================
         # PER-OID METRICS (top 50 by total volume)
@@ -739,11 +739,11 @@ class GranularStatsCollector:
 
         if top_combinations:
             lines.append("")
-            lines.append("# HELP trapninja_ip_oid_traps_total Total traps from a specific source IP with a specific OID")
-            lines.append("# TYPE trapninja_ip_oid_traps_total counter")
+            lines.append("# HELP trapninja_src_ip_oid_traps_total Total traps from a specific source IP with a specific OID")
+            lines.append("# TYPE trapninja_src_ip_oid_traps_total counter")
             for ip, oid, count in top_combinations:
                 labels = self._format_labels({"ip": ip, "oid": oid})
-                lines.append(f'trapninja_ip_oid_traps_total{labels} {count}')
+                lines.append(f'trapninja_src_ip_oid_traps_total{labels} {count}')
 
         return "\n".join(lines)
     

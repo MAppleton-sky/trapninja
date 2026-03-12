@@ -396,11 +396,11 @@ class TestCollectorExport:
         assert "trapninja_uptime_seconds" in result
 
         # Per-IP counters
-        assert "trapninja_ip_traps_total" in result
-        assert "trapninja_ip_blocked_total" in result
+        assert "trapninja_src_ip_traps_total" in result
+        assert "trapninja_src_ip_blocked_total" in result
 
         # Per-IP peak gauge — present because we seeded a non-zero peak above
-        assert "trapninja_ip_peak_rate_per_minute" in result
+        assert "trapninja_src_ip_peak_rate_per_minute" in result
 
         # Per-OID counters
         assert "trapninja_oid_traps_total" in result
@@ -414,7 +414,7 @@ class TestCollectorExport:
         assert "trapninja_dest_forwards_total" in result
 
         # IP+OID combination counter
-        assert "trapninja_ip_oid_traps_total" in result
+        assert "trapninja_src_ip_oid_traps_total" in result
 
         # Prometheus formatting
         assert "# HELP" in result
@@ -425,7 +425,7 @@ class TestCollectorExport:
         Metrics derivable by Grafana must NOT appear in the Prometheus export.
 
         These were removed because Grafana calculates them natively:
-          trapninja_ip_rate_per_minute   -> rate(trapninja_ip_traps_total[1m]) * 60
+          trapninja_ip_rate_per_minute   -> rate(trapninja_src_ip_traps_total[1m]) * 60
           trapninja_oid_rate_per_minute  -> rate(trapninja_oid_traps_total[1m]) * 60
           trapninja_dest_forwards_60s    -> increase(trapninja_dest_forwards_total[60s])
         """
@@ -463,8 +463,8 @@ class TestCollectorExport:
 
         assert 'oid="1.3.6.1.4.1.9.1"' in result
 
-    def test_export_prometheus_blocked_ip_appears_in_ip_blocked_total(self):
-        """trapninja_ip_blocked_total only appears for IPs that have blocked traps."""
+    def test_export_prometheus_blocked_ip_appears_in_src_ip_blocked_total(self):
+        """trapninja_src_ip_blocked_total only appears for IPs that have blocked traps."""
         from trapninja.stats.collector import GranularStatsCollector
 
         collector = GranularStatsCollector()
@@ -473,9 +473,9 @@ class TestCollectorExport:
 
         result = collector.export_prometheus()
 
-        # Only the blocked IP should appear under ip_blocked_total
-        assert 'trapninja_ip_blocked_total{ip="10.0.0.2"}' in result
-        assert 'trapninja_ip_blocked_total{ip="10.0.0.1"}' not in result
+        # Only the blocked IP should appear under src_ip_blocked_total
+        assert 'trapninja_src_ip_blocked_total{ip="10.0.0.2"}' in result
+        assert 'trapninja_src_ip_blocked_total{ip="10.0.0.1"}' not in result
 
     def test_export_prometheus_blocked_oid_appears_in_oid_blocked_total(self):
         """trapninja_oid_blocked_total only appears for OIDs with blocked traps."""
@@ -505,7 +505,7 @@ class TestCollectorExport:
         assert 'trapninja_dest_failures_total{destination="healthy"}' not in result
 
     def test_export_prometheus_ip_oid_combination_present(self):
-        """trapninja_ip_oid_traps_total emitted for IP+OID combinations."""
+        """trapninja_src_ip_oid_traps_total emitted for IP+OID combinations."""
         from trapninja.stats.collector import GranularStatsCollector
 
         collector = GranularStatsCollector()
@@ -513,7 +513,7 @@ class TestCollectorExport:
 
         result = collector.export_prometheus()
 
-        assert 'trapninja_ip_oid_traps_total{ip="10.0.0.1",oid="1.3.6.1.4.1.9.1"}' in result
+        assert 'trapninja_src_ip_oid_traps_total{ip="10.0.0.1",oid="1.3.6.1.4.1.9.1"}' in result
 
     def test_export_prometheus_with_global_labels(self):
         """Global labels are applied to all metrics."""
