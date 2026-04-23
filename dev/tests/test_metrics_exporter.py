@@ -13,6 +13,87 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 
+class TestEmitCounter:
+    """Tests for _emit_counter helper function."""
+
+    def test_includes_help_and_type(self):
+        """Test _emit_counter emits HELP/TYPE comments."""
+        from trapninja.metrics.exporter import _emit_counter
+
+        result = _emit_counter(
+            "trapninja_traps_received_total",
+            100,
+            1718000000.123,
+            help_text="Total traps received",
+        )
+
+        assert "# HELP trapninja_traps_received_total Total traps received" in result
+        assert "# TYPE trapninja_traps_received_total counter" in result
+
+    def test_emits_value_line(self):
+        """Test _emit_counter emits the value line."""
+        from trapninja.metrics.exporter import _emit_counter
+
+        result = _emit_counter("my_counter_total", 42, 1718000000.0)
+
+        assert "my_counter_total 42" in result
+
+    def test_emits_created_line(self):
+        """Test _emit_counter emits a _created line with the given timestamp."""
+        from trapninja.metrics.exporter import _emit_counter
+
+        result = _emit_counter("my_counter_total", 42, 1718000000.123)
+
+        assert "my_counter_total_created 1718000000.123" in result
+
+    def test_created_timestamp_format(self):
+        """Test _created timestamp is formatted to 3 decimal places."""
+        from trapninja.metrics.exporter import _emit_counter
+
+        result = _emit_counter("my_counter_total", 0, 1700000000.0)
+
+        assert "my_counter_total_created 1700000000.000" in result
+
+    def test_with_global_labels(self):
+        """Test labels are applied to both value and _created lines."""
+        from trapninja.metrics.exporter import _emit_counter
+
+        result = _emit_counter(
+            "my_counter_total",
+            10,
+            1718000000.0,
+            global_labels={"env": "prod"},
+        )
+
+        assert 'my_counter_total{env="prod"} 10' in result
+        assert 'my_counter_total_created{env="prod"} 1718000000.000' in result
+
+    def test_created_line_has_no_help_or_type(self):
+        """Test _created line is not preceded by its own HELP/TYPE."""
+        from trapninja.metrics.exporter import _emit_counter
+
+        result = _emit_counter(
+            "my_counter_total",
+            5,
+            1718000000.0,
+            help_text="A counter",
+        )
+
+        lines = result.split("\n")
+        created_idx = next(i for i, l in enumerate(lines) if "_created" in l)
+        # The line immediately before _created must be the value line, not a comment
+        assert not lines[created_idx - 1].startswith("#")
+
+    def test_returns_single_string(self):
+        """Test _emit_counter returns a single joined string."""
+        from trapninja.metrics.exporter import _emit_counter
+
+        result = _emit_counter("c_total", 1, 1718000000.0, help_text="x")
+
+        assert isinstance(result, str)
+        assert "\n" in result
+
+
 class TestFormatPrometheus:
     """Tests for format_prometheus function."""
 
@@ -255,17 +336,18 @@ class TestExportMetrics:
         assert (tmp_path / config.prometheus_file).exists()
 
     def test_export_prometheus_format(self, tmp_path):
-        """Test exported file is in Prometheus format."""
+        """Test exported file is in Prometheus format with _created lines for counters."""
         from trapninja.metrics.exporter import export_metrics
         from trapninja.metrics.config import MetricsConfig
-        
+
         config = MetricsConfig(directory=str(tmp_path))
-        
+
         with patch('trapninja.metrics.collector.get_current_config', return_value=config):
             with patch('trapninja.metrics.collector.get_metrics_summary') as mock_summary:
                 mock_summary.return_value = {
                     'timestamp': '2024-01-01T00:00:00',
                     'uptime_seconds': 100,
+                    'metrics_start_time': 1718000000.0,
                     'total_traps_received': 1000,
                     'total_traps_forwarded': 900,
                     'total_traps_blocked': 50,
@@ -291,13 +373,19 @@ class TestExportMetrics:
                     'redirected_ips': {},
                     'redirected_oids': {},
                 }
-                
+
                 export_metrics()
-        
+
         content = (tmp_path / config.prometheus_file).read_text()
         assert "trapninja_traps_received_total" in content
         assert "# HELP" in content
         assert "# TYPE" in content
+        # Every counter must have a _created companion line
+        assert "trapninja_traps_received_total_created" in content
+        assert "trapninja_traps_forwarded_total_created" in content
+        assert "trapninja_traps_dropped_total_created" in content
+        # processing_rate is a lifetime average and must not appear in .prom output
+        assert "trapninja_processing_rate" not in content
 
     def test_export_includes_global_labels(self, tmp_path):
         """Test global labels are included in export."""
@@ -454,14 +542,15 @@ class TestPrometheusMetricNames:
     """Tests for correct Prometheus metric names in export."""
 
     def test_contains_traps_received(self, tmp_path):
-        """Test export contains traps received metric."""
+        """Test export contains all required metrics including _created lines."""
         from trapninja.metrics.exporter import export_metrics
         from trapninja.metrics.config import MetricsConfig
-        
+
         config = MetricsConfig(directory=str(tmp_path))
         mock_summary = {
             'timestamp': '2024-01-01T00:00:00',
             'uptime_seconds': 100,
+            'metrics_start_time': 1718000000.0,
             'total_traps_received': 1000,
             'total_traps_forwarded': 900,
             'total_traps_blocked': 50,
@@ -487,27 +576,47 @@ class TestPrometheusMetricNames:
             'redirected_ips': {},
             'redirected_oids': {},
         }
-        
+
         with patch('trapninja.metrics.collector.get_current_config', return_value=config):
             with patch('trapninja.metrics.collector.get_metrics_summary', return_value=mock_summary):
                 export_metrics()
-        
+
         content = (tmp_path / config.prometheus_file).read_text()
-        
+
         # Core metrics
         assert "trapninja_traps_received_total" in content
         assert "trapninja_traps_forwarded_total" in content
         assert "trapninja_traps_blocked_total" in content
         assert "trapninja_traps_redirected_total" in content
         assert "trapninja_traps_dropped_total" in content
-        
+
         # Performance metrics
         assert "trapninja_fast_path_hits_total" in content
         assert "trapninja_slow_path_hits_total" in content
-        
+
         # Queue metrics
         assert "trapninja_queue_depth" in content
         assert "trapninja_queue_capacity" in content
+
+        # Every counter must have a _created companion for Prometheus reset detection
+        assert "trapninja_traps_received_total_created" in content
+        assert "trapninja_traps_forwarded_total_created" in content
+        assert "trapninja_traps_blocked_total_created" in content
+        assert "trapninja_traps_redirected_total_created" in content
+        assert "trapninja_traps_dropped_total_created" in content
+        assert "trapninja_processing_errors_total_created" in content
+        assert "trapninja_ha_blocked_total_created" in content
+        assert "trapninja_traps_cached_total_created" in content
+        assert "trapninja_cache_failures_total_created" in content
+        assert "trapninja_fast_path_hits_total_created" in content
+        assert "trapninja_slow_path_hits_total_created" in content
+        assert "trapninja_queue_full_events_total_created" in content
+
+        # _created timestamp value must be the one from metrics_start_time
+        assert "1718000000.000" in content
+
+        # processing_rate is a lifetime average — must not appear in .prom output
+        assert "trapninja_processing_rate" not in content
 
 
 class TestPrometheusFormatCompliance:

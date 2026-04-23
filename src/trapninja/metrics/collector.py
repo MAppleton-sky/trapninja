@@ -335,6 +335,7 @@ def get_metrics_summary() -> Dict[str, Any]:
     summary = {
         "timestamp": datetime.now().isoformat(),
         "uptime_seconds": round(uptime, 1),
+        "metrics_start_time": _start_time,
         "interval_seconds": config.export_interval_seconds,
 
         # Configuration info (for reference)
