@@ -568,6 +568,7 @@ class GranularStatsCollector:
         """
         now = time.time()
         uptime = now - self._start_time
+        created_ts = self._start_time
 
         # Snapshot all stats under lock to avoid mutation during iteration
         with self._lock:
@@ -595,21 +596,25 @@ class GranularStatsCollector:
         lines.append("# HELP trapninja_traps_total Total traps received")
         lines.append("# TYPE trapninja_traps_total counter")
         lines.append(f"trapninja_traps_total{global_labels} {self._total_traps}")
+        lines.append(f"trapninja_traps_total_created{global_labels} {created_ts:.3f}")
 
         lines.append("")
         lines.append("# HELP trapninja_traps_forwarded_total Total traps forwarded")
         lines.append("# TYPE trapninja_traps_forwarded_total counter")
         lines.append(f"trapninja_traps_forwarded_total{global_labels} {self._total_forwarded}")
+        lines.append(f"trapninja_traps_forwarded_total_created{global_labels} {created_ts:.3f}")
 
         lines.append("")
         lines.append("# HELP trapninja_traps_blocked_total Total traps blocked")
         lines.append("# TYPE trapninja_traps_blocked_total counter")
         lines.append(f"trapninja_traps_blocked_total{global_labels} {self._total_blocked}")
+        lines.append(f"trapninja_traps_blocked_total_created{global_labels} {created_ts:.3f}")
 
         lines.append("")
         lines.append("# HELP trapninja_traps_redirected_total Total traps redirected")
         lines.append("# TYPE trapninja_traps_redirected_total counter")
         lines.append(f"trapninja_traps_redirected_total{global_labels} {self._total_redirected}")
+        lines.append(f"trapninja_traps_redirected_total_created{global_labels} {created_ts:.3f}")
 
         lines.append("")
         lines.append("# HELP trapninja_unique_sources Number of unique source IPs seen since start")
@@ -637,6 +642,7 @@ class GranularStatsCollector:
         for ip_stat in top_ips:
             labels = self._format_labels({"ip": ip_stat.ip_address})
             lines.append(f'trapninja_src_ip_traps_total{labels} {ip_stat.total_traps}')
+            lines.append(f'trapninja_src_ip_traps_total_created{labels} {created_ts:.3f}')
 
         blocked_ips = [s for s in top_ips if s.blocked > 0]
         if blocked_ips:
@@ -646,6 +652,7 @@ class GranularStatsCollector:
             for ip_stat in blocked_ips:
                 labels = self._format_labels({"ip": ip_stat.ip_address})
                 lines.append(f'trapninja_src_ip_blocked_total{labels} {ip_stat.blocked}')
+                lines.append(f'trapninja_src_ip_blocked_total_created{labels} {created_ts:.3f}')
 
         # Peak rate is kept as a gauge: TrapNinja observes every individual trap
         # and can detect bursts that occur between Prometheus scrape intervals.
@@ -673,6 +680,7 @@ class GranularStatsCollector:
         for oid_stat in top_oids:
             labels = self._format_labels({"oid": oid_stat.oid})
             lines.append(f'trapninja_oid_traps_total{labels} {oid_stat.total_traps}')
+            lines.append(f'trapninja_oid_traps_total_created{labels} {created_ts:.3f}')
 
         blocked_oids = [s for s in top_oids if s.blocked > 0]
         if blocked_oids:
@@ -682,6 +690,7 @@ class GranularStatsCollector:
             for oid_stat in blocked_oids:
                 labels = self._format_labels({"oid": oid_stat.oid})
                 lines.append(f'trapninja_oid_blocked_total{labels} {oid_stat.blocked}')
+                lines.append(f'trapninja_oid_blocked_total_created{labels} {created_ts:.3f}')
 
         # unique_sources is a gauge: it counts distinct source IPs per OID and
         # cannot be derived from any counter. It distinguishes a widespread
@@ -714,6 +723,7 @@ class GranularStatsCollector:
         for dest_stat in dest_stats_list:
             labels = self._format_labels({"destination": dest_stat.destination})
             lines.append(f'trapninja_dest_forwards_total{labels} {dest_stat.total_forwarded}')
+            lines.append(f'trapninja_dest_forwards_total_created{labels} {created_ts:.3f}')
 
         failed_dests = [s for s in dest_stats_list if s.failed > 0]
         if failed_dests:
@@ -723,6 +733,7 @@ class GranularStatsCollector:
             for dest_stat in failed_dests:
                 labels = self._format_labels({"destination": dest_stat.destination})
                 lines.append(f'trapninja_dest_failures_total{labels} {dest_stat.failed}')
+                lines.append(f'trapninja_dest_failures_total_created{labels} {created_ts:.3f}')
 
         # =================================================================
         # IP+OID COMBINATION COUNTERS (top 100 by volume)
@@ -744,6 +755,7 @@ class GranularStatsCollector:
             for ip, oid, count in top_combinations:
                 labels = self._format_labels({"ip": ip, "oid": oid})
                 lines.append(f'trapninja_src_ip_oid_traps_total{labels} {count}')
+                lines.append(f'trapninja_src_ip_oid_traps_total_created{labels} {created_ts:.3f}')
 
         return "\n".join(lines)
     

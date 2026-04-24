@@ -546,6 +546,78 @@ class TestCollectorExport:
         assert "trapninja_traps_forwarded_total 3" in result
         assert "trapninja_traps_blocked_total 2" in result
 
+    def test_export_prometheus_created_timestamps_on_counters(self):
+        """
+        Every counter metric must have a _created line immediately after its
+        value line. Gauge metrics must NOT have _created lines.
+        """
+        from trapninja.stats.collector import GranularStatsCollector
+
+        collector = GranularStatsCollector()
+        collector.record_trap(source_ip="10.0.0.1", oid="1.3.6.1.4.1.9.1",
+                              action="forwarded", destination="default")
+        collector.record_trap(source_ip="10.0.0.2", oid="1.3.6.1.4.1.9.1",
+                              action="blocked")
+        collector.record_forward_failure(destination="broken", source_ip="10.0.0.1")
+
+        result = collector.export_prometheus()
+        lines = result.splitlines()
+
+        def assert_created_follows_counter(metric_name: str):
+            """Verify every sample line for metric_name is followed by _created."""
+            for i, line in enumerate(lines):
+                if line.startswith(metric_name + "{") or line == metric_name + " ":
+                    # The very next line must be the _created companion
+                    assert i + 1 < len(lines), (
+                        f"No line after {metric_name} sample"
+                    )
+                    next_line = lines[i + 1]
+                    assert next_line.startswith(metric_name + "_created"), (
+                        f"Expected {metric_name}_created after '{line}', "
+                        f"got '{next_line}'"
+                    )
+
+        # Global counters
+        assert_created_follows_counter("trapninja_traps_total")
+        assert_created_follows_counter("trapninja_traps_forwarded_total")
+        assert_created_follows_counter("trapninja_traps_blocked_total")
+        assert_created_follows_counter("trapninja_traps_redirected_total")
+
+        # Per-IP counters
+        assert_created_follows_counter("trapninja_src_ip_traps_total")
+        assert_created_follows_counter("trapninja_src_ip_blocked_total")
+
+        # Per-OID counters
+        assert_created_follows_counter("trapninja_oid_traps_total")
+        assert_created_follows_counter("trapninja_oid_blocked_total")
+
+        # Per-destination counters
+        assert_created_follows_counter("trapninja_dest_forwards_total")
+        assert_created_follows_counter("trapninja_dest_failures_total")
+
+        # IP+OID combination counter
+        assert_created_follows_counter("trapninja_src_ip_oid_traps_total")
+
+        # Gauges must NOT have _created lines
+        assert "trapninja_uptime_seconds_created" not in result
+        assert "trapninja_unique_sources_created" not in result
+        assert "trapninja_unique_oids_created" not in result
+        assert "trapninja_src_ip_peak_rate_per_minute_created" not in result
+        assert "trapninja_oid_unique_sources_created" not in result
+        assert "trapninja_oid_peak_rate_per_minute_created" not in result
+
+    def test_export_prometheus_created_value_equals_start_time(self):
+        """_created timestamp must equal _start_time, not time.time()."""
+        from trapninja.stats.collector import GranularStatsCollector
+
+        collector = GranularStatsCollector()
+        collector.record_trap(source_ip="10.0.0.1")
+
+        result = collector.export_prometheus()
+
+        expected_ts = f"{collector._start_time:.3f}"
+        assert f"trapninja_traps_total_created {expected_ts}" in result
+
     def test_export_json(self):
         """Test export_json method."""
         from trapninja.stats.collector import GranularStatsCollector
