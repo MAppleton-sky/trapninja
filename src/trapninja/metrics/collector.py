@@ -345,12 +345,13 @@ def get_metrics_summary() -> Dict[str, Any]:
         },
 
         # Core trap processing metrics (from packet processor)
-        "total_traps_received": processor_stats.get('processed', 0),
-        "total_traps_forwarded": processor_stats.get('forwarded', 0),
-        "total_traps_blocked": processor_stats.get('blocked', 0),
-        "total_traps_redirected": processor_stats.get('redirected', 0),
-        "total_traps_dropped": processor_stats.get('dropped', 0),
-        "processing_errors": processor_stats.get('errors', 0),
+        # Keys match ProcessingStats.to_dict() output exactly.
+        "total_traps_received": processor_stats.get('packets_processed', 0),
+        "total_traps_forwarded": processor_stats.get('packets_forwarded', 0),
+        "total_traps_blocked": processor_stats.get('packets_blocked', 0),
+        "total_traps_redirected": processor_stats.get('packets_redirected', 0),
+        "total_traps_dropped": processor_stats.get('packets_dropped', 0),
+        "processing_errors": processor_stats.get('processing_errors', 0),
 
         # Sliding 60-second window counts
         "window_60s_received":  window_60s.get('received',  0),

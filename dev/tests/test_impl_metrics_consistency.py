@@ -403,11 +403,12 @@ class TestMetricsSummaryStructure:
         from trapninja.metrics.collector import get_metrics_summary
         
         with patch('trapninja.metrics.collector._get_processor_stats', return_value={
-            'processed': 100,
-            'forwarded': 90,
-            'blocked': 5,
-            'redirected': 3,
-            'dropped': 2,
+            'packets_processed': 100,
+            'packets_forwarded': 90,
+            'packets_blocked': 5,
+            'packets_redirected': 3,
+            'packets_dropped': 2,
+            'processing_errors': 0,
         }):
             with patch('trapninja.metrics.collector._get_queue_stats', return_value={}):
                 with patch('trapninja.metrics.collector._get_ha_stats', return_value={}):
