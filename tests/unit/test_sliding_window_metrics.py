@@ -89,19 +89,22 @@ class TestProcessingStatsWindowProperties:
         assert stats.errors_last_60s == 0
 
     def test_processing_stats_received_window_increments(self):
+        # _window_received is incremented directly by packet_handler (no longer via ProcessingStats method)
         stats = ProcessingStats()
-        stats.increment_processed()
-        stats.increment_processed()
+        stats._window_received.increment()
+        stats._window_received.increment()
         assert stats.received_last_60s == 2
 
     def test_processing_stats_forwarded_window_increments(self):
+        # _window_forwarded is incremented directly by packet_handler
         stats = ProcessingStats()
-        stats.increment_forwarded()
+        stats._window_forwarded.increment()
         assert stats.forwarded_last_60s == 1
 
     def test_processing_stats_dropped_window_increments(self):
+        # Drops are recorded via record_drop(), which also updates queue_full_events
         stats = ProcessingStats()
-        stats.increment_dropped()
+        stats.record_drop()
         assert stats.dropped_last_60s == 1
 
     def test_processing_stats_errors_window_increments(self):
@@ -111,8 +114,8 @@ class TestProcessingStatsWindowProperties:
 
     def test_processing_stats_to_dict_includes_window_60s(self):
         stats = ProcessingStats()
-        stats.increment_processed()
-        stats.increment_forwarded()
+        stats._window_received.increment()
+        stats._window_forwarded.increment()
         d = stats.to_dict()
 
         assert 'window_60s' in d
@@ -125,8 +128,8 @@ class TestProcessingStatsWindowProperties:
 
     def test_processing_stats_reset_clears_window(self):
         stats = ProcessingStats()
-        stats.increment_processed()
-        stats.increment_forwarded()
+        stats._window_received.increment()
+        stats._window_forwarded.increment()
         stats.reset()
         assert stats.received_last_60s == 0
         assert stats.forwarded_last_60s == 0
@@ -169,7 +172,6 @@ def _build_minimal_metrics_summary() -> dict:
         "fast_path_hits":   800,
         "slow_path_hits":   200,
         "fast_path_ratio":  80.0,
-        "processing_rate":  15.2,
         # Queue
         "queue_current_depth": 5,
         "queue_max_depth":     100,

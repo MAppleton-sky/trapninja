@@ -28,6 +28,7 @@ from typing import Optional, Dict, Any
 from .parser import is_snmpv2c, is_snmpv3, extract_trap_oid_fast, parse_snmp_packet
 from .forwarder import forward_packet
 from .config_cache import _config_cache
+from .stats import get_global_stats
 
 # Import optional modules registry for lazy loading with automatic fallbacks
 from ..core.optional_modules import modules
@@ -189,11 +190,10 @@ class PacketHandler:
         # Forward the packet
         forward_packet(source_ip, payload, destinations)
 
-        # Update stats
+        # Update sliding-window counter for forwarded traps.
+        # Redirected has no window counter; total counters are owned by GranularStatsCollector.
         if action == 'forwarded':
-            self.stats.increment_forwarded()
-        elif action == 'redirected':
-            self.stats.increment_redirected()
+            get_global_stats()._window_forwarded.increment()
 
         # Record granular statistics
         self._record_granular_stats(source_ip, trap_oid, action, destination_tag)
@@ -223,8 +223,9 @@ class PacketHandler:
             source_ip = packet_data['src_ip']
             payload = packet_data['payload']
 
-            # Always count packets received (for diagnostics)
-            self.stats.increment_processed()
+            # Increment 60s sliding-window for received traps.
+            # Total counters are owned by GranularStatsCollector.
+            get_global_stats()._window_received.increment()
 
             # CRITICAL: Check HA state before forwarding
             # Only the PRIMARY node should forward traps
@@ -260,7 +261,6 @@ class PacketHandler:
 
             # Quick IP block check
             if source_ip in config['blocked_ips']:
-                self.stats.increment_blocked()
                 self._record_granular_stats(source_ip, None, 'blocked')
                 return
 
@@ -282,7 +282,6 @@ class PacketHandler:
 
                     # Check OID blocking
                     if trap_oid in config['blocked_traps']:
-                        self.stats.increment_blocked()
                         self._record_granular_stats(
                             source_ip, trap_oid, 'blocked'
                         )
@@ -380,7 +379,6 @@ class PacketHandler:
 
         # Check blocking
         if trap_oid in config['blocked_traps']:
-            self.stats.increment_blocked()
             self._record_granular_stats(source_ip, trap_oid, 'blocked')
             if config['blocked_dest']:
                 forward_packet(source_ip, payload, config['blocked_dest'])
@@ -449,7 +447,6 @@ class PacketHandler:
 
         # Check OID blocking
         if trap_oid and trap_oid in config['blocked_traps']:
-            self.stats.increment_blocked()
             self._record_granular_stats(source_ip, trap_oid, 'blocked')
             if config['blocked_dest']:
                 forward_packet(source_ip, payload, config['blocked_dest'])

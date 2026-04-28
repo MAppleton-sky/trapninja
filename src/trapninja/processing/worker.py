@@ -153,8 +153,7 @@ class PacketWorker(PacketHandler):
             stats = get_global_stats()
             if stats.should_log_summary():
                 logger.info(
-                    f"Processing: rate={stats.processing_rate:.1f}/s, "
-                    f"total={stats.packets_processed}, "
+                    f"Processing: received_60s={stats.received_last_60s}, "
                     f"fast_path={stats.fast_path_ratio:.1f}%"
                 )
             self._packets_since_log = 0

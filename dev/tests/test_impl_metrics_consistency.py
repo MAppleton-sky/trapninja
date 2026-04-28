@@ -44,73 +44,83 @@ from fixtures import (
 # =============================================================================
 
 class TestProcessingStatsToMetrics:
-    """Test that ProcessingStats are correctly reflected in metrics."""
-    
-    def test_processed_count_in_metrics_summary(self):
-        """packets_processed appears as total_traps_received."""
+    """Test that ProcessingStats are correctly reflected in metrics.
+
+    Trap total counters (received/forwarded/blocked/redirected/dropped) are now
+    tracked exclusively by GranularStatsCollector.  ProcessingStats only tracks
+    performance metadata: errors, path hits, queue events.
+    """
+
+    def test_total_counters_absent_from_processing_stats_dict(self):
+        """ProcessingStats.to_dict() no longer contains buffered total counters.
+
+        These moved to GranularStatsCollector which increments them directly on
+        every trap, eliminating the flush lag that caused Grafana dips.
+        """
         from trapninja.processing.stats import ProcessingStats
-        
+
         stats = ProcessingStats()
-        stats.packets_processed = 100
-        
         result = stats.to_dict()
-        
-        # to_dict uses packets_processed, metrics uses 'processed' key
-        assert result['packets_processed'] == 100
-    
-    def test_forwarded_count_in_metrics_summary(self):
-        """packets_forwarded appears in metrics."""
-        from trapninja.processing.stats import ProcessingStats
-        
-        stats = ProcessingStats()
-        stats.packets_forwarded = 95
-        
-        result = stats.to_dict()
-        
-        assert result['packets_forwarded'] == 95
-    
-    def test_blocked_count_in_metrics_summary(self):
-        """packets_blocked appears in metrics."""
-        from trapninja.processing.stats import ProcessingStats
-        
-        stats = ProcessingStats()
-        stats.packets_blocked = 5
-        
-        result = stats.to_dict()
-        
-        assert result['packets_blocked'] == 5
-    
-    def test_redirected_count_in_metrics_summary(self):
-        """packets_redirected appears in metrics."""
-        from trapninja.processing.stats import ProcessingStats
-        
-        stats = ProcessingStats()
-        stats.packets_redirected = 10
-        
-        result = stats.to_dict()
-        
-        assert result['packets_redirected'] == 10
-    
-    def test_dropped_count_in_metrics_summary(self):
-        """packets_dropped appears in metrics."""
-        from trapninja.processing.stats import ProcessingStats
-        
-        stats = ProcessingStats()
-        stats.packets_dropped = 3
-        
-        result = stats.to_dict()
-        
-        assert result['packets_dropped'] == 3
-    
+
+        assert 'packets_processed' not in result
+        assert 'packets_forwarded' not in result
+        assert 'packets_blocked' not in result
+        assert 'packets_redirected' not in result
+        assert 'packets_dropped' not in result
+
+    def test_granular_collector_tracks_total_traps(self):
+        """GranularStatsCollector._total_traps increments on record_trap()."""
+        from trapninja.stats.collector import GranularStatsCollector
+
+        collector = GranularStatsCollector()
+        assert collector._total_traps == 0
+
+        collector.record_trap(source_ip='10.0.0.1', action='forwarded')
+        assert collector._total_traps == 1
+
+    def test_granular_collector_tracks_forwarded(self):
+        """GranularStatsCollector._total_forwarded increments correctly."""
+        from trapninja.stats.collector import GranularStatsCollector
+
+        collector = GranularStatsCollector()
+        collector.record_trap(source_ip='10.0.0.1', action='forwarded')
+        assert collector._total_forwarded == 1
+        assert collector._total_blocked == 0
+
+    def test_granular_collector_tracks_blocked(self):
+        """GranularStatsCollector._total_blocked increments correctly."""
+        from trapninja.stats.collector import GranularStatsCollector
+
+        collector = GranularStatsCollector()
+        collector.record_trap(source_ip='10.0.0.1', action='blocked')
+        assert collector._total_blocked == 1
+        assert collector._total_forwarded == 0
+
+    def test_granular_collector_tracks_redirected(self):
+        """GranularStatsCollector._total_redirected increments correctly."""
+        from trapninja.stats.collector import GranularStatsCollector
+
+        collector = GranularStatsCollector()
+        collector.record_trap(source_ip='10.0.0.1', action='redirected')
+        assert collector._total_redirected == 1
+
+    def test_granular_collector_tracks_dropped(self):
+        """GranularStatsCollector._total_dropped increments correctly."""
+        from trapninja.stats.collector import GranularStatsCollector
+
+        collector = GranularStatsCollector()
+        collector.record_trap(source_ip='10.0.0.1', action='dropped')
+        assert collector._total_dropped == 1
+
     def test_ha_blocked_count_in_metrics_summary(self):
-        """ha_blocked appears in metrics."""
+        """ha_blocked appears in ProcessingStats.to_dict() (still tracked here)."""
         from trapninja.processing.stats import ProcessingStats
-        
+
         stats = ProcessingStats()
         stats.ha_blocked = 20
-        
+
         result = stats.to_dict()
-        
+
         assert result['ha_blocked'] == 20
 
 
@@ -181,43 +191,45 @@ class TestFastSlowPathMetrics:
 # =============================================================================
 
 class TestProcessingRateMetrics:
-    """Test processing rate calculation."""
-    
-    def test_processing_rate_calculated(self):
-        """Processing rate is packets_processed / uptime."""
+    """Test that processing_rate has been removed from ProcessingStats.
+
+    processing_rate was packets_processed / uptime — it was removed along with
+    packets_processed because totals moved to GranularStatsCollector.  Rate
+    calculations in Grafana use rate(trapninja_traps_received_total[1m]) instead.
+    """
+
+    def test_processing_rate_absent_from_processing_stats(self):
+        """ProcessingStats no longer has a processing_rate property."""
         from trapninja.processing.stats import ProcessingStats
-        
+
         stats = ProcessingStats()
-        stats.packets_processed = 1000
-        
-        # Need a small delay to ensure uptime > 0
-        time.sleep(0.01)
-        
-        # Rate depends on uptime
-        rate = stats.processing_rate
-        
-        # Should be positive since time has elapsed
-        assert rate > 0
-    
-    def test_processing_rate_zero_when_no_packets(self):
-        """Processing rate is 0 when no packets."""
+        assert not hasattr(stats, 'processing_rate')
+
+    def test_processing_rate_absent_from_to_dict(self):
+        """ProcessingStats.to_dict() does not include processing_rate."""
         from trapninja.processing.stats import ProcessingStats
-        
+
         stats = ProcessingStats()
-        stats.packets_processed = 0
-        
-        assert stats.processing_rate == 0.0
-    
-    def test_processing_rate_in_to_dict(self):
-        """processing_rate appears in to_dict output."""
-        from trapninja.processing.stats import ProcessingStats
-        
-        stats = ProcessingStats()
-        stats.packets_processed = 500
-        
         result = stats.to_dict()
-        
-        assert 'processing_rate' in result
+
+        assert 'processing_rate' not in result
+
+    def test_processing_rate_absent_from_metrics_summary(self):
+        """get_metrics_summary() does not include processing_rate."""
+        from trapninja.metrics.collector import get_metrics_summary
+        from unittest.mock import patch
+
+        with patch('trapninja.metrics.collector._get_processor_stats', return_value={}):
+            with patch('trapninja.metrics.collector._get_granular_totals', return_value={
+                'total_traps': 0, 'total_forwarded': 0, 'total_blocked': 0,
+                'total_redirected': 0, 'total_dropped': 0,
+            }):
+                with patch('trapninja.metrics.collector._get_queue_stats', return_value={}):
+                    with patch('trapninja.metrics.collector._get_ha_stats', return_value={}):
+                        with patch('trapninja.metrics.collector._get_cache_stats', return_value={}):
+                            summary = get_metrics_summary()
+
+        assert 'processing_rate' not in summary
 
 
 # =============================================================================
@@ -399,27 +411,33 @@ class TestMetricsSummaryStructure:
         assert summary['uptime_seconds'] >= 0
     
     def test_summary_contains_trap_counts(self):
-        """Metrics summary contains all trap count fields."""
+        """Metrics summary contains all trap count fields, sourced from GranularStatsCollector."""
         from trapninja.metrics.collector import get_metrics_summary
-        
-        with patch('trapninja.metrics.collector._get_processor_stats', return_value={
-            'packets_processed': 100,
-            'packets_forwarded': 90,
-            'packets_blocked': 5,
-            'packets_redirected': 3,
-            'packets_dropped': 2,
-            'processing_errors': 0,
-        }):
-            with patch('trapninja.metrics.collector._get_queue_stats', return_value={}):
-                with patch('trapninja.metrics.collector._get_ha_stats', return_value={}):
-                    with patch('trapninja.metrics.collector._get_cache_stats', return_value={}):
-                        summary = get_metrics_summary()
-        
+
+        granular = {
+            'total_traps': 100,
+            'total_forwarded': 90,
+            'total_blocked': 5,
+            'total_redirected': 3,
+            'total_dropped': 2,
+        }
+
+        with patch('trapninja.metrics.collector._get_processor_stats', return_value={}):
+            with patch('trapninja.metrics.collector._get_granular_totals', return_value=granular):
+                with patch('trapninja.metrics.collector._get_queue_stats', return_value={}):
+                    with patch('trapninja.metrics.collector._get_ha_stats', return_value={}):
+                        with patch('trapninja.metrics.collector._get_cache_stats', return_value={}):
+                            summary = get_metrics_summary()
+
         assert 'total_traps_received' in summary
         assert 'total_traps_forwarded' in summary
         assert 'total_traps_blocked' in summary
         assert 'total_traps_redirected' in summary
         assert 'total_traps_dropped' in summary
+        # Verify values come from the granular collector, not processor stats
+        assert summary['total_traps_received'] == 100
+        assert summary['total_traps_forwarded'] == 90
+        assert summary['total_traps_blocked'] == 5
     
     def test_summary_contains_queue_metrics(self):
         """Metrics summary contains queue metrics."""
@@ -617,19 +635,19 @@ class TestMetricsReset:
         assert len(collector._redirected_oid_counter) == 0
     
     def test_processing_stats_reset(self):
-        """ProcessingStats reset clears all counters."""
+        """ProcessingStats reset clears all remaining counters."""
         from trapninja.processing.stats import ProcessingStats
-        
+
         stats = ProcessingStats()
-        stats.packets_processed = 100
-        stats.packets_forwarded = 95
-        stats.packets_blocked = 5
-        
+        stats.processing_errors = 100
+        stats.fast_path_hits = 95
+        stats.queue_full_events = 5
+
         stats.reset()
-        
-        assert stats.packets_processed == 0
-        assert stats.packets_forwarded == 0
-        assert stats.packets_blocked == 0
+
+        assert stats.processing_errors == 0
+        assert stats.fast_path_hits == 0
+        assert stats.queue_full_events == 0
 
 
 # =============================================================================
@@ -649,29 +667,29 @@ class TestGlobalStatsSingleton:
         assert stats1 is stats2
     
     def test_global_stats_increments_persist(self):
-        """Increments on global stats persist."""
+        """Increments on global stats persist across get_global_stats() calls."""
         from trapninja.processing.stats import get_global_stats, reset_global_stats
-        
+
         reset_global_stats()
-        
+
         stats = get_global_stats()
-        stats.increment_processed()
-        stats.increment_processed()
-        
+        stats.increment_error()
+        stats.increment_error()
+
         stats2 = get_global_stats()
-        assert stats2.packets_processed == 2
-    
+        assert stats2.processing_errors == 2
+
     def test_reset_global_stats(self):
         """reset_global_stats clears all counters."""
         from trapninja.processing.stats import get_global_stats, reset_global_stats
-        
+
         stats = get_global_stats()
-        stats.packets_processed = 100
-        
+        stats.processing_errors = 100
+
         reset_global_stats()
-        
+
         stats2 = get_global_stats()
-        assert stats2.packets_processed == 0
+        assert stats2.processing_errors == 0
 
 
 # =============================================================================
@@ -977,21 +995,21 @@ class TestMetricsThreadSafety:
         assert collector._blocked_ip_counter["10.0.0.1"] == 1000
     
     def test_processing_stats_atomic_increments(self):
-        """ProcessingStats increments are atomic under GIL."""
+        """ProcessingStats error increments are atomic under GIL."""
         from trapninja.processing.stats import ProcessingStats
-        
+
         stats = ProcessingStats()
-        
+
         def increment_many():
             for _ in range(100):
-                stats.increment_processed()
-        
+                stats.increment_error()
+
         threads = [threading.Thread(target=increment_many) for _ in range(10)]
-        
+
         for t in threads:
             t.start()
         for t in threads:
             t.join()
-        
+
         # Should have 1000 total
-        assert stats.packets_processed == 1000
+        assert stats.processing_errors == 1000

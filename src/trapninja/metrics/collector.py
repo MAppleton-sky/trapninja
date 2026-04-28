@@ -304,6 +304,38 @@ def _get_cache_stats() -> Dict[str, Any]:
     return {'enabled': False, 'available': False}
 
 
+def _get_granular_totals() -> Dict[str, Any]:
+    """
+    Get trap total counters from GranularStatsCollector.
+
+    GranularStatsCollector is the single source of truth for trap totals.
+    Counters update directly on every trap with no buffering, ensuring
+    metrics/collector.py always reads current values.
+
+    Returns:
+        Dict with keys: total_traps, total_forwarded, total_blocked,
+        total_redirected, total_dropped. Returns zeros if collector
+        is not yet initialised.
+    """
+    try:
+        from ..stats.collector import get_stats_collector
+        collector = get_stats_collector()
+        if collector:
+            return {
+                'total_traps':      collector._total_traps,
+                'total_forwarded':  collector._total_forwarded,
+                'total_blocked':    collector._total_blocked,
+                'total_redirected': collector._total_redirected,
+                'total_dropped':    collector._total_dropped,
+            }
+    except Exception:
+        pass
+    return {
+        'total_traps': 0, 'total_forwarded': 0, 'total_blocked': 0,
+        'total_redirected': 0, 'total_dropped': 0,
+    }
+
+
 def get_metrics_summary() -> Dict[str, Any]:
     """
     Get a comprehensive summary of all metrics from all sources.
@@ -311,24 +343,27 @@ def get_metrics_summary() -> Dict[str, Any]:
     Returns:
         dict: Dictionary with complete metrics summary
     """
-    # Get processor stats (main source of trap counts)
+    # Get processor stats (performance metadata: path hits, errors, queue depth)
     processor_stats = _get_processor_stats()
-    
+
+    # Get trap totals from GranularStatsCollector (single source of truth)
+    granular_totals = _get_granular_totals()
+
     # Get queue stats
     queue_stats = _get_queue_stats()
-    
+
     # Get HA stats
     ha_stats = _get_ha_stats()
-    
+
     # Get cache stats
     cache_stats = _get_cache_stats()
-    
+
     # Calculate uptime
     uptime = time.time() - _start_time
-    
+
     # Get current configuration
     config = get_current_config()
-    
+
     # Build summary from processor stats
     window_60s = processor_stats.get('window_60s', {})
 
@@ -344,13 +379,14 @@ def get_metrics_summary() -> Dict[str, Any]:
             "global_labels": config.global_labels,
         },
 
-        # Core trap processing metrics (from packet processor)
-        # Keys match ProcessingStats.to_dict() output exactly.
-        "total_traps_received": processor_stats.get('packets_processed', 0),
-        "total_traps_forwarded": processor_stats.get('packets_forwarded', 0),
-        "total_traps_blocked": processor_stats.get('packets_blocked', 0),
-        "total_traps_redirected": processor_stats.get('packets_redirected', 0),
-        "total_traps_dropped": processor_stats.get('packets_dropped', 0),
+        # Core trap processing metrics — sourced from GranularStatsCollector.
+        # These are unbuffered: each trap increments the counter directly,
+        # so values here are always current (no flush lag).
+        "total_traps_received":   granular_totals['total_traps'],
+        "total_traps_forwarded":  granular_totals['total_forwarded'],
+        "total_traps_blocked":    granular_totals['total_blocked'],
+        "total_traps_redirected": granular_totals['total_redirected'],
+        "total_traps_dropped":    granular_totals['total_dropped'],
         "processing_errors": processor_stats.get('processing_errors', 0),
 
         # Sliding 60-second window counts
@@ -361,17 +397,16 @@ def get_metrics_summary() -> Dict[str, Any]:
 
         # HA-specific metrics
         "ha_blocked": processor_stats.get('ha_blocked', 0),
-        
+
         # Cache metrics
         "traps_cached": processor_stats.get('cached', 0),
         "cache_failures": processor_stats.get('cache_failures', 0),
-        
+
         # Performance metrics
         "fast_path_hits": processor_stats.get('fast_path_hits', 0),
         "slow_path_hits": processor_stats.get('slow_path_hits', 0),
         "fast_path_ratio": processor_stats.get('fast_path_ratio', 0.0),
-        "processing_rate": processor_stats.get('processing_rate', 0.0),
-        
+
         # Queue metrics
         "queue_current_depth": queue_stats.get('current_depth', 0),
         "queue_max_depth": max(

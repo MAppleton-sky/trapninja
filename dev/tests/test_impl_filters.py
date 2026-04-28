@@ -740,20 +740,22 @@ class TestFilterChainOrder:
         
         with patch.object(_config_cache, 'get', return_value=config), \
              patch('trapninja.processing.packet_handler.forward_packet') as mock_forward, \
-             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True):
-            
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True), \
+             patch.object(worker, '_record_granular_stats') as mock_granular:
+
             packet_data = {
                 'src_ip': '192.168.1.50',  # Not blocked
                 'dst_port': 162,
                 'payload': payload
             }
-            
+
             worker._process_packet(packet_data)
-            
+
             # Should not forward (OID blocked)
             mock_forward.assert_not_called()
-            assert worker.stats._local.packets_blocked > 0
-    
+            # Blocking is now tracked by GranularStatsCollector (source of truth for totals)
+            assert any(c.args[2] == 'blocked' for c in mock_granular.call_args_list)
+
     def test_oid_block_before_ip_redirect(self):
         """OID blocking takes priority over IP redirection.
         
@@ -791,19 +793,21 @@ class TestFilterChainOrder:
         
         with patch.object(_config_cache, 'get', return_value=config), \
              patch('trapninja.processing.packet_handler.forward_packet') as mock_forward, \
-             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True):
-            
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True), \
+             patch.object(worker, '_record_granular_stats') as mock_granular:
+
             packet_data = {
                 'src_ip': '192.168.10.50',  # Would redirect to security
                 'dst_port': 162,
                 'payload': payload  # But OID is blocked
             }
-            
+
             worker._process_packet(packet_data)
-            
+
             # Should be blocked by OID, NOT redirected by IP
             mock_forward.assert_not_called()
-            assert worker.stats._local.packets_blocked > 0
+            # Blocking is now tracked by GranularStatsCollector (source of truth for totals)
+            assert any(c.args[2] == 'blocked' for c in mock_granular.call_args_list)
 
 
 # =============================================================================

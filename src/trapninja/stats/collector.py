@@ -592,31 +592,17 @@ class GranularStatsCollector:
 
         # =================================================================
         # GLOBAL COUNTERS & GAUGES
+        #
+        # trapninja_traps_total / _forwarded_total / _blocked_total /
+        # _redirected_total are intentionally NOT exported here.  These
+        # counters are now the responsibility of metrics/collector.py
+        # (written to trapninja_metrics.prom).  Exporting them here too
+        # would produce identical metric names in two .prom files, causing
+        # Prometheus to double-count them when node_exporter scrapes both.
+        # The _total_* attributes still exist on this class and are read by
+        # metrics/collector.py via _get_granular_totals().
         # =================================================================
-        lines.append("# HELP trapninja_traps_total Total traps received")
-        lines.append("# TYPE trapninja_traps_total counter")
-        lines.append(f"trapninja_traps_total{global_labels} {self._total_traps}")
-        lines.append(f"trapninja_traps_total_created{global_labels} {created_ts:.3f}")
 
-        lines.append("")
-        lines.append("# HELP trapninja_traps_forwarded_total Total traps forwarded")
-        lines.append("# TYPE trapninja_traps_forwarded_total counter")
-        lines.append(f"trapninja_traps_forwarded_total{global_labels} {self._total_forwarded}")
-        lines.append(f"trapninja_traps_forwarded_total_created{global_labels} {created_ts:.3f}")
-
-        lines.append("")
-        lines.append("# HELP trapninja_traps_blocked_total Total traps blocked")
-        lines.append("# TYPE trapninja_traps_blocked_total counter")
-        lines.append(f"trapninja_traps_blocked_total{global_labels} {self._total_blocked}")
-        lines.append(f"trapninja_traps_blocked_total_created{global_labels} {created_ts:.3f}")
-
-        lines.append("")
-        lines.append("# HELP trapninja_traps_redirected_total Total traps redirected")
-        lines.append("# TYPE trapninja_traps_redirected_total counter")
-        lines.append(f"trapninja_traps_redirected_total{global_labels} {self._total_redirected}")
-        lines.append(f"trapninja_traps_redirected_total_created{global_labels} {created_ts:.3f}")
-
-        lines.append("")
         lines.append("# HELP trapninja_unique_sources Number of unique source IPs seen since start")
         lines.append("# TYPE trapninja_unique_sources gauge")
         lines.append(f"trapninja_unique_sources{global_labels} {unique_ips}")
