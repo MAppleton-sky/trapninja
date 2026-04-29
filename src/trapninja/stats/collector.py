@@ -49,7 +49,11 @@ class CollectorConfig:
     persist_interval: int = 60  # Persist every minute
     
     # Export settings
-    export_interval: int = 60  # Export metrics every minute
+    # NOTE: export_interval is retained for backward compatibility but no longer
+    # drives the export schedule.  Export timing is now controlled exclusively by
+    # MetricsConfig.export_interval_seconds in metrics/collector.py, which calls
+    # GranularStatsCollector.export_now() as part of the unified export cycle.
+    export_interval: int = 60
     metrics_dir: str = "/var/log/trapninja/metrics"
     
     # Global labels applied to all Prometheus metrics
@@ -141,7 +145,6 @@ class GranularStatsCollector:
         # Threading
         self._lock = threading.RLock()
         self._cleanup_timer: Optional[threading.Timer] = None
-        self._export_timer: Optional[threading.Timer] = None
         self._running = False
         
         # Start time
@@ -154,26 +157,19 @@ class GranularStatsCollector:
         """Start background threads for cleanup and export."""
         self._running = True
         self._schedule_cleanup()
-        self._schedule_export()
-        # Initial export so files exist immediately
-        self._export_stats()
         logger.info("GranularStatsCollector started")
     
     def stop(self):
         """Stop background threads."""
         self._running = False
-        
+
         if self._cleanup_timer:
             self._cleanup_timer.cancel()
             self._cleanup_timer = None
-        
-        if self._export_timer:
-            self._export_timer.cancel()
-            self._export_timer = None
-        
+
         # Final export
         self._export_stats()
-        
+
         logger.info("GranularStatsCollector stopped")
     
     # =========================================================================
@@ -799,26 +795,6 @@ class GranularStatsCollector:
             logger.debug(f"Cleanup: removed {len(stale_ips)} stale IPs, "
                         f"{len(stale_oids)} stale OIDs")
     
-    def _schedule_export(self):
-        """Schedule next export."""
-        if not self._running:
-            return
-        
-        self._export_timer = threading.Timer(
-            self.config.export_interval,
-            self._export_and_reschedule
-        )
-        self._export_timer.daemon = True
-        self._export_timer.start()
-    
-    def _export_and_reschedule(self):
-        """Run export and schedule next."""
-        if not self._running:
-            return
-        
-        self._export_stats()
-        self._schedule_export()
-    
     def _export_stats(self):
         """Export statistics to files."""
         import os
@@ -854,10 +830,29 @@ class GranularStatsCollector:
                 json.dump(self.export_json(), f, indent=2)
             
             logger.debug(f"Exported granular stats to {self.config.metrics_dir}")
-            
+
         except Exception as e:
             logger.error(f"Failed to export granular stats: {e}")
-    
+
+    def export_now(self) -> bool:
+        """
+        Perform an immediate export of all statistics to .prom and .json files.
+
+        Called by the unified metrics export timer in metrics/collector.py to
+        ensure both trapninja_metrics.prom and trapninja_granular.prom are
+        written synchronously in the same timer callback, guaranteeing they
+        always reflect a consistent point-in-time snapshot.
+
+        Returns:
+            True if export succeeded, False if it failed (error already logged).
+        """
+        try:
+            self._export_stats()
+            return True
+        except Exception as e:
+            logger.error(f"GranularStatsCollector.export_now() failed: {e}")
+            return False
+
     def reset(self):
         """Reset all statistics."""
         with self._lock:

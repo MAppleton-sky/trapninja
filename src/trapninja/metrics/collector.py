@@ -122,8 +122,39 @@ def init_metrics(
     return _current_config
 
 
+def _export_granular_stats():
+    """
+    Call GranularStatsCollector.export_now() as part of the unified export cycle.
+
+    The granular collector no longer runs its own timer.  Instead, this
+    function is called synchronously from _schedule_metrics_export() so that
+    trapninja_metrics.prom and trapninja_granular.prom are always written in
+    the same timer callback, guaranteeing temporal consistency between the
+    two files.
+
+    Failure is logged but never raises — a failed granular export must never
+    prevent the metrics export from completing or scheduling the next timer.
+    """
+    try:
+        from ..stats.collector import get_stats_collector
+        collector = get_stats_collector()
+        if collector:
+            collector.export_now()
+    except Exception as e:
+        logger.error(f"Granular stats export failed in unified timer: {e}")
+
+
 def _schedule_metrics_export():
-    """Schedule periodic export of metrics."""
+    """
+    Unified export timer callback — writes both .prom files then reschedules.
+
+    The next timer is scheduled in a finally block so it is ALWAYS rescheduled
+    regardless of whether the export succeeds or fails.  Without this guarantee,
+    a transient export failure (disk full, I/O error, NFS timeout) would silently
+    kill the timer and stop all metric file updates until TrapNinja is restarted.
+    Each export call is individually guarded so a failure in one does not prevent
+    the other from running.
+    """
     global _export_timer
 
     try:
@@ -141,19 +172,30 @@ def _schedule_metrics_export():
         except Exception:
             pass
 
-    # Export metrics
-    from .exporter import export_metrics
-    export_metrics()
+    try:
+        # Step 1 — write trapninja_metrics.prom + trapninja_metrics.json
+        try:
+            from .exporter import export_metrics
+            export_metrics()
+        except Exception as e:
+            logger.error(
+                f"metrics export failed (trapninja_metrics.prom not updated): {e}"
+            )
 
-    # Schedule next export if not stopping
-    config = get_current_config()
-    if not stop_event.is_set():
-        _export_timer = Timer(
-            config.export_interval_seconds,
-            _schedule_metrics_export
-        )
-        _export_timer.daemon = True
-        _export_timer.start()
+        # Step 2 — write trapninja_granular.prom + trapninja_granular.json
+        # Always runs even if Step 1 failed.
+        _export_granular_stats()
+
+    finally:
+        # Always reschedule — export failures must never stop the timer.
+        config = get_current_config()
+        if not stop_event.is_set():
+            _export_timer = Timer(
+                config.export_interval_seconds,
+                _schedule_metrics_export
+            )
+            _export_timer.daemon = True
+            _export_timer.start()
 
 
 def get_current_config() -> MetricsConfig:
@@ -500,6 +542,7 @@ def cleanup_metrics():
     try:
         from .exporter import export_metrics
         export_metrics()
+        _export_granular_stats()
         logger.info("Final metrics export completed")
     except Exception as e:
         logger.error(f"Error during final metrics export: {e}")

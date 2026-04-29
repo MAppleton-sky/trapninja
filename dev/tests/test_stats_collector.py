@@ -761,15 +761,73 @@ class TestGlobalCollectorManagement:
             initialize_stats, get_stats_collector, shutdown_stats,
             CollectorConfig
         )
-        
+
         config = CollectorConfig(
             metrics_dir=str(tmp_path),
             cleanup_interval=3600,
             export_interval=3600
         )
-        
+
         initialize_stats(config)
         shutdown_stats()
-        
+
         # Collector should be None after shutdown
         # Note: This depends on implementation
+
+
+class TestExportNow:
+    """Tests for GranularStatsCollector.export_now() — the unified-timer entry point."""
+
+    def test_export_now_returns_true_on_success(self):
+        """export_now returns True when _export_stats completes without exception."""
+        from trapninja.stats.collector import GranularStatsCollector
+
+        collector = GranularStatsCollector()
+
+        with patch.object(collector, '_export_stats') as mock_export:
+            result = collector.export_now()
+
+        mock_export.assert_called_once()
+        assert result is True
+
+    def test_export_now_returns_false_on_exception(self):
+        """export_now returns False and logs when _export_stats raises."""
+        from trapninja.stats.collector import GranularStatsCollector
+
+        collector = GranularStatsCollector()
+
+        with patch.object(collector, '_export_stats', side_effect=OSError("disk full")):
+            result = collector.export_now()
+
+        assert result is False
+
+    def test_export_now_works_standalone(self, tmp_path):
+        """export_now is usable without metrics/collector.py being initialised."""
+        from trapninja.stats.collector import GranularStatsCollector, CollectorConfig
+
+        config = CollectorConfig(metrics_dir=str(tmp_path))
+        collector = GranularStatsCollector(config)
+        collector.record_trap(source_ip="10.0.0.1", action="forwarded")
+
+        result = collector.export_now()
+
+        assert result is True
+        assert (tmp_path / "trapninja_granular.prom").exists()
+
+    def test_start_does_not_create_export_timer(self, tmp_path):
+        """After start(), GranularStatsCollector has no self-owned export timer."""
+        from trapninja.stats.collector import GranularStatsCollector, CollectorConfig
+
+        config = CollectorConfig(
+            metrics_dir=str(tmp_path),
+            cleanup_interval=3600,
+        )
+        collector = GranularStatsCollector(config)
+        collector.start()
+
+        try:
+            assert not hasattr(collector, '_export_timer'), (
+                "_export_timer must not exist — export is driven by the unified timer"
+            )
+        finally:
+            collector.stop()
