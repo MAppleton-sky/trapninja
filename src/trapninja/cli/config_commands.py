@@ -116,7 +116,7 @@ def show_redirected_ips(json_output: bool = False) -> int:
     from ..config import REDIRECTED_IPS_FILE
     from .command_base import config_io
 
-    data = config_io.load(REDIRECTED_IPS_FILE, {})
+    data = config_io.load(REDIRECTED_IPS_FILE, [])
 
     if json_output:
         print(json.dumps(data, indent=2))
@@ -126,14 +126,19 @@ def show_redirected_ips(json_output: bool = False) -> int:
         if not data:
             print("  No IP redirections configured")
         else:
-            # data is typically {ip: tag} or {ip: {tag: ...}}
-            for ip, tag in sorted(data.items()):
-                if isinstance(tag, dict):
-                    tag_str = tag.get('tag', str(tag))
-                else:
-                    tag_str = str(tag)
-                print(f"  {ip:>20s}  →  {tag_str}")
-            print(f"\nTotal: {len(data)} IP redirection(s)")
+            # File format is a list of [ip_or_cidr, tag] pairs
+            pairs = _normalise_redir_pairs(data)
+            plain = sorted((ip, tag) for ip, tag in pairs if '/' not in ip)
+            cidr  = sorted((ip, tag) for ip, tag in pairs if '/' in ip)
+            if plain:
+                print("  Individual IPs:")
+                for ip, tag in plain:
+                    print(f"    {ip:>20s}  →  {tag}")
+            if cidr:
+                print("  CIDR Ranges:")
+                for ip, tag in cidr:
+                    print(f"    {ip:>20s}  →  {tag}")
+            print(f"\nTotal: {len(pairs)} IP redirection(s)")
         print()
 
     return 0
@@ -144,7 +149,7 @@ def show_redirected_oids(json_output: bool = False) -> int:
     from ..config import REDIRECTED_OIDS_FILE
     from .command_base import config_io
 
-    data = config_io.load(REDIRECTED_OIDS_FILE, {})
+    data = config_io.load(REDIRECTED_OIDS_FILE, [])
 
     if json_output:
         print(json.dumps(data, indent=2))
@@ -154,13 +159,10 @@ def show_redirected_oids(json_output: bool = False) -> int:
         if not data:
             print("  No OID redirections configured")
         else:
-            for oid, tag in sorted(data.items()):
-                if isinstance(tag, dict):
-                    tag_str = tag.get('tag', str(tag))
-                else:
-                    tag_str = str(tag)
-                print(f"  {oid}  →  {tag_str}")
-            print(f"\nTotal: {len(data)} OID redirection(s)")
+            pairs = _normalise_redir_pairs(data)
+            for oid, tag in sorted(pairs):
+                print(f"  {oid}  →  {tag}")
+            print(f"\nTotal: {len(pairs)} OID redirection(s)")
         print()
 
     return 0
@@ -235,6 +237,32 @@ def validate_config() -> int:
 # INTERNAL HELPERS
 # =============================================================================
 
+def _normalise_redir_pairs(data) -> list:
+    """
+    Normalise redirection data to a flat list of (key, tag) string tuples.
+
+    The on-disk format is a list of [key, tag] pairs (written by
+    ConfigPairListManager). This helper handles that format and also
+    tolerates the legacy dict format {key: tag} so that both load cleanly.
+
+    Args:
+        data: Raw value returned by config_io.load() — either a list of
+              [key, tag] pairs or a dict mapping key -> tag.
+
+    Returns:
+        List of (key, tag) string tuples.
+    """
+    if isinstance(data, dict):
+        return [(str(k), str(v)) for k, v in data.items()]
+    if isinstance(data, list):
+        pairs = []
+        for item in data:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                pairs.append((str(item[0]), str(item[1])))
+        return pairs
+    return []
+
+
 def _gather_full_config(include_detail: bool = True) -> dict:
     """
     Gather complete configuration state from all config files.
@@ -296,22 +324,24 @@ def _gather_full_config(include_detail: bool = True) -> dict:
         result['blocked_oids'] = []
         result['blocked_oids_count'] = 0
 
-    # Redirected IPs
+    # Redirected IPs — file format is list of [ip_or_cidr, tag] pairs
     try:
-        redir_ips = config_io.load(cfg.REDIRECTED_IPS_FILE, {})
-        result['redirected_ips'] = redir_ips if include_detail else {}
+        redir_ips_raw = config_io.load(cfg.REDIRECTED_IPS_FILE, [])
+        redir_ips = _normalise_redir_pairs(redir_ips_raw)
+        result['redirected_ips'] = redir_ips if include_detail else []
         result['redirected_ips_count'] = len(redir_ips)
     except Exception:
-        result['redirected_ips'] = {}
+        result['redirected_ips'] = []
         result['redirected_ips_count'] = 0
 
-    # Redirected OIDs
+    # Redirected OIDs — same list-of-pairs format
     try:
-        redir_oids = config_io.load(cfg.REDIRECTED_OIDS_FILE, {})
-        result['redirected_oids'] = redir_oids if include_detail else {}
+        redir_oids_raw = config_io.load(cfg.REDIRECTED_OIDS_FILE, [])
+        redir_oids = _normalise_redir_pairs(redir_oids_raw)
+        result['redirected_oids'] = redir_oids if include_detail else []
         result['redirected_oids_count'] = len(redir_oids)
     except Exception:
-        result['redirected_oids'] = {}
+        result['redirected_oids'] = []
         result['redirected_oids_count'] = 0
 
     # Redirect destinations
@@ -393,8 +423,15 @@ def _print_full_config(config: dict, brief: bool = False):
     bip_count = config.get('blocked_ips_count', len(blocked_ips))
     print(f"\n--- Blocked IPs ({bip_count}) ---")
     if blocked_ips and not brief:
-        for ip in blocked_ips:
-            print(f"  • {ip}")
+        plain = sorted(ip for ip in blocked_ips if '/' not in ip)
+        cidr  = sorted(ip for ip in blocked_ips if '/' in ip)
+        if plain:
+            for ip in plain:
+                print(f"  • {ip}")
+        if cidr:
+            print("  CIDR ranges:")
+            for ip in cidr:
+                print(f"  • {ip}")
     elif bip_count == 0:
         print("  None")
 
@@ -408,25 +445,30 @@ def _print_full_config(config: dict, brief: bool = False):
     elif boid_count == 0:
         print("  None")
 
-    # IP Redirections
-    redir_ips = config.get('redirected_ips', {})
+    # IP Redirections — stored as list of (ip, tag) tuples after _normalise_redir_pairs
+    redir_ips = config.get('redirected_ips', [])
     rip_count = config.get('redirected_ips_count', len(redir_ips))
     print(f"\n--- IP Redirections ({rip_count}) ---")
     if redir_ips and not brief:
-        for ip, tag in sorted(redir_ips.items()):
-            tag_str = tag.get('tag', str(tag)) if isinstance(tag, dict) else str(tag)
-            print(f"  {ip:>20s}  →  {tag_str}")
+        plain = sorted((ip, tag) for ip, tag in redir_ips if '/' not in ip)
+        cidr  = sorted((ip, tag) for ip, tag in redir_ips if '/' in ip)
+        if plain:
+            for ip, tag in plain:
+                print(f"  {ip:>20s}  →  {tag}")
+        if cidr:
+            print("  CIDR ranges:")
+            for ip, tag in cidr:
+                print(f"  {ip:>20s}  →  {tag}")
     elif rip_count == 0:
         print("  None")
 
-    # OID Redirections
-    redir_oids = config.get('redirected_oids', {})
+    # OID Redirections — same normalised list-of-tuples format
+    redir_oids = config.get('redirected_oids', [])
     roid_count = config.get('redirected_oids_count', len(redir_oids))
     print(f"\n--- OID Redirections ({roid_count}) ---")
     if redir_oids and not brief:
-        for oid, tag in sorted(redir_oids.items()):
-            tag_str = tag.get('tag', str(tag)) if isinstance(tag, dict) else str(tag)
-            print(f"  {oid}  →  {tag_str}")
+        for oid, tag in sorted(redir_oids):
+            print(f"  {oid}  →  {tag}")
     elif roid_count == 0:
         print("  None")
 

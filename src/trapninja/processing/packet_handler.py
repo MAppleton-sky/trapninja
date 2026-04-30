@@ -22,6 +22,8 @@ Version: 2.0.0
 
 import logging
 import base64
+import functools
+import ipaddress
 from datetime import datetime
 from typing import Optional, Dict, Any
 
@@ -34,6 +36,100 @@ from .stats import get_global_stats
 from ..core.optional_modules import modules
 
 logger = logging.getLogger("trapninja")
+
+
+def _is_ip_blocked_by_range(source_ip: str, ranges: list) -> bool:
+    """
+    Return True if source_ip falls within any network in ranges.
+
+    Fast path: returns False immediately if ranges is empty — no cache
+    lookup, no ipaddress parsing, no iteration. This is the common case
+    for deployments that have not configured any CIDR ranges.
+
+    Delegates to _is_ip_blocked_by_range_impl (LRU-cached) by converting
+    the list to a tuple (hashable) and passing id(ranges) as a cache-bust
+    key. When load_config() replaces the list object, the id() changes and
+    stale cache entries are naturally bypassed.
+
+    Args:
+        source_ip: Source IP string (e.g. "10.0.0.5")
+        ranges:    List of ipaddress.IPv4Network / IPv6Network objects
+
+    Returns:
+        True if source_ip is contained in any range, False otherwise.
+    """
+    if not ranges:
+        return False
+    return _is_ip_blocked_by_range_impl(source_ip, id(ranges), tuple(ranges))
+
+
+@functools.lru_cache(maxsize=65536)
+def _is_ip_blocked_by_range_impl(source_ip: str, ranges_id: int,
+                                  ranges: tuple) -> bool:
+    """
+    Cached implementation of IP-in-range check.
+
+    Args:
+        source_ip:  Source IP string
+        ranges_id:  id() of the original list (cache-bust on config reload)
+        ranges:     Tuple of IPv4Network/IPv6Network objects
+
+    Returns:
+        True if source_ip is contained in any range, False otherwise.
+    """
+    try:
+        addr = ipaddress.ip_address(source_ip)
+        return any(addr in net for net in ranges)
+    except ValueError:
+        return False
+
+
+def _get_redirect_tag_from_ranges(source_ip: str, ip_ranges: list) -> str:
+    """
+    Return the redirection tag for source_ip from ip_ranges, or "" if none.
+
+    ip_ranges is a list of (IPv4Network|IPv6Network, tag: str) tuples.
+
+    Fast path: returns "" immediately if ip_ranges is empty.
+
+    Uses the same id()-based cache-bust pattern as _is_ip_blocked_by_range.
+
+    Args:
+        source_ip:  Source IP string
+        ip_ranges:  List of (network, tag) tuples from
+                    config['redirected_ip_ranges']
+
+    Returns:
+        First matching tag string, or "" if no match.
+    """
+    if not ip_ranges:
+        return ""
+    return _get_redirect_tag_from_ranges_impl(source_ip, id(ip_ranges),
+                                              tuple(ip_ranges))
+
+
+@functools.lru_cache(maxsize=65536)
+def _get_redirect_tag_from_ranges_impl(source_ip: str, ranges_id: int,
+                                       ip_ranges: tuple) -> str:
+    """
+    Cached implementation of IP-range-to-tag lookup.
+
+    Args:
+        source_ip:  Source IP string
+        ranges_id:  id() of the original list (cache-bust on config reload)
+        ip_ranges:  Tuple of (network, tag) tuples
+
+    Returns:
+        First matching tag string, or "" if no match.
+    """
+    try:
+        addr = ipaddress.ip_address(source_ip)
+        for net, tag in ip_ranges:
+            if addr in net:
+                return tag
+    except ValueError:
+        pass
+    return ""
 
 
 class PacketHandler:
@@ -259,8 +355,9 @@ class PacketHandler:
                     f"SNMP {snmp_ver}, first bytes: {payload[:10].hex()}"
                 )
 
-            # Quick IP block check
-            if source_ip in config['blocked_ips']:
+            # IP block check — exact first (O(1)), range fallback (O(1) after warmup)
+            if (source_ip in config['blocked_ips'] or
+                    _is_ip_blocked_by_range(source_ip, config.get('blocked_ip_ranges', []))):
                 self._record_granular_stats(source_ip, None, 'blocked')
                 return
 
@@ -291,16 +388,19 @@ class PacketHandler:
                             )
                         return
 
-                    # Check IP redirection
-                    if source_ip in config['redirected_ips']:
-                        tag = config['redirected_ips'][source_ip]
-                        if tag in config['redirected_destinations']:
-                            self._complete_forward(
-                                source_ip, payload,
-                                config['redirected_destinations'][tag],
-                                trap_oid, tag, 'redirected'
-                            )
-                            return
+                    # IP redirect — exact first (O(1)), range fallback (O(1) after warmup)
+                    tag = config['redirected_ips'].get(source_ip, '')
+                    if not tag:
+                        tag = _get_redirect_tag_from_ranges(
+                            source_ip, config.get('redirected_ip_ranges', [])
+                        )
+                    if tag and tag in config['redirected_destinations']:
+                        self._complete_forward(
+                            source_ip, payload,
+                            config['redirected_destinations'][tag],
+                            trap_oid, tag, 'redirected'
+                        )
+                        return
 
                     # Check OID redirection
                     if trap_oid in config['redirected_oids']:
@@ -384,16 +484,19 @@ class PacketHandler:
                 forward_packet(source_ip, payload, config['blocked_dest'])
             return
 
-        # Check redirection (IP takes priority over OID)
-        if source_ip in config['redirected_ips']:
-            tag = config['redirected_ips'][source_ip]
-            if tag in config['redirected_destinations']:
-                self._complete_forward(
-                    source_ip, payload,
-                    config['redirected_destinations'][tag],
-                    trap_oid, tag, 'redirected'
-                )
-                return
+        # IP redirect — exact first, range fallback
+        tag = config['redirected_ips'].get(source_ip, '')
+        if not tag:
+            tag = _get_redirect_tag_from_ranges(
+                source_ip, config.get('redirected_ip_ranges', [])
+            )
+        if tag and tag in config['redirected_destinations']:
+            self._complete_forward(
+                source_ip, payload,
+                config['redirected_destinations'][tag],
+                trap_oid, tag, 'redirected'
+            )
+            return
 
         if trap_oid in config['redirected_oids']:
             tag = config['redirected_oids'][trap_oid]
@@ -453,21 +556,24 @@ class PacketHandler:
             logger.debug(f"{log_prefix}Trap blocked by OID filter: {trap_oid}")
             return True
 
-        # Check IP redirection (takes priority over OID)
-        if source_ip in config['redirected_ips']:
-            tag = config['redirected_ips'][source_ip]
-            if tag in config['redirected_destinations']:
-                dest_list = config['redirected_destinations'][tag]
-                self._complete_forward(
-                    source_ip, payload, dest_list,
-                    trap_oid, tag, 'redirected'
+        # IP redirect — exact first, range fallback
+        tag = config['redirected_ips'].get(source_ip, '')
+        if not tag:
+            tag = _get_redirect_tag_from_ranges(
+                source_ip, config.get('redirected_ip_ranges', [])
+            )
+        if tag and tag in config['redirected_destinations']:
+            dest_list = config['redirected_destinations'][tag]
+            self._complete_forward(
+                source_ip, payload, dest_list,
+                trap_oid, tag, 'redirected'
+            )
+            if is_decrypted_v3:
+                logger.info(
+                    f"{log_prefix}Forwarded from {source_ip} to '{tag}' "
+                    f"({len(dest_list)} hosts)"
                 )
-                if is_decrypted_v3:
-                    logger.info(
-                        f"{log_prefix}Forwarded from {source_ip} to '{tag}' "
-                        f"({len(dest_list)} hosts)"
-                    )
-                return True
+            return True
 
         # Check OID redirection
         if trap_oid and trap_oid in config['redirected_oids']:

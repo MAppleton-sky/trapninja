@@ -432,6 +432,234 @@ class TestLoadRedirectionConfig:
         assert "invalid" not in config.redirected_destinations
 
 
+class TestCIDRLoading:
+    """Tests for CIDR range splitting in blocked_ips and redirected_ips loaders."""
+
+    def _stop_event(self):
+        return MagicMock(is_set=lambda: True)
+
+    def test_plain_ips_only_leaves_ranges_empty(self, tmp_path, monkeypatch):
+        """Plain IPs with no CIDR notation populate blocked_ips; blocked_ip_ranges stays empty."""
+        import trapninja.config as config
+
+        ip_file = tmp_path / "blocked_ips.json"
+        ip_file.write_text(json.dumps(["10.0.0.1", "10.0.0.2"]))
+
+        config.blocked_ips_mtime = 0
+        config.blocked_ips = set()
+        config.blocked_ip_ranges = []
+
+        monkeypatch.setattr(config, 'BLOCKED_IPS_FILE', str(ip_file))
+        monkeypatch.setattr(config, 'stop_event', self._stop_event())
+
+        config.load_config()
+
+        assert config.blocked_ips == {"10.0.0.1", "10.0.0.2"}
+        assert config.blocked_ip_ranges == []
+
+    def test_cidrs_only_leaves_blocked_ips_empty(self, tmp_path, monkeypatch):
+        """CIDR entries populate blocked_ip_ranges; blocked_ips stays empty."""
+        import ipaddress
+        import trapninja.config as config
+
+        ip_file = tmp_path / "blocked_ips.json"
+        ip_file.write_text(json.dumps(["192.168.0.0/24", "10.0.0.0/8"]))
+
+        config.blocked_ips_mtime = 0
+        config.blocked_ips = set()
+        config.blocked_ip_ranges = []
+
+        monkeypatch.setattr(config, 'BLOCKED_IPS_FILE', str(ip_file))
+        monkeypatch.setattr(config, 'stop_event', self._stop_event())
+
+        config.load_config()
+
+        assert config.blocked_ips == set()
+        assert len(config.blocked_ip_ranges) == 2
+        assert ipaddress.ip_network("192.168.0.0/24") in config.blocked_ip_ranges
+        assert ipaddress.ip_network("10.0.0.0/8") in config.blocked_ip_ranges
+
+    def test_mixed_blocked_ips_populates_both_structures(self, tmp_path, monkeypatch):
+        """Mixed file: plain IPs to blocked_ips, CIDRs to blocked_ip_ranges."""
+        import ipaddress
+        import trapninja.config as config
+
+        ip_file = tmp_path / "blocked_ips.json"
+        ip_file.write_text(json.dumps(["10.0.0.1", "192.168.0.0/24"]))
+
+        config.blocked_ips_mtime = 0
+        config.blocked_ips = set()
+        config.blocked_ip_ranges = []
+
+        monkeypatch.setattr(config, 'BLOCKED_IPS_FILE', str(ip_file))
+        monkeypatch.setattr(config, 'stop_event', self._stop_event())
+
+        config.load_config()
+
+        assert "10.0.0.1" in config.blocked_ips
+        assert len(config.blocked_ip_ranges) == 1
+        assert config.blocked_ip_ranges[0] == ipaddress.ip_network("192.168.0.0/24")
+
+    def test_invalid_cidr_in_blocked_ips_is_skipped(self, tmp_path, monkeypatch):
+        """Invalid CIDR entries are skipped; valid entries are still loaded."""
+        import trapninja.config as config
+
+        ip_file = tmp_path / "blocked_ips.json"
+        ip_file.write_text(json.dumps(["10.0.0.0/99", "10.0.0.1"]))
+
+        config.blocked_ips_mtime = 0
+        config.blocked_ips = set()
+        config.blocked_ip_ranges = []
+
+        monkeypatch.setattr(config, 'BLOCKED_IPS_FILE', str(ip_file))
+        monkeypatch.setattr(config, 'stop_event', self._stop_event())
+
+        config.load_config()
+
+        assert "10.0.0.1" in config.blocked_ips
+        assert config.blocked_ip_ranges == []
+
+    def test_cidr_normalisation_strips_host_bits(self, tmp_path, monkeypatch):
+        """Non-strict CIDR: 10.0.0.5/24 is stored as network 10.0.0.0/24."""
+        import trapninja.config as config
+
+        ip_file = tmp_path / "blocked_ips.json"
+        ip_file.write_text(json.dumps(["10.0.0.5/24"]))
+
+        config.blocked_ips_mtime = 0
+        config.blocked_ips = set()
+        config.blocked_ip_ranges = []
+
+        monkeypatch.setattr(config, 'BLOCKED_IPS_FILE', str(ip_file))
+        monkeypatch.setattr(config, 'stop_event', self._stop_event())
+
+        config.load_config()
+
+        assert len(config.blocked_ip_ranges) == 1
+        assert str(config.blocked_ip_ranges[0]) == "10.0.0.0/24"
+
+    def test_cidr_pair_in_redirected_ips_goes_to_ranges(self, tmp_path, monkeypatch):
+        """CIDR entry in redirected_ips.json appears in redirected_ip_ranges."""
+        import ipaddress
+        import trapninja.config as config
+
+        ip_file = tmp_path / "redirected_ips.json"
+        ip_file.write_text(json.dumps([["192.168.0.0/24", "security"]]))
+
+        config.redirected_ips_mtime = 0
+        config.redirected_ips = defaultdict(str)
+        config.redirected_ip_ranges = []
+
+        monkeypatch.setattr(config, 'REDIRECTED_IPS_FILE', str(ip_file))
+        monkeypatch.setattr(config, 'stop_event', self._stop_event())
+
+        config.load_config()
+
+        assert len(config.redirected_ip_ranges) == 1
+        net, tag = config.redirected_ip_ranges[0]
+        assert net == ipaddress.IPv4Network("192.168.0.0/24")
+        assert tag == "security"
+        assert len(config.redirected_ips) == 0
+
+    def test_plain_ip_pair_still_in_redirected_ips_dict(self, tmp_path, monkeypatch):
+        """Plain IP pairs in redirected_ips.json remain in redirected_ips dict."""
+        import trapninja.config as config
+
+        ip_file = tmp_path / "redirected_ips.json"
+        ip_file.write_text(json.dumps([["192.168.10.50", "security"]]))
+
+        config.redirected_ips_mtime = 0
+        config.redirected_ips = defaultdict(str)
+        config.redirected_ip_ranges = []
+
+        monkeypatch.setattr(config, 'REDIRECTED_IPS_FILE', str(ip_file))
+        monkeypatch.setattr(config, 'stop_event', self._stop_event())
+
+        config.load_config()
+
+        assert config.redirected_ips["192.168.10.50"] == "security"
+        assert config.redirected_ip_ranges == []
+
+    def test_mixed_redirected_ips_populates_both_structures(self, tmp_path, monkeypatch):
+        """Mixed redirected_ips.json: plain IPs to dict, CIDRs to ranges list."""
+        import ipaddress
+        import trapninja.config as config
+
+        ip_file = tmp_path / "redirected_ips.json"
+        ip_file.write_text(json.dumps([
+            ["192.168.10.50", "security"],
+            ["10.0.0.0/8", "network"]
+        ]))
+
+        config.redirected_ips_mtime = 0
+        config.redirected_ips = defaultdict(str)
+        config.redirected_ip_ranges = []
+
+        monkeypatch.setattr(config, 'REDIRECTED_IPS_FILE', str(ip_file))
+        monkeypatch.setattr(config, 'stop_event', self._stop_event())
+
+        config.load_config()
+
+        assert config.redirected_ips["192.168.10.50"] == "security"
+        assert len(config.redirected_ip_ranges) == 1
+        net, tag = config.redirected_ip_ranges[0]
+        assert net == ipaddress.ip_network("10.0.0.0/8")
+        assert tag == "network"
+
+    def test_invalid_cidr_in_redirected_ips_is_skipped(self, tmp_path, monkeypatch):
+        """Invalid CIDR in redirected_ips.json is skipped; valid entries still load."""
+        import trapninja.config as config
+
+        ip_file = tmp_path / "redirected_ips.json"
+        ip_file.write_text(json.dumps([
+            ["10.0.0.0/99", "bad"],
+            ["192.168.10.50", "security"]
+        ]))
+
+        config.redirected_ips_mtime = 0
+        config.redirected_ips = defaultdict(str)
+        config.redirected_ip_ranges = []
+
+        monkeypatch.setattr(config, 'REDIRECTED_IPS_FILE', str(ip_file))
+        monkeypatch.setattr(config, 'stop_event', self._stop_event())
+
+        config.load_config()
+
+        assert config.redirected_ips["192.168.10.50"] == "security"
+        assert config.redirected_ip_ranges == []
+
+    def test_config_cache_contains_range_keys(self, monkeypatch):
+        """After cache refresh, config dict includes blocked_ip_ranges and redirected_ip_ranges."""
+        import ipaddress
+        import trapninja.config as config
+        from trapninja.processing.config_cache import ConfigCache
+
+        config.blocked_ip_ranges = [ipaddress.ip_network("10.0.0.0/8")]
+        config.redirected_ip_ranges = []
+
+        cache = ConfigCache(ttl=0)
+        result = cache.get()
+
+        assert 'blocked_ip_ranges' in result
+        assert 'redirected_ip_ranges' in result
+        assert isinstance(result['blocked_ip_ranges'], list)
+        assert isinstance(result['redirected_ip_ranges'], list)
+
+    def test_config_cache_empty_ranges_when_module_empty(self, monkeypatch):
+        """When both range lists are empty in the module, cache keys are []."""
+        import trapninja.config as config
+        from trapninja.processing.config_cache import ConfigCache
+
+        config.blocked_ip_ranges = []
+        config.redirected_ip_ranges = []
+
+        cache = ConfigCache(ttl=0)
+        result = cache.get()
+
+        assert result['blocked_ip_ranges'] == []
+        assert result['redirected_ip_ranges'] == []
+
+
 class TestEnsureConfigDir:
     """Tests for ensure_config_dir function."""
 

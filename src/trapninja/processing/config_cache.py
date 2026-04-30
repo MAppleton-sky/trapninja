@@ -63,9 +63,11 @@ class ConfigCache:
             self._cache = {
                 'destinations': getattr(cfg, 'destinations', []),
                 'blocked_ips': getattr(cfg, 'blocked_ips', set()),
+                'blocked_ip_ranges': getattr(cfg, 'blocked_ip_ranges', []),
                 'blocked_traps': getattr(cfg, 'blocked_traps', set()),
                 'blocked_dest': getattr(cfg, 'blocked_dest', None),
                 'redirected_ips': getattr(cfg, 'redirected_ips', {}),
+                'redirected_ip_ranges': getattr(cfg, 'redirected_ip_ranges', []),
                 'redirected_oids': getattr(cfg, 'redirected_oids', {}),
                 'redirected_destinations': getattr(cfg, 'redirected_destinations', {}),
             }
@@ -84,6 +86,7 @@ class ConfigCache:
                 logger.debug(
                     f"Config cache refreshed: {dest_count} destination(s), "
                     f"{len(self._cache['blocked_ips'])} blocked IPs, "
+                    f"{len(self._cache['blocked_ip_ranges'])} blocked IP ranges, "
                     f"{len(self._cache['blocked_traps'])} blocked traps"
                 )
 
@@ -94,9 +97,11 @@ class ConfigCache:
                 self._cache = {
                     'destinations': [],
                     'blocked_ips': set(),
+                    'blocked_ip_ranges': [],
                     'blocked_traps': set(),
                     'blocked_dest': None,
                     'redirected_ips': {},
+                    'redirected_ip_ranges': [],
                     'redirected_oids': {},
                     'redirected_destinations': {},
                 }

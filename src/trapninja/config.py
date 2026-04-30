@@ -16,6 +16,7 @@ import logging
 import time
 from threading import Timer, Event
 from collections import defaultdict
+import ipaddress
 
 # Paths to config files
 # Priority: TRAPNINJA_CONFIG env var > /etc/trapninja > ./config > /opt/trapninja/config
@@ -285,7 +286,13 @@ destinations = []
 blocked_traps = set()  # Using set for O(1) lookups
 blocked_dest = [("127.0.0.1", 1462)]
 blocked_ips = set()  # IPs that should be blocked - using set for O(1) lookups
+blocked_ip_ranges: list = []
+# List of ipaddress.IPv4Network / IPv6Network objects parsed from CIDR entries
+# in blocked_ips.json. Populated by load_config().
 redirected_ips = defaultdict(str)  # Maps IP -> tag
+redirected_ip_ranges: list = []
+# List of (ipaddress.IPv4Network | IPv6Network, tag: str) tuples parsed from
+# CIDR entries in redirected_ips.json. Populated by load_config().
 redirected_oids = defaultdict(str)  # Maps OID -> tag
 redirected_destinations = defaultdict(list)  # Maps tag -> list of (ip, port) destinations
 
@@ -426,7 +433,8 @@ def load_config(restart_udp_listeners_callback=None):
         bool: True if any configuration changed, False otherwise
     """
     global destinations, blocked_traps, LISTEN_PORTS, dest_mtime, blocked_mtime, ports_mtime
-    global blocked_ips, blocked_ips_mtime, redirected_ips, redirected_oids, redirected_destinations
+    global blocked_ips, blocked_ip_ranges, blocked_ips_mtime
+    global redirected_ips, redirected_ip_ranges, redirected_oids, redirected_destinations
     global redirected_ips_mtime, redirected_oids_mtime, redirected_destinations_mtime
 
     # Use existing logger instance
@@ -475,11 +483,24 @@ def load_config(restart_udp_listeners_callback=None):
         if os.path.exists(BLOCKED_IPS_FILE):
             current_blocked_ips_mtime = os.path.getmtime(BLOCKED_IPS_FILE)
             if current_blocked_ips_mtime != blocked_ips_mtime:
-                # Use set for more efficient lookups
-                blocked_ips = set(safe_load_json(BLOCKED_IPS_FILE, []))
+                raw_list = safe_load_json(BLOCKED_IPS_FILE, [])
+                _exact = set()
+                _ranges = []
+                for entry in raw_list:
+                    if '/' in str(entry):
+                        try:
+                            net = ipaddress.ip_network(entry, strict=False)
+                            _ranges.append(net)
+                        except ValueError:
+                            log.warning(f"Invalid CIDR in blocked_ips: {entry!r} — skipped")
+                    else:
+                        _exact.add(entry)
+                blocked_ips = _exact
+                blocked_ip_ranges = _ranges
                 blocked_ips_mtime = current_blocked_ips_mtime
                 config_changed = True
-                log.info(f"Reloaded {len(blocked_ips)} blocked IPs")
+                log.info(f"Reloaded {len(blocked_ips)} blocked IPs, "
+                         f"{len(blocked_ip_ranges)} blocked IP ranges")
         else:
             log.warning(f"Blocked IPs file does not exist: {BLOCKED_IPS_FILE}")
     except Exception as e:
@@ -493,16 +514,27 @@ def load_config(restart_udp_listeners_callback=None):
                 current_time = os.path.getmtime(REDIRECTED_IPS_FILE)
                 if current_time != redirected_ips_mtime:
                     loaded_data = safe_load_json(REDIRECTED_IPS_FILE, [])
-                    temp_dict = defaultdict(str)
+                    _exact = defaultdict(str)
+                    _ranges = []
                     for item in loaded_data:
                         if len(item) == 2:
-                            ip, tag = item
-                            if isinstance(tag, str):
-                                temp_dict[ip] = tag
-                    redirected_ips = temp_dict
+                            key, tag = item
+                            if not isinstance(tag, str):
+                                continue
+                            if '/' in str(key):
+                                try:
+                                    net = ipaddress.ip_network(key, strict=False)
+                                    _ranges.append((net, tag))
+                                except ValueError:
+                                    log.warning(f"Invalid CIDR in redirected_ips: {key!r} — skipped")
+                            else:
+                                _exact[key] = tag
+                    redirected_ips = _exact
+                    redirected_ip_ranges = _ranges
                     redirected_ips_mtime = current_time
                     config_changed = True
-                    log.info(f"Loaded {len(redirected_ips)} IP redirection rules")
+                    log.info(f"Loaded {len(redirected_ips)} IP redirections, "
+                             f"{len(redirected_ip_ranges)} IP range redirections")
 
             if os.path.exists(REDIRECTED_OIDS_FILE):
                 current_time = os.path.getmtime(REDIRECTED_OIDS_FILE)

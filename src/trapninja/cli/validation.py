@@ -190,6 +190,37 @@ class InputValidator:
             return None
 
     @classmethod
+    @lru_cache(maxsize=512)
+    def validate_ip_or_cidr(cls, ip_str: str) -> Optional[str]:
+        """
+        Validate an IPv4/IPv6 address or CIDR network range.
+
+        Accepts a plain IP address (e.g. '10.0.0.1') or a CIDR range
+        (e.g. '192.168.0.0/24'). CIDR ranges are normalised to their
+        network address form (e.g. '192.168.1.5/24' -> '192.168.1.0/24').
+        Plain IPs are delegated to validate_ip.
+
+        Returns:
+            Normalised address or network string, or None if invalid.
+        """
+        if not isinstance(ip_str, str):
+            return None
+
+        sanitized = cls.sanitize_string(ip_str, max_length=50)
+        if not sanitized:
+            return None
+
+        if '/' in sanitized:
+            try:
+                net = ipaddress.ip_network(sanitized, strict=False)
+                return str(net)
+            except ValueError:
+                print(f"Invalid CIDR range: {sanitized}")
+                return None
+
+        return cls.validate_ip(ip_str)
+
+    @classmethod
     @lru_cache(maxsize=256)
     def validate_tag(cls, tag_str: str) -> Optional[str]:
         """

@@ -994,23 +994,431 @@ class TestRedirectionOIDLoading:
     def test_invalid_oid_redirection_skipped(self, temp_config_dir):
         """Invalid OID in redirection is skipped (if validation is done)."""
         from trapninja import config
-        
+
         bad_redirections = [
             ['not.valid..oid', 'security'],  # Invalid (double dot)
             ['1.3.6.1.4.1.9.9.117', 'valid_tag'],  # Valid
         ]
-        
+
         oid_file = os.path.join(temp_config_dir, 'redirected_oids.json')
         with open(oid_file, 'w') as f:
             json.dump(bad_redirections, f)
-        
+
         with patch.object(config, 'REDIRECTED_OIDS_FILE', oid_file):
             with patch.object(config, 'stop_event') as mock_stop:
                 mock_stop.is_set.return_value = True
-                
+
                 config.redirected_oids_mtime = 0
                 config.load_config()
-                
+
                 # Valid OID should be loaded
                 assert '1.3.6.1.4.1.9.9.117' in config.redirected_oids
                 # Note: config.py may not validate OIDs - just test that valid one works
+
+
+# =============================================================================
+# TEST CLASS: IP RANGE FILTERING
+# =============================================================================
+
+class TestIPRangeFiltering:
+    """Test CIDR range-based IP blocking and redirection in the hot path."""
+
+    def _make_config(self, **overrides):
+        """Build a complete config dict with safe defaults for all required keys."""
+        base = {
+            'destinations': [('192.168.1.100', 162)],
+            'blocked_traps': set(),
+            'blocked_dest': [],
+            'blocked_ips': set(),
+            'blocked_ip_ranges': [],
+            'redirected_ips': {},
+            'redirected_ip_ranges': [],
+            'redirected_oids': {},
+            'redirected_destinations': {},
+        }
+        base.update(overrides)
+        return base
+
+    # ------------------------------------------------------------------
+    # Module-level helper unit tests
+    # ------------------------------------------------------------------
+
+    def test_blocked_by_range_empty_fast_path(self):
+        """_is_ip_blocked_by_range returns False immediately for an empty list."""
+        from trapninja.processing.packet_handler import _is_ip_blocked_by_range
+
+        result = _is_ip_blocked_by_range("10.0.0.5", [])
+
+        assert result is False
+
+    def test_blocked_by_range_match(self):
+        """_is_ip_blocked_by_range returns True when IP falls within a range."""
+        import ipaddress
+        from trapninja.processing.packet_handler import _is_ip_blocked_by_range
+
+        result = _is_ip_blocked_by_range(
+            "10.0.0.5", [ipaddress.IPv4Network("10.0.0.0/24")]
+        )
+
+        assert result is True
+
+    def test_blocked_by_range_no_match(self):
+        """_is_ip_blocked_by_range returns False when IP is outside all ranges."""
+        import ipaddress
+        from trapninja.processing.packet_handler import _is_ip_blocked_by_range
+
+        result = _is_ip_blocked_by_range(
+            "10.0.1.5", [ipaddress.IPv4Network("10.0.0.0/24")]
+        )
+
+        assert result is False
+
+    def test_redirect_tag_from_ranges_empty_fast_path(self):
+        """_get_redirect_tag_from_ranges returns '' immediately for an empty list."""
+        from trapninja.processing.packet_handler import _get_redirect_tag_from_ranges
+
+        result = _get_redirect_tag_from_ranges("10.0.0.5", [])
+
+        assert result == ""
+
+    def test_redirect_tag_from_ranges_match(self):
+        """_get_redirect_tag_from_ranges returns the matching tag."""
+        import ipaddress
+        from trapninja.processing.packet_handler import _get_redirect_tag_from_ranges
+
+        result = _get_redirect_tag_from_ranges(
+            "10.0.0.5",
+            [(ipaddress.IPv4Network("10.0.0.0/24"), "sec")]
+        )
+
+        assert result == "sec"
+
+    def test_redirect_tag_from_ranges_no_match(self):
+        """_get_redirect_tag_from_ranges returns '' when IP is outside all ranges."""
+        import ipaddress
+        from trapninja.processing.packet_handler import _get_redirect_tag_from_ranges
+
+        result = _get_redirect_tag_from_ranges(
+            "10.0.1.5",
+            [(ipaddress.IPv4Network("10.0.0.0/24"), "sec")]
+        )
+
+        assert result == ""
+
+    def test_impl_cache_used_on_repeated_calls(self):
+        """_is_ip_blocked_by_range_impl LRU cache records a hit on second call."""
+        import ipaddress
+        from trapninja.processing.packet_handler import _is_ip_blocked_by_range_impl
+
+        _is_ip_blocked_by_range_impl.cache_clear()
+        ranges = (ipaddress.IPv4Network("10.0.0.0/24"),)
+        ranges_id = id(ranges)
+
+        _is_ip_blocked_by_range_impl("10.0.0.5", ranges_id, ranges)
+        _is_ip_blocked_by_range_impl("10.0.0.5", ranges_id, ranges)
+
+        assert _is_ip_blocked_by_range_impl.cache_info().hits >= 1
+
+    # ------------------------------------------------------------------
+    # Integration tests via PacketWorker
+    # ------------------------------------------------------------------
+
+    def test_packet_blocked_by_cidr_range(self):
+        """Packet from IP within a blocked CIDR range is dropped without forwarding."""
+        import ipaddress
+        import queue
+        from trapninja.processing.worker import PacketWorker
+        from trapninja.processing.worker import _config_cache
+
+        config = self._make_config(
+            blocked_ip_ranges=[ipaddress.IPv4Network("10.0.0.0/24")]
+        )
+        pq = queue.Queue()
+        stop = threading.Event()
+        worker = PacketWorker(0, pq, stop)
+        payload = build_snmpv2c_trap()
+
+        with patch.object(_config_cache, 'get', return_value=config), \
+             patch('trapninja.processing.packet_handler.forward_packet') as mock_forward, \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled',
+                   return_value=True):
+
+            worker._process_packet({
+                'src_ip': '10.0.0.5',
+                'dst_port': 162,
+                'payload': payload,
+            })
+
+            mock_forward.assert_not_called()
+
+    def test_packet_not_blocked_outside_cidr_range(self):
+        """Packet from IP outside the blocked CIDR range is forwarded normally."""
+        import ipaddress
+        import queue
+        from trapninja.processing.worker import PacketWorker
+        from trapninja.processing.worker import _config_cache
+
+        config = self._make_config(
+            blocked_ip_ranges=[ipaddress.IPv4Network("10.0.0.0/24")]
+        )
+        pq = queue.Queue()
+        stop = threading.Event()
+        worker = PacketWorker(0, pq, stop)
+        payload = build_snmpv2c_trap()
+
+        with patch.object(_config_cache, 'get', return_value=config), \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled',
+                   return_value=True), \
+             patch.object(worker, '_complete_forward') as mock_complete:
+
+            worker._process_packet({
+                'src_ip': '10.0.1.5',
+                'dst_port': 162,
+                'payload': payload,
+            })
+
+            mock_complete.assert_called_once()
+
+    def test_exact_ip_and_range_block_counted_once(self):
+        """When IP matches both blocked_ips and blocked_ip_ranges, blocked is recorded once."""
+        import ipaddress
+        import queue
+        from trapninja.processing.worker import PacketWorker
+        from trapninja.processing.worker import _config_cache
+
+        config = self._make_config(
+            blocked_ips={'10.0.0.5'},
+            blocked_ip_ranges=[ipaddress.IPv4Network("10.0.0.0/24")],
+        )
+        pq = queue.Queue()
+        stop = threading.Event()
+        worker = PacketWorker(0, pq, stop)
+        payload = build_snmpv2c_trap()
+
+        with patch.object(_config_cache, 'get', return_value=config), \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled',
+                   return_value=True), \
+             patch.object(worker, '_record_granular_stats') as mock_stats:
+
+            worker._process_packet({
+                'src_ip': '10.0.0.5',
+                'dst_port': 162,
+                'payload': payload,
+            })
+
+            blocked_calls = [c for c in mock_stats.call_args_list
+                             if len(c.args) > 2 and c.args[2] == 'blocked']
+            assert len(blocked_calls) == 1
+
+    def test_packet_redirected_via_cidr_range(self):
+        """Packet from IP within a redirected CIDR range forwards to that tag's destinations."""
+        import ipaddress
+        import queue
+        from trapninja.processing.worker import PacketWorker
+        from trapninja.processing.worker import _config_cache
+
+        security_dest = [('10.10.10.1', 162)]
+        config = self._make_config(
+            redirected_ip_ranges=[(ipaddress.IPv4Network("192.168.50.0/24"), "security")],
+            redirected_destinations={'security': security_dest},
+        )
+        pq = queue.Queue()
+        stop = threading.Event()
+        worker = PacketWorker(0, pq, stop)
+        payload = build_snmpv2c_trap()
+
+        with patch.object(_config_cache, 'get', return_value=config), \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled',
+                   return_value=True), \
+             patch.object(worker, '_complete_forward') as mock_complete:
+
+            worker._process_packet({
+                'src_ip': '192.168.50.5',
+                'dst_port': 162,
+                'payload': payload,
+            })
+
+            mock_complete.assert_called_once()
+            # Third positional arg is destinations
+            assert mock_complete.call_args.args[2] == security_dest
+
+    def test_exact_ip_redirect_beats_range_redirect(self):
+        """Exact IP match in redirected_ips takes priority over a CIDR range match."""
+        import ipaddress
+        import queue
+        from trapninja.processing.worker import PacketWorker
+        from trapninja.processing.worker import _config_cache
+
+        voice_dest = [('20.20.20.1', 162)]
+        security_dest = [('10.10.10.1', 162)]
+        config = self._make_config(
+            redirected_ips={'192.168.50.5': 'voice'},
+            redirected_ip_ranges=[(ipaddress.IPv4Network("192.168.50.0/24"), "security")],
+            redirected_destinations={
+                'voice': voice_dest,
+                'security': security_dest,
+            },
+        )
+        pq = queue.Queue()
+        stop = threading.Event()
+        worker = PacketWorker(0, pq, stop)
+        payload = build_snmpv2c_trap()
+
+        with patch.object(_config_cache, 'get', return_value=config), \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled',
+                   return_value=True), \
+             patch.object(worker, '_complete_forward') as mock_complete:
+
+            worker._process_packet({
+                'src_ip': '192.168.50.5',
+                'dst_port': 162,
+                'payload': payload,
+            })
+
+            mock_complete.assert_called_once()
+            assert mock_complete.call_args.args[2] == voice_dest
+
+
+# =============================================================================
+# TEST CLASS: CLI IP RANGE OPERATIONS
+# =============================================================================
+
+class TestCLIIPRangeOperations:
+    """
+    Tests for CIDR range support in the CLI filtering layer.
+
+    Uses local manager instances backed by temp files rather than the global
+    singletons in filtering_commands.py, so no real config paths are touched.
+    """
+
+    def _make_list_manager(self, file_path: str):
+        """Build a ConfigListManager with validate_ip_or_cidr and a temp file."""
+        from trapninja.cli.command_base import ConfigListManager, config_io
+        from trapninja.cli.validation import InputValidator
+        config_io.invalidate(file_path)
+        return ConfigListManager(
+            file_path_getter=lambda: file_path,
+            validator=InputValidator.validate_ip_or_cidr,
+            item_name="IP address or CIDR range",
+        )
+
+    def _make_pair_manager(self, pairs_path: str, dests_path: str):
+        """Build a ConfigPairListManager with validate_ip_or_cidr and temp files."""
+        from trapninja.cli.command_base import ConfigPairListManager, config_io
+        from trapninja.cli.validation import InputValidator
+        config_io.invalidate(pairs_path)
+        config_io.invalidate(dests_path)
+        return ConfigPairListManager(
+            file_path_getter=lambda: pairs_path,
+            dest_file_path_getter=lambda: dests_path,
+            key_validator=InputValidator.validate_ip_or_cidr,
+            tag_validator=InputValidator.validate_tag,
+            key_name="IP or CIDR range",
+        )
+
+    def test_block_cidr_range_accepted(self, tmp_path):
+        """block-ip accepts a CIDR range and persists it to the config file."""
+        blocked_file = str(tmp_path / "blocked_ips.json")
+        manager = self._make_list_manager(blocked_file)
+        assert manager.add("10.50.0.0/16") is True
+        from trapninja.cli.command_base import config_io
+        assert "10.50.0.0/16" in config_io.load(blocked_file, [])
+
+    def test_block_cidr_normalises_host_bits(self, tmp_path):
+        """block-ip normalises CIDR that has host bits set."""
+        blocked_file = str(tmp_path / "blocked_ips.json")
+        manager = self._make_list_manager(blocked_file)
+        manager.add("192.168.1.5/24")
+        from trapninja.cli.command_base import config_io
+        data = config_io.load(blocked_file, [])
+        assert "192.168.1.0/24" in data
+        assert "192.168.1.5/24" not in data
+
+    def test_block_invalid_cidr_rejected(self, tmp_path):
+        """block-ip rejects a CIDR with an out-of-range prefix length."""
+        blocked_file = str(tmp_path / "blocked_ips.json")
+        manager = self._make_list_manager(blocked_file)
+        assert manager.add("10.0.0.0/33") is False
+
+    def test_list_all_separates_plain_and_cidr(self, tmp_path, capsys):
+        """list_all() prints plain IPs and CIDR ranges in separate subsections."""
+        import json
+        blocked_file = str(tmp_path / "blocked_ips.json")
+        with open(blocked_file, 'w') as f:
+            json.dump(["10.0.0.1", "10.50.0.0/16", "192.168.1.0/24"], f)
+        from trapninja.cli.command_base import config_io
+        config_io.invalidate(blocked_file)
+        manager = self._make_list_manager(blocked_file)
+        assert manager.list_all() is True
+        out = capsys.readouterr().out
+        assert "Individual IPs" in out
+        assert "CIDR Ranges" in out
+        assert "10.0.0.1" in out
+        assert "10.50.0.0/16" in out
+
+    def test_list_all_cidr_only_no_plain_section(self, tmp_path, capsys):
+        """list_all() shows only CIDR Ranges section when no plain IPs present."""
+        import json
+        blocked_file = str(tmp_path / "blocked_ips.json")
+        with open(blocked_file, 'w') as f:
+            json.dump(["10.50.0.0/16"], f)
+        from trapninja.cli.command_base import config_io
+        config_io.invalidate(blocked_file)
+        manager = self._make_list_manager(blocked_file)
+        manager.list_all()
+        out = capsys.readouterr().out
+        assert "CIDR Ranges" in out
+        assert "Individual IPs" not in out
+
+    def test_redirect_cidr_range_accepted(self, tmp_path):
+        """redirect-ip accepts a CIDR range when the destination tag exists."""
+        import json
+        pairs_file = str(tmp_path / "redirected_ips.json")
+        dests_file = str(tmp_path / "redirected_destinations.json")
+        with open(dests_file, 'w') as f:
+            json.dump({"security": [["10.1.1.100", 162]]}, f)
+        manager = self._make_pair_manager(pairs_file, dests_file)
+        assert manager.add("192.168.50.0/24", "security") is True
+        from trapninja.cli.command_base import config_io
+        data = config_io.load(pairs_file, [])
+        assert ["192.168.50.0/24", "security"] in data
+
+    def test_redirect_pair_list_all_shows_sections(self, tmp_path, capsys):
+        """list_all() on ConfigPairListManager shows grouped sections when CIDRs present."""
+        import json
+        pairs_file = str(tmp_path / "redirected_ips.json")
+        dests_file = str(tmp_path / "redirected_destinations.json")
+        with open(pairs_file, 'w') as f:
+            json.dump([["10.0.0.1", "voice"], ["192.168.50.0/24", "security"]], f)
+        with open(dests_file, 'w') as f:
+            json.dump({"voice": [["20.0.0.1", 162]], "security": [["10.1.1.1", 162]]}, f)
+        from trapninja.cli.command_base import config_io
+        config_io.invalidate(pairs_file)
+        config_io.invalidate(dests_file)
+        manager = self._make_pair_manager(pairs_file, dests_file)
+        assert manager.list_all() is True
+        out = capsys.readouterr().out
+        assert "Individual IPs" in out
+        assert "CIDR Ranges" in out
+        assert "10.0.0.1" in out
+        assert "192.168.50.0/24" in out
+
+    def test_redirect_pair_list_all_flat_for_plain_only(self, tmp_path, capsys):
+        """list_all() uses flat table (no section headers) when no CIDRs present."""
+        import json
+        pairs_file = str(tmp_path / "redirected_ips.json")
+        dests_file = str(tmp_path / "redirected_destinations.json")
+        with open(pairs_file, 'w') as f:
+            json.dump([["10.0.0.1", "voice"], ["10.0.0.2", "security"]], f)
+        with open(dests_file, 'w') as f:
+            json.dump({"voice": [["20.0.0.1", 162]], "security": [["10.1.1.1", 162]]}, f)
+        from trapninja.cli.command_base import config_io
+        config_io.invalidate(pairs_file)
+        config_io.invalidate(dests_file)
+        manager = self._make_pair_manager(pairs_file, dests_file)
+        manager.list_all()
+        out = capsys.readouterr().out
+        assert "Individual IPs" not in out
+        assert "CIDR Ranges" not in out
+        assert "10.0.0.1" in out
+        assert "10.0.0.2" in out

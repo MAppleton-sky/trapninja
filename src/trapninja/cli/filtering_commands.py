@@ -62,8 +62,8 @@ config_manager = ConfigManager()
 
 ip_blocker = ConfigListManager(
     file_path_getter=lambda: _get_config_path('BLOCKED_IPS_FILE'),
-    validator=InputValidator.validate_ip,
-    item_name="IP address",
+    validator=InputValidator.validate_ip_or_cidr,
+    item_name="IP address or CIDR range",
 )
 
 oid_blocker = ConfigListManager(
@@ -77,9 +77,9 @@ oid_blocker = ConfigListManager(
 ip_redirector = ConfigPairListManager(
     file_path_getter=lambda: _get_config_path('REDIRECTED_IPS_FILE'),
     dest_file_path_getter=lambda: _get_config_path('REDIRECTED_DESTINATIONS_FILE'),
-    key_validator=InputValidator.validate_ip,
+    key_validator=InputValidator.validate_ip_or_cidr,
     tag_validator=InputValidator.validate_tag,
-    key_name="IP",
+    key_name="IP or CIDR range",
 )
 
 oid_redirector = ConfigPairListManager(
@@ -355,6 +355,9 @@ This is useful for:
   - Sending security-related traps to a security NOC
   - Routing configuration change traps to a config management system
   - Separating trap streams by device type or vendor
+  - Routing all traps from a management subnet to a dedicated handler
+  - Blocking or redirecting traffic from entire address ranges (e.g. vendor
+    subnets, remote sites) without listing individual IPs
 
 CONCEPTS
 --------
@@ -407,14 +410,15 @@ Destination Groups:
       List all redirect destination groups
 
 IP Redirection:
-  trapninja filter redirect-ip IP --tag TAG
-      Redirect traps from IP to destination group
+  trapninja filter redirect-ip IP_OR_CIDR --tag TAG
+      Redirect traps from IP or CIDR range to destination group
+      Examples: 10.0.0.1  or  192.168.50.0/24
 
-  trapninja filter unredirect-ip IP
-      Remove IP redirection rule
+  trapninja filter unredirect-ip IP_OR_CIDR
+      Remove IP or CIDR range redirection rule
 
   trapninja filter list-redirected-ips
-      List all IP redirection rules
+      List all IP and CIDR range redirection rules
 
 OID Redirection:
   trapninja filter redirect-oid OID --tag TAG
@@ -425,6 +429,11 @@ OID Redirection:
 
   trapninja filter list-redirected-oids
       List all OID redirection rules
+
+Blocking:
+  trapninja filter block-ip IP_OR_CIDR
+      Block traps from IP or CIDR range
+      Examples: 10.0.0.1  or  10.50.0.0/16
 
 Viewing Configuration:
   trapninja config show               Full configuration overview

@@ -264,9 +264,17 @@ class ConfigListManager:
         try:
             items = config_io.load(self.file_path, [])
             if items:
+                plain_ips = sorted(i for i in items if '/' not in i)
+                cidr_ranges = sorted(i for i in items if '/' in i)
                 print(f"Blocked {self._item_name}s:")
-                for item in sorted(items):
-                    print(f"  - {item}")
+                if plain_ips:
+                    print("  Individual IPs:")
+                    for item in plain_ips:
+                        print(f"    - {item}")
+                if cidr_ranges:
+                    print("  CIDR Ranges:")
+                    for item in cidr_ranges:
+                        print(f"    - {item}")
             else:
                 print(f"No {self._item_name}s are currently blocked")
             return True
@@ -441,19 +449,53 @@ class ConfigPairListManager:
         """
         List all redirection rules with their destination tags.
 
+        When CIDR ranges are present alongside plain IPs, entries are grouped
+        into "Individual IPs" and "CIDR Ranges" subsections. OID entries and
+        plain-IP-only lists use the original flat-table format.
+
         Returns:
             True on success, False on error
         """
         try:
             pairs = config_io.load(self.file_path, [])
             if pairs:
-                # Determine column width from key name
-                col_width = 45 if self._key_name == "OID" else 20
+                valid_pairs = [e for e in pairs if len(e) >= 2]
+                has_cidrs = any('/' in e[0] for e in valid_pairs)
+                col_width = 45 if self._key_name.startswith("OID") else 24
                 print(f"Redirected {self._key_name}s:")
-                print(f"  {self._key_name:<{col_width}} {'Destination Tag'}")
-                print(f"  {'-' * col_width} {'-' * 20}")
-                for entry in sorted(pairs, key=lambda x: x[0] if len(x) >= 1 else ''):
-                    if len(entry) >= 2:
+
+                if has_cidrs:
+                    plain_pairs = sorted(
+                        (e for e in valid_pairs if '/' not in e[0]),
+                        key=lambda x: x[0],
+                    )
+                    cidr_pairs = sorted(
+                        (e for e in valid_pairs if '/' in e[0]),
+                        key=lambda x: x[0],
+                    )
+                    if plain_pairs:
+                        print("  Individual IPs:")
+                        print(f"    {'Key':<{col_width}} {'Destination Tag'}")
+                        print(f"    {'-' * col_width} {'-' * 20}")
+                        for entry in plain_pairs:
+                            display = entry[0]
+                            if len(display) > col_width:
+                                display = display[:col_width - 3] + '...'
+                            print(f"    {display:<{col_width}} {entry[1]}")
+                    if cidr_pairs:
+                        print("  CIDR Ranges:")
+                        print(f"    {'Range':<{col_width}} {'Destination Tag'}")
+                        print(f"    {'-' * col_width} {'-' * 20}")
+                        for entry in cidr_pairs:
+                            display = entry[0]
+                            if len(display) > col_width:
+                                display = display[:col_width - 3] + '...'
+                            print(f"    {display:<{col_width}} {entry[1]}")
+                else:
+                    # Flat table — OIDs, or plain-IP-only lists
+                    print(f"  {self._key_name:<{col_width}} {'Destination Tag'}")
+                    print(f"  {'-' * col_width} {'-' * 20}")
+                    for entry in sorted(valid_pairs, key=lambda x: x[0]):
                         display = entry[0]
                         if len(display) > col_width:
                             display = display[:col_width - 3] + '...'
