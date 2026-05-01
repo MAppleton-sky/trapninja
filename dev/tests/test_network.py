@@ -230,6 +230,7 @@ class TestUDPListenerManagement:
 
     @patch('trapninja.network.socket.socket')
     @patch('trapninja.network.udp_thread_pool')
+    @patch('trapninja.network.BIND_ADDRESS', '0.0.0.0')
     def test_start_udp_listener_binds_socket(self, mock_pool, mock_socket_class):
         """Test start_udp_listener binds to port."""
         from trapninja import network
@@ -245,6 +246,7 @@ class TestUDPListenerManagement:
         
         result = network.start_udp_listener(162)
         
+        # Should bind to configured BIND_ADDRESS (mocked to 0.0.0.0)
         mock_socket.bind.assert_called_with(('0.0.0.0', 162))
         assert result is True
 

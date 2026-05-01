@@ -14,6 +14,8 @@ ASSUMPTIONS:
 - Listen port changes trigger UDP listener restart callback
 - stop_event controls scheduled config checks
 
+UPDATED: Tests now use config.py for redirection globals (consolidated architecture)
+
 Author: TrapNinja Team
 """
 
@@ -379,26 +381,29 @@ class TestListenPortsReload:
 # =============================================================================
 
 class TestRedirectionConfigReload:
-    """Test redirection configuration hot reload."""
+    """Test redirection configuration hot reload.
+    
+    NOTE: Redirection globals now live in config.py (single source of truth).
+    """
     
     def test_redirected_ips_stored_as_defaultdict(self):
         """Redirected IPs use defaultdict for missing key handling."""
-        from trapninja.redirection import redirected_ips
+        from trapninja import config
         
         # Should be defaultdict or dict-like
-        assert hasattr(redirected_ips, 'get')
+        assert hasattr(config.redirected_ips, 'get')
     
     def test_redirected_oids_stored_as_defaultdict(self):
         """Redirected OIDs use defaultdict for missing key handling."""
-        from trapninja.redirection import redirected_oids
+        from trapninja import config
         
-        assert hasattr(redirected_oids, 'get')
+        assert hasattr(config.redirected_oids, 'get')
     
     def test_redirected_destinations_stored_as_defaultdict(self):
         """Redirected destinations use defaultdict."""
-        from trapninja.redirection import redirected_destinations
+        from trapninja import config
         
-        assert hasattr(redirected_destinations, 'get')
+        assert hasattr(config.redirected_destinations, 'get')
     
     def test_load_redirection_config_loads_all(self):
         """load_redirection_config loads IPs, OIDs, and destinations."""
@@ -426,22 +431,22 @@ class TestRedirectionConfigReload:
         assert info.currsize == 0
     
     def test_ip_validation_in_redirection(self):
-        """IP addresses are validated in redirection config."""
-        from trapninja.redirection import validate_ip
+        """IP addresses are validated using InputValidator."""
+        from trapninja.cli.validation import InputValidator
         
-        assert validate_ip("192.168.1.1") == "192.168.1.1"
-        assert validate_ip("10.0.0.1") == "10.0.0.1"
-        assert validate_ip("invalid") is None
-        assert validate_ip("256.256.256.256") is None
+        assert InputValidator.validate_ip("192.168.1.1") == "192.168.1.1"
+        assert InputValidator.validate_ip("10.0.0.1") == "10.0.0.1"
+        assert InputValidator.validate_ip("invalid") is None
+        assert InputValidator.validate_ip("256.256.256.256") is None
     
     def test_oid_validation_in_redirection(self):
-        """OIDs are validated in redirection config."""
-        from trapninja.redirection import validate_oid
+        """OIDs are validated using InputValidator."""
+        from trapninja.cli.validation import InputValidator
         
-        assert validate_oid("1.3.6.1.4.1.9.9.43.2.0.1") == "1.3.6.1.4.1.9.9.43.2.0.1"
-        assert validate_oid("1.3.6.1.6.3.1.1.5.1") == "1.3.6.1.6.3.1.1.5.1"
-        assert validate_oid("invalid") is None
-        assert validate_oid("1.3.a.b") is None
+        assert InputValidator.validate_oid("1.3.6.1.4.1.9.9.43.2.0.1") == "1.3.6.1.4.1.9.9.43.2.0.1"
+        assert InputValidator.validate_oid("1.3.6.1.6.3.1.1.5.1") == "1.3.6.1.6.3.1.1.5.1"
+        assert InputValidator.validate_oid("invalid") is None
+        assert InputValidator.validate_oid("1.3.a.b") is None
 
 
 # =============================================================================
@@ -449,47 +454,83 @@ class TestRedirectionConfigReload:
 # =============================================================================
 
 class TestRedirectionLookup:
-    """Test redirection lookup functionality."""
+    """Test redirection lookup functionality.
+    
+    NOTE: Tests now use config.py globals instead of redirection.py.
+    """
     
     def test_lookup_checks_ip_first(self):
         """Lookup checks IP-based redirection first."""
-        from trapninja.redirection import lookup_redirection_tag, redirected_ips, redirected_oids
+        from trapninja.redirection import lookup_redirection_tag
+        from trapninja import config
         
-        # Clear cache first
-        lookup_redirection_tag.cache_clear()
+        # Save original state
+        orig_ips = config.redirected_ips
+        orig_oids = config.redirected_oids
         
-        # Set up test data
-        with patch.dict(redirected_ips, {"10.0.0.1": "security"}):
-            with patch.dict(redirected_oids, {"1.3.6.1.6.3.1.1.5.1": "voice"}):
-                tag = lookup_redirection_tag("10.0.0.1", "1.3.6.1.6.3.1.1.5.1")
-                
-                # IP should take priority
-                assert tag == "security"
+        try:
+            # Clear cache first
+            lookup_redirection_tag.cache_clear()
+            
+            # Set up test data
+            config.redirected_ips = defaultdict(str, {"10.0.0.1": "security"})
+            config.redirected_oids = defaultdict(str, {"1.3.6.1.6.3.1.1.5.1": "voice"})
+            
+            tag = lookup_redirection_tag("10.0.0.1", "1.3.6.1.6.3.1.1.5.1")
+            
+            # IP should take priority
+            assert tag == "security"
+        finally:
+            config.redirected_ips = orig_ips
+            config.redirected_oids = orig_oids
+            lookup_redirection_tag.cache_clear()
     
     def test_lookup_falls_back_to_oid(self):
         """Lookup falls back to OID if no IP match."""
-        from trapninja.redirection import lookup_redirection_tag, redirected_ips, redirected_oids
+        from trapninja.redirection import lookup_redirection_tag
+        from trapninja import config
         
-        lookup_redirection_tag.cache_clear()
+        # Save original state
+        orig_ips = config.redirected_ips
+        orig_oids = config.redirected_oids
         
-        with patch.dict(redirected_ips, {}, clear=True):
-            with patch.dict(redirected_oids, {"1.3.6.1.6.3.1.1.5.1": "voice"}):
-                tag = lookup_redirection_tag("192.168.1.1", "1.3.6.1.6.3.1.1.5.1")
-                
-                # Should fall back to OID
-                assert tag == "voice"
+        try:
+            lookup_redirection_tag.cache_clear()
+            
+            config.redirected_ips = defaultdict(str)  # Empty
+            config.redirected_oids = defaultdict(str, {"1.3.6.1.6.3.1.1.5.1": "voice"})
+            
+            tag = lookup_redirection_tag("192.168.1.1", "1.3.6.1.6.3.1.1.5.1")
+            
+            # Should fall back to OID
+            assert tag == "voice"
+        finally:
+            config.redirected_ips = orig_ips
+            config.redirected_oids = orig_oids
+            lookup_redirection_tag.cache_clear()
     
     def test_lookup_returns_empty_when_no_match(self):
         """Lookup returns empty string when no match."""
         from trapninja.redirection import lookup_redirection_tag
+        from trapninja import config
         
-        lookup_redirection_tag.cache_clear()
+        # Save original state
+        orig_ips = config.redirected_ips
+        orig_oids = config.redirected_oids
         
-        with patch('trapninja.redirection.redirected_ips', defaultdict(str)):
-            with patch('trapninja.redirection.redirected_oids', defaultdict(str)):
-                tag = lookup_redirection_tag("192.168.1.1", "1.3.6.1.6.3.1.1.5.1")
-                
-                assert tag == ""
+        try:
+            lookup_redirection_tag.cache_clear()
+            
+            config.redirected_ips = defaultdict(str)
+            config.redirected_oids = defaultdict(str)
+            
+            tag = lookup_redirection_tag("192.168.1.1", "1.3.6.1.6.3.1.1.5.1")
+            
+            assert tag == ""
+        finally:
+            config.redirected_ips = orig_ips
+            config.redirected_oids = orig_oids
+            lookup_redirection_tag.cache_clear()
     
     def test_lookup_uses_lru_cache(self):
         """Lookup uses LRU cache for performance."""
@@ -505,7 +546,10 @@ class TestRedirectionLookup:
 # =============================================================================
 
 class TestCheckForRedirection:
-    """Test check_for_redirection function."""
+    """Test check_for_redirection function.
+    
+    NOTE: Tests now use config.py globals.
+    """
     
     def test_returns_tuple_with_three_values(self):
         """check_for_redirection returns (is_redirected, destinations, tag)."""
@@ -519,30 +563,58 @@ class TestCheckForRedirection:
     def test_returns_false_when_no_match(self):
         """Returns (False, [], None) when no redirection match."""
         from trapninja.redirection import check_for_redirection, lookup_redirection_tag
+        from trapninja import config
         
-        lookup_redirection_tag.cache_clear()
+        # Save original state
+        orig_ips = config.redirected_ips
+        orig_oids = config.redirected_oids
+        orig_dests = config.redirected_destinations
         
-        with patch('trapninja.redirection.redirected_ips', defaultdict(str)):
-            with patch('trapninja.redirection.redirected_oids', defaultdict(str)):
-                is_redirected, destinations, tag = check_for_redirection("1.1.1.1", "1.3.6")
-                
-                assert is_redirected is False
-                assert destinations == []
-                assert tag is None
+        try:
+            lookup_redirection_tag.cache_clear()
+            
+            config.redirected_ips = defaultdict(str)
+            config.redirected_oids = defaultdict(str)
+            config.redirected_destinations = defaultdict(list)
+            
+            is_redirected, destinations, tag = check_for_redirection("1.1.1.1", "1.3.6")
+            
+            assert is_redirected is False
+            assert destinations == []
+            assert tag is None
+        finally:
+            config.redirected_ips = orig_ips
+            config.redirected_oids = orig_oids
+            config.redirected_destinations = orig_dests
+            lookup_redirection_tag.cache_clear()
     
     def test_returns_destinations_when_match(self):
         """Returns destinations when redirection match found."""
-        from trapninja.redirection import check_for_redirection, lookup_redirection_tag, redirected_ips, redirected_destinations
+        from trapninja.redirection import check_for_redirection, lookup_redirection_tag
+        from trapninja import config
         
-        lookup_redirection_tag.cache_clear()
+        # Save original state
+        orig_ips = config.redirected_ips
+        orig_oids = config.redirected_oids
+        orig_dests = config.redirected_destinations
         
-        with patch.dict(redirected_ips, {"10.0.0.1": "security"}):
-            with patch.dict(redirected_destinations, {"security": [("192.168.1.100", 162)]}):
-                is_redirected, destinations, tag = check_for_redirection("10.0.0.1", "")
-                
-                assert is_redirected is True
-                assert destinations == [("192.168.1.100", 162)]
-                assert tag == "security"
+        try:
+            lookup_redirection_tag.cache_clear()
+            
+            config.redirected_ips = defaultdict(str, {"10.0.0.1": "security"})
+            config.redirected_oids = defaultdict(str)
+            config.redirected_destinations = defaultdict(list, {"security": [("192.168.1.100", 162)]})
+            
+            is_redirected, destinations, tag = check_for_redirection("10.0.0.1", "")
+            
+            assert is_redirected is True
+            assert destinations == [("192.168.1.100", 162)]
+            assert tag == "security"
+        finally:
+            config.redirected_ips = orig_ips
+            config.redirected_oids = orig_oids
+            config.redirected_destinations = orig_dests
+            lookup_redirection_tag.cache_clear()
 
 
 # =============================================================================
@@ -581,7 +653,7 @@ class TestScheduledConfigChecks:
         """Exceptions in config check don't stop future scheduling."""
         from trapninja.redirection import schedule_config_check
         
-        with patch('trapninja.redirection.load_redirection_config', side_effect=Exception("test")):
+        with patch('trapninja.config.load_config', side_effect=Exception("test")):
             with patch('trapninja.redirection.Timer') as mock_timer:
                 with patch('trapninja.config.stop_event') as mock_stop:
                     mock_stop.is_set.return_value = True

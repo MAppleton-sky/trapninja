@@ -160,6 +160,19 @@ int packet_filter(struct __sk_buff *skb) {
     if (ip->protocol != IPPROTO_UDP)
         return 0;
 
+    // Check for non-first IP fragments (fragment offset > 0).
+    // Non-first fragments have no UDP header - do not attempt port check.
+    // Pass a fragment event to userspace so Python reassembly can handle it.
+    u16 frag_off = ntohs(ip->frag_off);
+    if (frag_off & 0x1FFF) {
+        struct event_t frag_event = {};
+        frag_event.src_ip = ip->saddr;
+        frag_event.dst_port = 0;
+        frag_event.size = 0;
+        events.perf_submit(skb, &frag_event, sizeof(frag_event));
+        return 0;
+    }
+
     struct udphdr *udp = cursor_advance(cursor, sizeof(*udp));
 
     // Check port
@@ -206,11 +219,25 @@ int packet_filter(struct __sk_buff *skb) {
     u8 ip_proto = load_byte(skb, ETH_HLEN + offsetof(struct iphdr, protocol));
     if (ip_proto != IPPROTO_UDP)
         return 0;
-    
+
+    // Check for non-first IP fragments before attempting to read the UDP header.
+    // The frag_off field is 2 bytes at IP header offset 6.
+    // Network byte order layout of frag_off:
+    //   byte[0] bits 7-5: [Reserved][DF][MF]
+    //   byte[0] bits 4-0 + byte[1] bits 7-0: fragment offset (in 8-byte units)
+    // A non-first fragment has fragment offset > 0.
+    u8 frag_byte0 = load_byte(skb, ETH_HLEN + 6);
+    u8 frag_byte1 = load_byte(skb, ETH_HLEN + 7);
+    if ((frag_byte0 & 0x1F) != 0 || frag_byte1 != 0) {
+        // Non-first UDP fragment: no UDP header present at this position.
+        // Pass the raw bytes to userspace so Python can reassemble the datagram.
+        return skb->len;
+    }
+
     // Get IP header length (IHL is lower 4 bits of first byte)
     u8 ip_verihl = load_byte(skb, ETH_HLEN);
     u8 ip_hlen = (ip_verihl & 0x0F) * 4;
-    
+
     // Get UDP destination port at offset: ethernet + IP header + 2 (dest port offset in UDP)
     u16 dport = load_half(skb, ETH_HLEN + ip_hlen + offsetof(struct udphdr, dest));
     dport = ntohs(dport);
@@ -235,7 +262,8 @@ stop_event = None
 class MinimalTrapCapture:
     """Minimal eBPF-based SNMP trap capture with fallback mechanisms"""
 
-    def __init__(self, interface, listen_ports, queue_ref, stop_event_ref):
+    def __init__(self, interface, listen_ports, queue_ref, stop_event_ref,
+                 fragment_buffer=None):
         """
         Initialize the eBPF trap capture
 
@@ -244,10 +272,15 @@ class MinimalTrapCapture:
             listen_ports (list): List of UDP ports to listen for traps
             queue_ref (queue.Queue): Reference to the packet processing queue
             stop_event_ref (threading.Event): Reference to the stop event
+            fragment_buffer: Optional FragmentReassemblyBuffer instance for
+                reassembling fragmented SNMP traps (>1472 bytes)
         """
         self.interface = interface
         self.listen_ports = listen_ports
         self.bpf = None
+
+        # Fragment reassembly buffer (None = reassembly disabled)
+        self.fragment_buffer = fragment_buffer
 
         # Store references to existing structures
         global packet_queue, stop_event
@@ -315,7 +348,7 @@ class MinimalTrapCapture:
         # Import required modules for packet parsing
         import select
         import struct
-        
+
         # Import queue stats from network module for consistent drop tracking
         try:
             from .network import _queue_stats
@@ -323,6 +356,42 @@ class MinimalTrapCapture:
         except ImportError:
             use_network_stats = False
             logger.warning("Could not import network stats - drops may not be recorded")
+
+        # Lazy-import fragment helpers only when needed (avoids startup cost when disabled)
+        fragment_helper_available = False
+        parse_ip_header_fn = None
+        if self.fragment_buffer is not None:
+            try:
+                from .core.fragmentation import parse_ip_header as _parse_ip_header
+                parse_ip_header_fn = _parse_ip_header
+                fragment_helper_available = True
+                logger.info("eBPF capture: IP fragment reassembly ENABLED")
+            except ImportError:
+                logger.warning(
+                    "eBPF capture: fragment_buffer provided but core.fragmentation "
+                    "not importable — fragment reassembly disabled"
+                )
+
+        def _queue_packet(src_ip, dst_port, payload):
+            """Queue a parsed packet dict for the processing workers."""
+            packet_data = {
+                'src_ip': src_ip,
+                'dst_port': dst_port,
+                'payload': payload,
+            }
+            try:
+                packet_queue.put_nowait(packet_data)
+                if use_network_stats:
+                    _queue_stats.record_queued()
+                logger.debug(
+                    f"Raw capture: queued packet from {src_ip} to port {dst_port}, "
+                    f"{len(payload)} bytes"
+                )
+            except queue.Full:
+                if use_network_stats:
+                    _queue_stats.record_dropped()
+                else:
+                    logger.warning("Packet queue full, dropping packet")
 
         try:
             while not stop_event.is_set():
@@ -332,57 +401,99 @@ class MinimalTrapCapture:
                 if not readable:
                     continue
 
-                # Receive packet
-                packet = self.raw_socket.recv(4096)
+                # Receive packet (65535 bytes covers any jumbo frame or fragment chain)
+                packet = self.raw_socket.recv(65535)
 
-                # Skip if too short
-                if len(packet) < 34:  # Ethernet + IP header + part of UDP
+                # Skip if too short for Ethernet + minimal IP header
+                if len(packet) < 34:  # 14 Ethernet + 20 IP
                     continue
 
-                # Parse IP header
+                # Parse IP header (20 bytes starting after 14-byte Ethernet header)
                 ip_header = packet[14:34]
+                # Format: version_ihl, dscp, tot_len, ip_id, frag_off, ttl, proto,
+                #         checksum, src_ip, dst_ip
                 iph = struct.unpack('!BBHHHBBH4s4s', ip_header[:20])
 
                 # Check if UDP (protocol = 17)
                 if iph[6] != 17:
                     continue
 
-                # Get source IP
                 src_ip = socket.inet_ntoa(iph[8])
 
-                # Parse UDP header
-                udp_start = 14 + (iph[0] & 0x0F) * 4
+                # --- Fragment detection ---
+                # iph[4] is the 16-bit flags+frag_offset field (network byte order,
+                # already converted to host order by struct.unpack with '!')
+                frag_field = iph[4]
+                mf_flag = bool(frag_field & 0x2000)    # More Fragments bit
+                frag_offset = frag_field & 0x1FFF       # Fragment offset (8-byte units)
+                is_fragment = mf_flag or frag_offset > 0
+
+                if is_fragment:
+                    if not fragment_helper_available or self.fragment_buffer is None:
+                        # Fragment reassembly not configured: log a warning so the
+                        # operator knows traps may be lost (never silent).
+                        logger.warning(
+                            f"IP fragment received from {src_ip} (id={iph[3]}, "
+                            f"offset={frag_offset}, MF={mf_flag}) but fragment "
+                            "reassembly is disabled in eBPF mode. Large traps "
+                            "(>1472 bytes) may be lost. Enable fragment_reassembly "
+                            "in capture_config.json."
+                        )
+                        continue
+
+                    # Feed fragment into the reassembly buffer.
+                    # parse_ip_header expects raw bytes starting at the IP header
+                    # (no Ethernet prefix), and returns an IPFragment with:
+                    #   .data = everything after the IP header for this fragment
+                    fragment = parse_ip_header_fn(packet[14:])
+                    if fragment is None:
+                        logger.debug(
+                            f"Could not parse IP fragment from {src_ip}, skipping"
+                        )
+                        continue
+
+                    reassembled = self.fragment_buffer.add_fragment(fragment)
+                    if reassembled is None:
+                        # Fragment stored; waiting for remaining pieces
+                        continue
+
+                    # Reassembly complete: reassembled = UDP header + SNMP payload
+                    if len(reassembled) < 8:
+                        logger.warning(
+                            f"Reassembled datagram from {src_ip} is too short "
+                            f"({len(reassembled)} bytes), discarding"
+                        )
+                        continue
+
+                    dst_port = struct.unpack('!H', reassembled[2:4])[0]
+                    if dst_port not in self.listen_ports:
+                        continue
+
+                    payload = reassembled[8:]  # Skip 8-byte UDP header
+                    logger.debug(
+                        f"eBPF: reassembled fragmented trap from {src_ip}, "
+                        f"port={dst_port}, payload={len(payload)} bytes"
+                    )
+                    _queue_packet(src_ip, dst_port, payload)
+                    continue
+
+                # --- Complete (non-fragmented) packet ---
+                ip_hlen = (iph[0] & 0x0F) * 4
+                udp_start = 14 + ip_hlen
+
+                if len(packet) < udp_start + 8:
+                    continue
+
                 udph = struct.unpack('!HHHH', packet[udp_start:udp_start + 8])
                 dst_port = udph[1]
 
-                # Check if destination port is one we're listening for
                 if dst_port not in self.listen_ports:
                     continue
 
-                # Get UDP payload
                 payload_start = udp_start + 8
                 payload = packet[payload_start:]
 
-                # Create packet data structure
-                packet_data = {
-                    'src_ip': src_ip,
-                    'dst_port': dst_port,
-                    'payload': payload
-                }
-
-                # Queue packet for processing - use put_nowait and handle Full exception
-                # This properly tracks drops like sniff mode does
-                try:
-                    packet_queue.put_nowait(packet_data)
-                    if use_network_stats:
-                        _queue_stats.record_queued()
-                    logger.debug(
-                        f"Raw capture: queued packet from {src_ip} to port {dst_port}, {len(payload)} bytes")
-                except queue.Full:
-                    if use_network_stats:
-                        _queue_stats.record_dropped()
-                    else:
-                        logger.warning("Packet queue full, dropping packet")
+                _queue_packet(src_ip, dst_port, payload)
 
         except Exception as e:
             if not stop_event.is_set():
@@ -807,7 +918,8 @@ def check_ebpf_dependencies():
 
 
 # Create a compatible capture instance
-def create_capture(interface, listen_ports, queue_ref, stop_event_ref):
+def create_capture(interface, listen_ports, queue_ref, stop_event_ref,
+                   fragment_buffer=None):
     """
     Create a capture instance, either eBPF or traditional
 
@@ -816,11 +928,14 @@ def create_capture(interface, listen_ports, queue_ref, stop_event_ref):
         listen_ports (list): List of UDP ports to listen for traps
         queue_ref (queue.Queue): Reference to the packet processing queue
         stop_event_ref (threading.Event): Reference to the stop event
+        fragment_buffer: Optional FragmentReassemblyBuffer for reassembling
+            fragmented SNMP traps arriving in eBPF mode
 
     Returns:
         object: Capture instance
     """
-    return MinimalTrapCapture(interface, listen_ports, queue_ref, stop_event_ref)
+    return MinimalTrapCapture(interface, listen_ports, queue_ref, stop_event_ref,
+                              fragment_buffer=fragment_buffer)
 
 
 # SnmpTrapCapture is the same as MinimalTrapCapture for backward compatibility

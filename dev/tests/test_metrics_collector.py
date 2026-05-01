@@ -325,3 +325,44 @@ class TestThreadSafety:
         
         assert len(errors) == 0
         assert collector._redirected_ip_counter["test_tag"]["test_ip"] == 5000
+
+
+class TestUnifiedExportTimer:
+    """Verify the unified timer calls both exports per cycle in the correct order."""
+
+    def test_schedule_metrics_export_calls_both_in_order(self, tmp_path):
+        """_schedule_metrics_export must call export_metrics then _export_granular_stats."""
+        from trapninja.metrics import collector
+        from trapninja.metrics.config import MetricsConfig
+
+        collector._current_config = MetricsConfig(directory=str(tmp_path))
+        call_order = []
+
+        with patch('trapninja.metrics.exporter.export_metrics',
+                   side_effect=lambda *a, **kw: call_order.append('metrics')), \
+             patch('trapninja.metrics.collector._export_granular_stats',
+                   side_effect=lambda: call_order.append('granular')), \
+             patch('trapninja.metrics.collector.Timer'):
+            collector._schedule_metrics_export()
+
+        assert call_order == ['metrics', 'granular'], (
+            f"Expected ['metrics', 'granular'], got {call_order}"
+        )
+
+    def test_cleanup_metrics_calls_granular_after_main(self):
+        """cleanup_metrics must export both files; granular must follow main."""
+        from trapninja.metrics import collector
+
+        call_order = []
+
+        with patch('trapninja.metrics.exporter.export_metrics',
+                   side_effect=lambda *a, **kw: call_order.append('metrics')), \
+             patch('trapninja.metrics.collector._export_granular_stats',
+                   side_effect=lambda: call_order.append('granular')):
+            collector.cleanup_metrics()
+
+        assert 'metrics' in call_order
+        assert 'granular' in call_order
+        assert call_order.index('metrics') < call_order.index('granular'), (
+            "export_metrics must run before _export_granular_stats"
+        )

@@ -1,7 +1,7 @@
 # TrapNinja CLI Module
 
 **Version:** 3.0.0  
-**Last Updated:** January 2025
+**Last Updated:** February 2026
 
 ## Overview
 
@@ -14,7 +14,7 @@ The CLI module provides a clean, modular command-line interface for TrapNinja us
 ```
 trapninja/cli/
 ├── __init__.py              # Public API exports
-├── parser.py                # Subcommand-based argument parsing
+├── parser.py                # Compatibility shim → re-exports from cli/parsers/
 ├── validation.py            # Input validation and sanitization
 ├── executor.py              # Command orchestration and execution
 ├── output.py                # Output formatting utilities
@@ -28,7 +28,23 @@ trapninja/cli/
 ├── snmpv3_commands.py       # SNMPv3 credential management
 ├── sync_commands.py         # Config sync commands
 ├── failover_commands.py     # Failover replay commands
-└── metrics_commands.py      # Prometheus metrics configuration
+├── metrics_commands.py      # Prometheus metrics configuration
+└── parsers/                 # Argument parser definitions (sub-package)
+    ├── __init__.py           # Re-exports create_argument_parser()
+    ├── base.py               # Shared parser utilities and global options
+    ├── daemon_parser.py      # Daemon subcommand argument definitions
+    ├── config_parser.py      # Config subcommand argument definitions
+    ├── filter_parser.py      # Filter subcommand argument definitions
+    ├── ha_parser.py          # HA subcommand argument definitions
+    ├── snmpv3_parser.py      # SNMPv3 subcommand argument definitions
+    ├── cache_parser.py       # Cache subcommand argument definitions
+    ├── stats_parser.py       # Stats subcommand argument definitions
+    ├── metrics_parser.py     # Metrics subcommand argument definitions
+    ├── shadow_parser.py      # Shadow subcommand argument definitions
+    ├── failover_parser.py    # Failover subcommand argument definitions
+    ├── sync_parser.py        # Sync subcommand argument definitions
+    ├── legacy_parser.py      # Legacy flat-flag definitions (hidden)
+    └── legacy_compat.py      # Legacy flag → subcommand translation
 ```
 
 ### Design Principles
@@ -42,25 +58,40 @@ trapninja/cli/
 ## Module Descriptions
 
 ### `parser.py`
-**Purpose**: Configure all command-line arguments and subcommands
+**Purpose**: Compatibility shim — re-exports `create_argument_parser()` from `cli/parsers/`
 
-**Key Functions**:
-- `create_argument_parser()`: Returns configured ArgumentParser instance
-
-**Features**:
-- Subcommand-based structure (e.g., `trapninja daemon start`)
-- Backward compatibility with legacy flat-style arguments
-- Comprehensive argument definitions with help text
-- Built-in type validation using custom validators
-- Clear, actionable error messages
+This file exists to preserve backward-compatible imports. All argument parser
+definitions live in the `cli/parsers/` sub-package.
 
 **Example**:
 ```python
-from trapninja.cli.parser import create_argument_parser
+# Both imports work; prefer the parsers/ sub-package for new code
+from trapninja.cli.parser import create_argument_parser       # shim
+from trapninja.cli.parsers import create_argument_parser      # canonical
 
 parser = create_argument_parser()
 args = parser.parse_args()
 ```
+
+### `parsers/` sub-package
+**Purpose**: All argument parser definitions, split by command category
+
+| Module | Defines parsers for |
+|--------|--------------------|
+| `base.py` | Global options (`--config-dir`, `--debug`, `--json`, etc.) |
+| `daemon_parser.py` | `daemon` subcommands |
+| `config_parser.py` | `config` subcommands |
+| `filter_parser.py` | `filter` subcommands |
+| `ha_parser.py` | `ha` subcommands |
+| `snmpv3_parser.py` | `snmpv3` subcommands |
+| `cache_parser.py` | `cache` subcommands |
+| `stats_parser.py` | `stats` subcommands |
+| `metrics_parser.py` | `metrics` subcommands |
+| `shadow_parser.py` | `shadow` subcommands |
+| `failover_parser.py` | `failover` subcommands |
+| `sync_parser.py` | `sync` subcommands |
+| `legacy_parser.py` | Hidden legacy flat-flags (argparse.SUPPRESS) |
+| `legacy_compat.py` | Translates legacy flags to subcommand equivalents |
 
 ### `validation.py`
 **Purpose**: Validate and sanitize all user input
@@ -464,7 +495,7 @@ block_ip(user_input)  # UNSAFE!
 
 2. **Add subcommand to parser**:
    ```python
-   # In parser.py - add to filter subparser
+   # In cli/parsers/filter_parser.py - add to filter subparser
    filter_parser.add_parser('block-subnet', help='Block entire subnet')
    ```
 

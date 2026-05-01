@@ -54,6 +54,10 @@ FEATURES = {
     'unified_metrics': VERSION_INFO >= (0, 6, 0),
     'granular_stats': VERSION_INFO >= (0, 7, 0),
     'stats_api': VERSION_INFO >= (0, 7, 0),
+    'unified_v2c_pipeline': VERSION_INFO >= (0, 8, 0),
+    'shadow_mode': VERSION_INFO >= (0, 8, 0),
+    'config_sync': VERSION_INFO >= (0, 8, 0),
+    'unified_metrics': VERSION_INFO >= (0, 8, 1),
 }
 
 

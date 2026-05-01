@@ -54,6 +54,14 @@ try:
 except ImportError:
     FRAGMENTATION_AVAILABLE = False
 
+# Import optional modules registry
+from .optional_modules import (
+    modules,
+    ModuleRegistry,
+    is_module_available,
+    get_module_status,
+)
+
 __all__ = [
     # Constants
     'SNMP_VERSION_MAP',
@@ -88,4 +96,9 @@ __all__ = [
     'initialize_fragment_buffer',
     'shutdown_fragment_buffer',
     'get_fragment_stats',
+    # Optional Modules Registry
+    'modules',
+    'ModuleRegistry',
+    'is_module_available',
+    'get_module_status',
 ]

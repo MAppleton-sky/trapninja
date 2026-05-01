@@ -472,7 +472,14 @@ class DestinationStats:
     
     @property
     def rate_per_minute(self) -> float:
-        """Current rate (forwards/minute)."""
+        """Count of forwards in the last 60 seconds.
+
+        Note: Despite the name, this returns a *count* (events in the last 60
+        seconds), not a rate per minute.  The name is preserved because it is
+        surfaced as the dict key 'rate_per_minute' by to_dict(), which is
+        consumed by CLI output and API responses.  Renaming would silently
+        break those callers.
+        """
         return self._rate_tracker.get_count(60)
     
     @property

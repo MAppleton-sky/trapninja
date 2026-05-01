@@ -12,6 +12,8 @@ Package Structure:
 - parser.py: SNMP parsing and OID extraction
 - forwarder.py: Packet forwarding logic
 - worker.py: Processing worker threads
+- packet_handler.py: Packet processing pipeline (filtering/routing/forwarding)
+- config_cache.py: Thread-safe configuration cache with TTL
 - stats.py: Processing statistics
 
 Author: TrapNinja Team
@@ -38,6 +40,15 @@ from .worker import (
     start_workers,
     get_processor_stats,
     reset_processor_stats,
+)
+
+from .config_cache import (
+    ConfigCache,
+    get_config_cache,
+)
+
+from .packet_handler import (
+    PacketHandler,
 )
 
 from .stats import (
@@ -67,6 +78,11 @@ __all__ = [
     'ProcessingStats',
     'get_global_stats',
     'reset_global_stats',
+    # Config Cache
+    'ConfigCache',
+    'get_config_cache',
+    # Packet Handler
+    'PacketHandler',
 ]
 
 __version__ = '2.0.0'

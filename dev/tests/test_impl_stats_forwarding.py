@@ -553,8 +553,8 @@ class TestWorkerStatsIntegration:
         packet_data = create_packet_data(SampleIPs.NORMAL_1, payload)
         
         with patch.object(_config_cache, 'get', return_value=config), \
-             patch('trapninja.processing.worker.forward_packet', return_value=True), \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True):
+             patch('trapninja.processing.packet_handler.forward_packet', return_value=True), \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True):
             
             worker._process_packet(packet_data)
         
@@ -584,8 +584,8 @@ class TestWorkerStatsIntegration:
         packet_data = create_packet_data(SampleIPs.NORMAL_1, payload)
         
         with patch.object(_config_cache, 'get', return_value=config), \
-             patch('trapninja.processing.worker.forward_packet', return_value=True), \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True):
+             patch('trapninja.processing.packet_handler.forward_packet', return_value=True), \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True):
             
             worker._process_packet(packet_data)
         
@@ -614,7 +614,7 @@ class TestWorkerStatsIntegration:
         packet_data = create_packet_data(SampleIPs.BLOCKED_1, payload)
         
         with patch.object(_config_cache, 'get', return_value=config), \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True):
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True):
             
             worker._process_packet(packet_data)
         
@@ -643,7 +643,7 @@ class TestWorkerStatsIntegration:
         packet_data = create_packet_data(SampleIPs.NORMAL_1, payload)
         
         with patch.object(_config_cache, 'get', return_value=config), \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True):
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True):
             
             worker._process_packet(packet_data)
         
@@ -674,8 +674,8 @@ class TestWorkerStatsIntegration:
         packet_data = create_packet_data(SampleIPs.REDIRECT_VOICE, payload)
         
         with patch.object(_config_cache, 'get', return_value=config), \
-             patch('trapninja.processing.worker.forward_packet', return_value=True), \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True):
+             patch('trapninja.processing.packet_handler.forward_packet', return_value=True), \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True):
             
             worker._process_packet(packet_data)
         
@@ -704,7 +704,7 @@ class TestWorkerStatsIntegration:
         packet_data = create_packet_data(SampleIPs.NORMAL_1, payload)
         
         with patch.object(_config_cache, 'get', return_value=config), \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=False):
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=False):
             
             worker._process_packet(packet_data)
         
@@ -733,8 +733,8 @@ class TestWorkerStatsIntegration:
         packet_data = create_packet_data(SampleIPs.NORMAL_1, payload)
         
         with patch.object(_config_cache, 'get', return_value=config), \
-             patch('trapninja.processing.worker.forward_packet', return_value=True), \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True):
+             patch('trapninja.processing.packet_handler.forward_packet', return_value=True), \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True):
             
             worker._process_packet(packet_data)
         
@@ -921,8 +921,8 @@ class TestStatsDuringBatchProcessing:
         ]
         
         with patch.object(_config_cache, 'get', return_value=config), \
-             patch('trapninja.processing.worker.forward_packet', return_value=True), \
-             patch('trapninja.processing.worker.is_forwarding_enabled', return_value=True):
+             patch('trapninja.processing.packet_handler.forward_packet', return_value=True), \
+             patch('trapninja.processing.packet_handler.modules.ha.is_forwarding_enabled', return_value=True):
             
             for packet in packets:
                 worker._process_packet(packet)

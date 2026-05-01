@@ -122,8 +122,39 @@ def init_metrics(
     return _current_config
 
 
+def _export_granular_stats():
+    """
+    Call GranularStatsCollector.export_now() as part of the unified export cycle.
+
+    The granular collector no longer runs its own timer.  Instead, this
+    function is called synchronously from _schedule_metrics_export() so that
+    trapninja_metrics.prom and trapninja_granular.prom are always written in
+    the same timer callback, guaranteeing temporal consistency between the
+    two files.
+
+    Failure is logged but never raises — a failed granular export must never
+    prevent the metrics export from completing or scheduling the next timer.
+    """
+    try:
+        from ..stats.collector import get_stats_collector
+        collector = get_stats_collector()
+        if collector:
+            collector.export_now()
+    except Exception as e:
+        logger.error(f"Granular stats export failed in unified timer: {e}")
+
+
 def _schedule_metrics_export():
-    """Schedule periodic export of metrics."""
+    """
+    Unified export timer callback — writes both .prom files then reschedules.
+
+    The next timer is scheduled in a finally block so it is ALWAYS rescheduled
+    regardless of whether the export succeeds or fails.  Without this guarantee,
+    a transient export failure (disk full, I/O error, NFS timeout) would silently
+    kill the timer and stop all metric file updates until TrapNinja is restarted.
+    Each export call is individually guarded so a failure in one does not prevent
+    the other from running.
+    """
     global _export_timer
 
     try:
@@ -141,19 +172,30 @@ def _schedule_metrics_export():
         except Exception:
             pass
 
-    # Export metrics
-    from .exporter import export_metrics
-    export_metrics()
+    try:
+        # Step 1 — write trapninja_metrics.prom + trapninja_metrics.json
+        try:
+            from .exporter import export_metrics
+            export_metrics()
+        except Exception as e:
+            logger.error(
+                f"metrics export failed (trapninja_metrics.prom not updated): {e}"
+            )
 
-    # Schedule next export if not stopping
-    config = get_current_config()
-    if not stop_event.is_set():
-        _export_timer = Timer(
-            config.export_interval_seconds,
-            _schedule_metrics_export
-        )
-        _export_timer.daemon = True
-        _export_timer.start()
+        # Step 2 — write trapninja_granular.prom + trapninja_granular.json
+        # Always runs even if Step 1 failed.
+        _export_granular_stats()
+
+    finally:
+        # Always reschedule — export failures must never stop the timer.
+        config = get_current_config()
+        if not stop_event.is_set():
+            _export_timer = Timer(
+                config.export_interval_seconds,
+                _schedule_metrics_export
+            )
+            _export_timer.daemon = True
+            _export_timer.start()
 
 
 def get_current_config() -> MetricsConfig:
@@ -304,6 +346,38 @@ def _get_cache_stats() -> Dict[str, Any]:
     return {'enabled': False, 'available': False}
 
 
+def _get_granular_totals() -> Dict[str, Any]:
+    """
+    Get trap total counters from GranularStatsCollector.
+
+    GranularStatsCollector is the single source of truth for trap totals.
+    Counters update directly on every trap with no buffering, ensuring
+    metrics/collector.py always reads current values.
+
+    Returns:
+        Dict with keys: total_traps, total_forwarded, total_blocked,
+        total_redirected, total_dropped. Returns zeros if collector
+        is not yet initialised.
+    """
+    try:
+        from ..stats.collector import get_stats_collector
+        collector = get_stats_collector()
+        if collector:
+            return {
+                'total_traps':      collector._total_traps,
+                'total_forwarded':  collector._total_forwarded,
+                'total_blocked':    collector._total_blocked,
+                'total_redirected': collector._total_redirected,
+                'total_dropped':    collector._total_dropped,
+            }
+    except Exception:
+        pass
+    return {
+        'total_traps': 0, 'total_forwarded': 0, 'total_blocked': 0,
+        'total_redirected': 0, 'total_dropped': 0,
+    }
+
+
 def get_metrics_summary() -> Dict[str, Any]:
     """
     Get a comprehensive summary of all metrics from all sources.
@@ -311,57 +385,70 @@ def get_metrics_summary() -> Dict[str, Any]:
     Returns:
         dict: Dictionary with complete metrics summary
     """
-    # Get processor stats (main source of trap counts)
+    # Get processor stats (performance metadata: path hits, errors, queue depth)
     processor_stats = _get_processor_stats()
-    
+
+    # Get trap totals from GranularStatsCollector (single source of truth)
+    granular_totals = _get_granular_totals()
+
     # Get queue stats
     queue_stats = _get_queue_stats()
-    
+
     # Get HA stats
     ha_stats = _get_ha_stats()
-    
+
     # Get cache stats
     cache_stats = _get_cache_stats()
-    
+
     # Calculate uptime
     uptime = time.time() - _start_time
-    
+
     # Get current configuration
     config = get_current_config()
-    
+
     # Build summary from processor stats
+    window_60s = processor_stats.get('window_60s', {})
+
     summary = {
         "timestamp": datetime.now().isoformat(),
         "uptime_seconds": round(uptime, 1),
+        "metrics_start_time": _start_time,
         "interval_seconds": config.export_interval_seconds,
-        
+
         # Configuration info (for reference)
         "metrics_config": {
             "directory": config.directory,
             "global_labels": config.global_labels,
         },
-        
-        # Core trap processing metrics (from packet processor)
-        "total_traps_received": processor_stats.get('processed', 0),
-        "total_traps_forwarded": processor_stats.get('forwarded', 0),
-        "total_traps_blocked": processor_stats.get('blocked', 0),
-        "total_traps_redirected": processor_stats.get('redirected', 0),
-        "total_traps_dropped": processor_stats.get('dropped', 0),
-        "processing_errors": processor_stats.get('errors', 0),
-        
+
+        # Core trap processing metrics — sourced from GranularStatsCollector.
+        # These are unbuffered: each trap increments the counter directly,
+        # so values here are always current (no flush lag).
+        "total_traps_received":   granular_totals['total_traps'],
+        "total_traps_forwarded":  granular_totals['total_forwarded'],
+        "total_traps_blocked":    granular_totals['total_blocked'],
+        "total_traps_redirected": granular_totals['total_redirected'],
+        "total_traps_dropped":    granular_totals['total_dropped'],
+        "processing_errors": processor_stats.get('processing_errors', 0),
+
+        # Sliding 60-second window counts
+        "window_60s_received":  window_60s.get('received',  0),
+        "window_60s_forwarded": window_60s.get('forwarded', 0),
+        "window_60s_dropped":   window_60s.get('dropped',   0),
+        "window_60s_errors":    window_60s.get('errors',    0),
+
         # HA-specific metrics
         "ha_blocked": processor_stats.get('ha_blocked', 0),
-        
+
         # Cache metrics
         "traps_cached": processor_stats.get('cached', 0),
         "cache_failures": processor_stats.get('cache_failures', 0),
-        
+
         # Performance metrics
         "fast_path_hits": processor_stats.get('fast_path_hits', 0),
         "slow_path_hits": processor_stats.get('slow_path_hits', 0),
         "fast_path_ratio": processor_stats.get('fast_path_ratio', 0.0),
-        "processing_rate": processor_stats.get('processing_rate', 0.0),
-        
+
         # Queue metrics
         "queue_current_depth": queue_stats.get('current_depth', 0),
         "queue_max_depth": max(
@@ -455,6 +542,7 @@ def cleanup_metrics():
     try:
         from .exporter import export_metrics
         export_metrics()
+        _export_granular_stats()
         logger.info("Final metrics export completed")
     except Exception as e:
         logger.error(f"Error during final metrics export: {e}")

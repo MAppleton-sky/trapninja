@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)",
+      "Bash(chmod:*)",
+      "Bash(git stash:*)",
+      "Bash(ls:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git config:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(where:*)",
+      "Bash(py -3.9 -m pytest:*)",
+      "Bash(py -3.9 -c:*)",
+      "Bash(py:*)",
+      "Bash(py -3.13 -m pip show pytest)"
+    ]
+  },
+  "outputStyle": "Explanatory"
+}

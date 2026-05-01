@@ -1,6 +1,6 @@
 # TrapNinja User Guide
 
-**Version 0.7.13 (Beta)**
+**Version 0.8.0**
 
 A high-performance SNMP trap forwarder for telecommunications environments.
 
@@ -791,4 +791,4 @@ trapninja filter --help
 
 ---
 
-*TrapNinja v0.7.13 (Beta) - Target production release: Q2 2025*
+*TrapNinja v0.8.0*

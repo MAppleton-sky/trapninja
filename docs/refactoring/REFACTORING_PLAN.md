@@ -1,14 +1,19 @@
-# TrapNinja Refactoring Plan
+# TrapNinja Refactoring Plan (v0.7.13 -- Superseded)
 
-**Document Version:** 1.2  
-**Last Updated:** December 31, 2025  
-**TrapNinja Version:** 0.7.13
+> **This document is superseded.** For the current refactoring plan and status, see:
+> - [CODE-REVIEW-REFACTORING-ANALYSIS.md](CODE-REVIEW-REFACTORING-ANALYSIS.md) -- active refactoring plan
+> - [REFACTORING-STATUS.md](REFACTORING-STATUS.md) -- current status and verification
+
+**Document Version:** 1.2
+**Last Updated:** December 31, 2025
+**TrapNinja Version:** 0.7.13 (current version is 0.8.0)
 
 ## Executive Summary
 
-This document outlines the refactoring plan for the TrapNinja SNMP trap forwarder to improve code organization, eliminate redundancy, and enhance maintainability.
+This document covered the v0.7.13 refactoring (removing legacy `ha.py` and `packet_processor.py`).
+The v0.8.0 refactoring (optional modules, service init, CLI registry) is tracked in the documents linked above.
 
-**Status: Phase 1 & Phase 3 Complete** ✅
+**Status: Phase 1 & Phase 3 Complete** (this plan is now historical)
 
 ## Completed Work
 

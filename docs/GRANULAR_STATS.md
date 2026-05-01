@@ -244,21 +244,51 @@ Statistics are automatically exported every 60 seconds:
 ### Prometheus Format
 **Location:** `/var/log/trapninja/metrics/trapninja_granular.prom`
 
+The export contains only counters and gauges that Grafana/Prometheus **cannot derive on its own**.
+Current-rate metrics are intentionally absent — use `rate()` or `increase()` in your Grafana queries instead.
+
 ```prometheus
-# Per-IP metrics (top 50 by volume)
-trapninja_ip_traps_total{ip="10.0.0.1"} 45678
-trapninja_ip_rate_per_minute{ip="10.0.0.1"} 125.50
+# Global counters
+trapninja_traps_total 1234567
+trapninja_traps_forwarded_total 1200000
+trapninja_traps_blocked_total 30000
+trapninja_traps_redirected_total 4567
 
-# Per-OID metrics (top 50 by volume)
+# Global gauges
+trapninja_unique_sources 3456
+trapninja_unique_oids 892
+trapninja_uptime_seconds 86400
+
+# Per-IP counters (top 50 by volume)
+trapninja_src_ip_traps_total{ip="10.0.0.1"} 45678
+trapninja_src_ip_blocked_total{ip="10.0.0.2"} 281
+
+# Per-IP peak rate gauge (preserves burst data between Prometheus scrapes)
+trapninja_src_ip_peak_rate_per_minute{ip="10.0.0.1"} 1450.00
+
+# Per-OID counters (top 50 by volume)
 trapninja_oid_traps_total{oid="1.3.6.1.4.1.9.9.41.2.0.1"} 123456
+trapninja_oid_blocked_total{oid="1.3.6.1.4.1.9.9.41.2.0.2"} 500
 
-# Per-destination metrics
-trapninja_dest_forwards_total{destination="default"} 1234567
+# Per-OID gauges
+trapninja_oid_unique_sources{oid="1.3.6.1.4.1.9.9.41.2.0.1"} 247
+trapninja_oid_peak_rate_per_minute{oid="1.3.6.1.4.1.9.9.41.2.0.1"} 3200.00
 
-# Summary
-trapninja_granular_unique_ips 3456
-trapninja_granular_unique_oids 892
+# Per-destination counters
+trapninja_dest_forwards_total{destination="default"} 1200000
+trapninja_dest_failures_total{destination="voice"} 12
+
+# IP×OID combination counters (top 100 by volume)
+trapninja_src_ip_oid_traps_total{ip="10.0.0.1",oid="1.3.6.1.4.1.9.9.41.2.0.1"} 38000
 ```
+
+**Metrics NOT exported (calculate in Grafana instead):**
+
+| Removed metric | Grafana equivalent |
+|---|---|
+| `trapninja_ip_rate_per_minute` | `rate(trapninja_src_ip_traps_total[1m]) * 60` |
+| `trapninja_oid_rate_per_minute` | `rate(trapninja_oid_traps_total[1m]) * 60` |
+| `trapninja_dest_forwards_60s` | `increase(trapninja_dest_forwards_total[60s])` |
 
 ## Configuration
 
@@ -319,9 +349,15 @@ scrape_configs:
 ```
 
 **Sample queries:**
-- Top sources: `topk(10, trapninja_ip_traps_total)`
-- Rate over time: `rate(trapninja_ip_traps_total[5m])`
+- Top sources by total volume: `topk(10, trapninja_src_ip_traps_total)`
+- Current rate per IP (traps/min): `topk(10, rate(trapninja_src_ip_traps_total[1m]) * 60)`
 - OID distribution: `topk(10, trapninja_oid_traps_total)`
+- OID rate (traps/min): `topk(10, rate(trapninja_oid_traps_total[1m]) * 60)`
+- Destination forward rate: `rate(trapninja_dest_forwards_total[1m])`
+- Destination recent activity: `increase(trapninja_dest_forwards_total[60s])`
+- Peak rates (burst detection): `topk(10, trapninja_src_ip_peak_rate_per_minute)`
+- Widespread events (OID from many sources): `topk(5, trapninja_oid_unique_sources)`
+- Per-IP blocked: `topk(10, trapninja_src_ip_blocked_total)`
 
 ## Performance Impact
 

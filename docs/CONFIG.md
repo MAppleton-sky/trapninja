@@ -254,14 +254,14 @@ Define destination groups for redirection tags.
 ### Show current configuration
 
 ```bash
-python trapninja.py --show-config
-python trapninja.py --show-config --json
+trapninja daemon config
+trapninja daemon config --json
 ```
 
 ### Validate configuration
 
 ```bash
-python trapninja.py --validate-config
+trapninja daemon config --validate
 ```
 
 ---

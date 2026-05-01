@@ -528,15 +528,104 @@ class TestValidationCaching:
     def test_oid_validation_cached(self):
         """Test OID validation results are cached."""
         from trapninja.cli.validation import InputValidator
-        
+
         # Clear cache
         InputValidator.validate_oid.cache_clear()
-        
+
         # First call
         result1 = InputValidator.validate_oid("1.3.6.1.4")
         # Second call should be cached
         result2 = InputValidator.validate_oid("1.3.6.1.4")
-        
+
         assert result1 == result2
         info = InputValidator.validate_oid.cache_info()
+        assert info.hits >= 1
+
+
+class TestInputValidatorValidateIPOrCIDR:
+    """Tests for InputValidator.validate_ip_or_cidr method."""
+
+    def test_valid_ipv4_cidr(self):
+        """Test valid IPv4 CIDR range with aligned network address."""
+        from trapninja.cli.validation import InputValidator
+
+        result = InputValidator.validate_ip_or_cidr("192.168.0.0/24")
+
+        assert result == "192.168.0.0/24"
+
+    def test_valid_ipv4_cidr_class_a(self):
+        """Test valid IPv4 /8 CIDR range."""
+        from trapninja.cli.validation import InputValidator
+
+        result = InputValidator.validate_ip_or_cidr("10.0.0.0/8")
+
+        assert result == "10.0.0.0/8"
+
+    def test_cidr_normalisation(self):
+        """Test non-strict CIDR normalisation strips host bits."""
+        from trapninja.cli.validation import InputValidator
+
+        result = InputValidator.validate_ip_or_cidr("192.168.1.5/24")
+
+        assert result == "192.168.1.0/24"
+
+    def test_valid_individual_ipv4(self):
+        """Test plain IPv4 address delegates to validate_ip."""
+        from trapninja.cli.validation import InputValidator
+
+        result = InputValidator.validate_ip_or_cidr("10.0.0.1")
+
+        assert result == "10.0.0.1"
+
+    def test_valid_individual_ipv6(self):
+        """Test plain IPv6 address delegates to validate_ip."""
+        from trapninja.cli.validation import InputValidator
+
+        result = InputValidator.validate_ip_or_cidr("::1")
+
+        assert result == "::1"
+
+    def test_invalid_cidr_prefix_too_large(self):
+        """Test CIDR with prefix length > 32 for IPv4 returns None."""
+        from trapninja.cli.validation import InputValidator
+
+        result = InputValidator.validate_ip_or_cidr("192.168.0.0/33")
+
+        assert result is None
+
+    def test_invalid_cidr_non_numeric_prefix(self):
+        """Test CIDR with non-numeric prefix returns None."""
+        from trapninja.cli.validation import InputValidator
+
+        result = InputValidator.validate_ip_or_cidr("bad/bad")
+
+        assert result is None
+
+    def test_empty_string_returns_none(self):
+        """Test empty string returns None."""
+        from trapninja.cli.validation import InputValidator
+
+        result = InputValidator.validate_ip_or_cidr("")
+
+        assert result is None
+
+    def test_non_string_returns_none(self):
+        """Test non-string input returns None."""
+        from trapninja.cli.validation import InputValidator
+
+        result = InputValidator.validate_ip_or_cidr(12345)
+
+        assert result is None
+
+    def test_cidr_results_cached(self):
+        """Test CIDR validation results are cached on repeated calls."""
+        from trapninja.cli.validation import InputValidator
+
+        InputValidator.validate_ip_or_cidr.cache_clear()
+
+        result1 = InputValidator.validate_ip_or_cidr("10.0.0.0/8")
+        result2 = InputValidator.validate_ip_or_cidr("10.0.0.0/8")
+
+        assert result1 == result2
+        info = InputValidator.validate_ip_or_cidr.cache_info()
         assert info.hits >= 1

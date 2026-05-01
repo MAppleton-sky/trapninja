@@ -293,19 +293,19 @@ class TestOIDExtractionIntegration:
 
     def test_extract_trap_oid_fast_exists(self):
         """Test extract_trap_oid_fast function exists."""
-        from trapninja.snmp import extract_trap_oid_fast
+        from trapninja.processing.parser import extract_trap_oid_fast
         
         assert callable(extract_trap_oid_fast)
 
     def test_is_snmpv2c_function_exists(self):
         """Test is_snmpv2c function exists."""
-        from trapninja.snmp import is_snmpv2c
+        from trapninja.processing.parser import is_snmpv2c
         
         assert callable(is_snmpv2c)
 
     def test_is_snmpv2c_detects_v2c(self, sample_snmp_trap):
         """Test is_snmpv2c correctly identifies SNMPv2c packets."""
-        from trapninja.snmp import is_snmpv2c
+        from trapninja.processing.parser import is_snmpv2c
         
         result = is_snmpv2c(sample_snmp_trap)
         

@@ -18,7 +18,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.8.0] - 2025-02-11
+
+### Added
+
+#### New `config` Command Category
+- **Added `trapninja config` top-level command category** for viewing all running
+  configuration state including actual rule data, not just counts.
+- Subcommands: `show`, `destinations`, `blocked-ips`, `blocked-oids`,
+  `redirected-ips`, `redirected-oids`, `redirect-dests`, `listen-ports`, `validate`
+- `trapninja config show` displays full configuration overview with all rules listed
+- `trapninja config show --brief` shows counts only (compact summary)
+- `trapninja config show --json` outputs full config as machine-readable JSON
+- Individual subcommands (`blocked-ips`, `redirected-oids`, etc.) support `--json`
+  for integration with automation scripts
+
+#### Feature Flags
+- Added `unified_v2c_pipeline`, `shadow_mode`, and `config_sync` feature flags
+  in version metadata for 0.8.0
+
 ### Fixed
+
+#### CLI Help Text - Updated to Subcommand Format
+- **Fixed redirection help text** (`trapninja filter help`) which still showed
+  old `--flag` style commands (e.g. `--redirect-ip`, `--list-blocked-ips`)
+- All examples and command references now use the modern subcommand format
+  (e.g. `trapninja filter redirect-ip`, `trapninja config show`)
 
 #### SNMPv3 Decrypted Traps - Unified v2c Processing Pipeline
 - **Fixed OID statistics not being recorded for SNMPv3 decrypted traps**. Previously,
@@ -34,10 +61,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   any source (native v2c or decrypted v3)
 - Removed duplicated forwarding logic from `_process_snmpv3()` (~60 lines)
 
+### Refactoring — All Phases Complete
+- **R1.1: Optional Modules System** — Created `core/optional_modules.py` with lazy-loading
+  registry replacing ~280 lines of scattered `try/except ImportError` boilerplate.
+  Thread-safe typed wrappers for cache, stats, shadow, control, eBPF, fragmentation, and HA.
+- **R1.2: Service Initializer** — Broke 850-line `run_service()` into 15 testable
+  lifecycle phases in `core/service_init.py` (40+ tests)
+- **R1.3: CLI Command Patterns** — Eliminated ~400 lines of duplicate block/unblock/redirect
+  code via generic managers in `cli/command_base.py` (45+ tests)
+- **R2.1: Command Registry** — Replaced ~700 lines of if/elif routing in `executor.py`
+  with declarative registry in `cli/registry.py`. Executor reduced from ~950 to ~350 lines.
+- **Phase 2: Legacy Removal** — Removed `cli/stats.py` (~430 lines), `metrics.py` (~80 lines),
+  consolidated `redirection.py` (~280 → ~130 lines)
+- See `docs/refactoring/REFACTORING-STATUS.md` for full details
+
 ### Documentation
 - Updated GRANULAR_STATS.md with SNMPv3 OID tracking support
 - Added troubleshooting section for SNMPv3 OIDs not appearing in stats
 - Clarified that `--oid` query searches all tracked OIDs (not just top 100)
+- Updated refactoring documentation to reflect all-phases-complete status
 
 ---
 
@@ -983,15 +1025,19 @@ Before releasing 1.0.0, we need:
 - [ ] User feedback on API design
 - [ ] Documentation validated by users
 
-**Current Status: Beta (0.5.0)**
+**Current Status: Beta (0.8.0)**
 - ✅ Core features implemented
 - ✅ HA and SNMPv3 working
 - ✅ Performance optimized with eBPF
+- ✅ Granular statistics system
+- ✅ Redis caching with failover replay
+- ✅ Comprehensive pytest test suite (~1,830 tests)
+- ✅ Python packaging infrastructure (pip installable)
+- ✅ Security hardening (CWE-284, HMAC-SHA256, input validation)
+- ✅ Major refactoring complete (optional modules, service init, CLI registry)
 - ⏳ Field testing in progress
 - ⏳ Documentation being refined
-- ⏳ Security audit planned
-
-**Target 1.0.0 Release: Q2 2025**
+- ⏳ Formal security audit planned
 
 ---
 
@@ -999,7 +1045,9 @@ Before releasing 1.0.0, we need:
 
 | Version | Date | Type | Key Features | Status |
 |---------|------|------|--------------|--------|
-| **0.7.13** | 2025-12-31 | Cleanup | Code cleanup, removed ~76KB redundant code | **Current** |
+| **0.8.0** | 2026-02-11 | Feature/Refactor | Config category, SNMPv3 pipeline fix, refactoring complete | **Current** |
+| 0.7.14 | 2026-01-07 | Fix | Prometheus node_exporter compatibility | Beta |
+| 0.7.13 | 2025-12-31 | Cleanup | Code cleanup, removed ~76KB redundant code | Beta |
 | 0.7.12 | 2025-12-29 | Fix | Daemon restart crash fix, startup verification improvements | Beta |
 | 0.7.11 | 2025-12-24 | Fix | Config sync init fix, pass config_dir to HACluster | Beta |
 | 0.7.10 | 2025-12-24 | Fix | HA config sync working, Secondary pulls on startup | Beta |
@@ -1092,7 +1140,10 @@ When contributing, please:
 
 ---
 
-[Unreleased]: https://github.com/yourusername/trapninja/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/yourusername/trapninja/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/yourusername/trapninja/compare/v0.7.14...v0.8.0
+[0.7.14]: https://github.com/yourusername/trapninja/compare/v0.7.13...v0.7.14
+[0.7.13]: https://github.com/yourusername/trapninja/compare/v0.7.12...v0.7.13
 [0.5.0]: https://github.com/yourusername/trapninja/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/yourusername/trapninja/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/yourusername/trapninja/compare/v0.2.0...v0.3.0

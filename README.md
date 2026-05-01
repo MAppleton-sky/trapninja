@@ -212,11 +212,13 @@ Configuration files are stored in `/etc/trapninja/` (production) or `./config/` 
 | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | Operations guide with examples |
 | [docs/INSTALL.md](docs/INSTALL.md) | Detailed installation instructions |
 | [docs/CLI.md](docs/CLI.md) | Complete CLI reference |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design and internals |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, directory structure, and deployment |
 | [docs/HA.md](docs/HA.md) | High Availability configuration |
 | [docs/CACHE.md](docs/CACHE.md) | Trap caching and replay |
 | [docs/METRICS.md](docs/METRICS.md) | Prometheus metrics reference |
 | [docs/GRANULAR_STATS.md](docs/GRANULAR_STATS.md) | Per-IP/OID statistics |
+| [docs/SNMPV3_CREDENTIALS.md](docs/SNMPV3_CREDENTIALS.md) | SNMPv3 decryption setup |
+| [docs/SECURITY.md](docs/SECURITY.md) | Security measures and CWE remediation |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and solutions |
 
 ## Architecture

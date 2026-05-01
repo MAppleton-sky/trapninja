@@ -8,13 +8,13 @@ This guide covers common issues encountered with TrapNinja and their solutions. 
 
 ```bash
 # Check service status
-python trapninja.py --status
+trapninja daemon status
 
 # Run in foreground with debug logging
-python trapninja.py --foreground --debug
+trapninja daemon foreground --debug
 
 # Check log file
-tail -f /var/log/trapninja.log
+tail -f /var/log/trapninja/trapninja.log
 
 # Monitor metrics
 curl http://localhost:8080/metrics | grep trapninja
@@ -28,7 +28,7 @@ curl http://localhost:8080/metrics | grep trapninja
 
 **Example Output**:
 ```
-python3.9 -O trapninja.py --restart
+trapninja daemon restart
 ...
 Starting TrapNinja daemon...
 Daemon process spawned with PID 3543057
@@ -37,7 +37,7 @@ Verifying daemon startup...
 ✓ TrapNinja daemon started successfully with PID 3543057
 
 # Then immediately:
-python3.9 -O trapninja.py --status
+trapninja daemon status
 TrapNinja is not running (stale PID file)
 ```
 
@@ -53,10 +53,10 @@ to /dev/null).
 
 **Workaround for older versions**:
 ```bash
-# Instead of --restart, do stop then start separately:
-python trapninja.py --stop
+# Instead of daemon restart, do stop then start separately:
+trapninja daemon stop
 sleep 2
-python trapninja.py --start
+trapninja daemon start
 ```
 
 ### Symptom: Daemon Starts But Control Socket Doesn't Respond
@@ -80,16 +80,16 @@ python trapninja.py --start
    ```bash
    # Remove stale socket
    rm -f /tmp/trapninja_control.sock
-   python trapninja.py --start
+   trapninja daemon start
    ```
 
 **Diagnostics**:
 ```bash
 # Check log file for startup errors
-tail -50 /var/log/trapninja.log
+tail -50 /var/log/trapninja/trapninja.log
 
 # Run in foreground to see all output
-python trapninja.py --foreground --debug
+trapninja daemon foreground --debug
 ```
 
 ### Symptom: "stale PID file" on Status Check
@@ -101,7 +101,7 @@ python trapninja.py --foreground --debug
 1. TrapNinja automatically removes stale PID files
 2. Check logs for crash reason:
    ```bash
-   tail -100 /var/log/trapninja.log | grep -i "error\|exception\|crash"
+   tail -100 /var/log/trapninja/trapninja.log | grep -i "error\|exception\|crash"
    ```
 
 3. Common causes:
@@ -158,7 +158,7 @@ This happened when `load_config()` auto-started UDP listeners before capture mod
 ```bash
 # In foreground mode, check logs for:
 # "NOTE: UDP socket listeners are DISABLED in sniff mode"
-python trapninja.py --foreground --debug 2>&1 | grep -i "listener\|sniff\|capture"
+trapninja daemon foreground --debug 2>&1 | grep -i "listener\|sniff\|capture"
 ```
 
 ### Verification After Fix
@@ -187,7 +187,7 @@ snmptrap -v 2c -c public <server_ip>:162 "" .1.3.6.1.6.3.1.1.5.1
 **Verification**:
 ```bash
 # On SECONDARY, check ha_blocked counter
-python trapninja.py --status | grep ha_blocked
+trapninja daemon status | grep ha_blocked
 # Should increment when traps arrive
 ```
 
@@ -237,10 +237,10 @@ cat config/ha_config.json | grep timeout
 1. Check network connectivity between nodes
 2. Manually demote one node:
    ```bash
-   python trapninja.py --demote
+   trapninja ha demote
    ```
 3. Wait for state to stabilize
-4. Verify with `--ha-status` on both nodes
+4. Verify with `trapninja ha status` on both nodes
 
 ### Symptom: HA State Not Persisting
 
@@ -255,7 +255,7 @@ ls -la config/ha_config.json
 cat config/ha_config.json | python -m json.tool
 
 # Look for write errors in logs
-grep -i "error.*config\|permission" /var/log/trapninja.log
+grep -i "error.*config\|permission" /var/log/trapninja/trapninja.log
 ```
 
 ---
@@ -269,7 +269,7 @@ grep -i "error.*config\|permission" /var/log/trapninja.log
 **Diagnostics**:
 ```bash
 # Check which capture mode is active
-python trapninja.py --status | grep -i capture
+trapninja daemon status | grep -i capture
 
 # Monitor CPU per process
 top -p $(pgrep -f trapninja)
@@ -284,7 +284,7 @@ top -p $(pgrep -f trapninja)
    apt install bpfcc-tools python3-bpfcc  # Ubuntu
    
    # Run as root for eBPF
-   sudo python trapninja.py --start
+   sudo trapninja daemon start
    ```
 
 2. **Reduce worker count** if CPU-bound:
@@ -593,21 +593,21 @@ firewall-cmd --list-all
 **Diagnostics**:
 ```bash
 # Check if forwarding is enabled
-python trapninja.py --ha-status | grep Forwarding
+trapninja ha status | grep Forwarding
 
 # Check destinations configuration
 cat config/destinations.json
 
 # Check blocked lists
-python trapninja.py --list-blocked-ips
-python trapninja.py --list-blocked-oids
+trapninja filter list-blocked-ips
+trapninja filter list-blocked-oids
 ```
 
 **Common Causes**:
 
 1. **HA in SECONDARY mode**:
-   - Check with `--ha-status`
-   - Promote if needed: `--promote`
+   - Check with `trapninja ha status`
+   - Promote if needed: `trapninja ha promote`
 
 2. **All destinations filtered**:
    - Check `blocked_ips.json` and `blocked_traps.json`
@@ -625,7 +625,7 @@ python trapninja.py --list-blocked-oids
 nc -vzu <dest_ip> 162
 
 # Check for errors in logs
-grep -i "error.*forward\|destination" /var/log/trapninja.log
+grep -i "error.*forward\|destination" /var/log/trapninja/trapninja.log
 
 # Check metrics for failures
 curl -s http://localhost:8080/metrics | grep forward_errors
@@ -640,13 +640,13 @@ curl -s http://localhost:8080/metrics | grep forward_errors
 **Diagnostics**:
 ```bash
 # Check SNMPv3 status
-python trapninja.py --snmpv3-status
+trapninja snmpv3 status
 
 # List configured users
-python trapninja.py --snmpv3-list-users
+trapninja snmpv3 list-users
 
 # Check for decryption errors
-grep -i "snmpv3\|decrypt" /var/log/trapninja.log
+grep -i "snmpv3\|decrypt" /var/log/trapninja/trapninja.log
 ```
 
 **Common Causes**:
@@ -654,7 +654,7 @@ grep -i "snmpv3\|decrypt" /var/log/trapninja.log
 1. **Missing credentials**:
    ```bash
    # Add user
-   python trapninja.py --snmpv3-add-user \
+   trapninja snmpv3 add-user \
        --username <user> \
        --engine-id <id> \
        --auth-protocol SHA \
@@ -683,7 +683,7 @@ python -m json.tool < config/destinations.json
 ls -la config/
 
 # Look for parse errors
-grep -i "error.*config\|json" /var/log/trapninja.log
+grep -i "error.*config\|json" /var/log/trapninja/trapninja.log
 ```
 
 ### Symptom: Changes Not Taking Effect
@@ -694,7 +694,7 @@ grep -i "error.*config\|json" /var/log/trapninja.log
 
 1. **Restart service**:
    ```bash
-   python trapninja.py --restart
+   trapninja daemon restart
    ```
 
 2. **Clear cache** (for runtime changes):
@@ -714,26 +714,26 @@ grep -i "error.*config\|json" /var/log/trapninja.log
 
 ```bash
 # Full status
-python trapninja.py --status
+trapninja daemon status
 
 # HA status
-python trapninja.py --ha-status
+trapninja ha status
 
 # SNMPv3 status
-python trapninja.py --snmpv3-status
+trapninja snmpv3 status
 ```
 
 ### Log Analysis
 
 ```bash
 # Recent errors
-grep -i error /var/log/trapninja.log | tail -20
+grep -i error /var/log/trapninja/trapninja.log | tail -20
 
 # HA state changes
-grep "HA:" /var/log/trapninja.log | tail -20
+grep "HA:" /var/log/trapninja/trapninja.log | tail -20
 
 # Packet processing
-grep -i "forward\|process\|drop" /var/log/trapninja.log | tail -20
+grep -i "forward\|process\|drop" /var/log/trapninja/trapninja.log | tail -20
 ```
 
 ### Metrics
@@ -767,18 +767,18 @@ If issues persist:
 
 1. **Collect diagnostics**:
    ```bash
-   python trapninja.py --status > diag.txt
-   tail -100 /var/log/trapninja.log >> diag.txt
+   trapninja daemon status > diag.txt
+   tail -100 /var/log/trapninja/trapninja.log >> diag.txt
    ```
 
 2. **Enable debug logging**:
    ```bash
-   python trapninja.py --foreground --debug 2>&1 | tee debug.log
+   trapninja daemon foreground --debug 2>&1 | tee debug.log
    ```
 
 3. **Check version**:
    ```bash
-   python trapninja.py --version
+   trapninja daemon status
    cat VERSION
    ```
 
@@ -813,7 +813,7 @@ cat /var/log/trapninja/metrics/trapninja_granular.json | python -m json.tool | g
 **2. Check Processing Logs for Queue Full Warnings**:
 ```bash
 # Look for queue full events (logged with rate limiting)
-grep -i "queue full" /var/log/trapninja.log
+grep -i "queue full" /var/log/trapninja/trapninja.log
 
 # Example output:
 # WARNING - Queue full: 15 packets dropped
@@ -822,8 +822,8 @@ grep -i "queue full" /var/log/trapninja.log
 **3. Identify Burst Traffic Periods**:
 ```bash
 # Check peak rates - high peaks indicate burst traffic
-python trapninja.py --stats-top-ips --sort peak -n 20
-python trapninja.py --stats-top-oids --sort peak -n 20
+trapninja stats top-ips -s peak -n 20
+trapninja stats top-oids -s peak -n 20
 
 # Look for IPs with very high peak vs current rate
 # Peak/min >> Current/min indicates burst traffic occurred
@@ -832,7 +832,7 @@ python trapninja.py --stats-top-oids --sort peak -n 20
 **4. Correlate Drops with Traffic Patterns**:
 ```bash
 # Check when drops occurred by looking at log timestamps
-grep "Queue full" /var/log/trapninja.log | head -20
+grep "Queue full" /var/log/trapninja/trapninja.log | head -20
 
 # Cross-reference with network events (fiber cuts, maintenance, etc.)
 ```
@@ -855,25 +855,25 @@ grep "Queue full" /var/log/trapninja.log | head -20
 ```bash
 # eBPF filtering happens in kernel, reducing queue pressure
 sudo yum install bcc bcc-tools python3-bcc  # RHEL
-sudo python trapninja.py --start
+sudo trapninja daemon start
 ```
 
 **2. Block High-Volume Noise Sources**:
 ```bash
 # Identify sources generating excessive traps
-python trapninja.py --stats-top-ips --sort peak -n 10
+trapninja stats top-ips -s peak -n 10
 
 # Block noisy sources if appropriate
-python trapninja.py --add-blocked-ip 10.x.x.x
+trapninja filter block-ip 10.x.x.x
 ```
 
 **3. Block Noisy OIDs**:
 ```bash
 # Identify OIDs causing floods
-python trapninja.py --stats-top-oids --sort peak -n 10
+trapninja stats top-oids -s peak -n 10
 
 # Block non-critical OIDs
-python trapninja.py --add-blocked-oid 1.3.6.1.4.1.xxxx
+trapninja filter block-oid 1.3.6.1.4.1.xxxx
 ```
 
 **4. Increase Processing Capacity**:
@@ -965,7 +965,7 @@ python3 tests/metrics-test.py --all
 **Diagnostics**:
 ```bash
 # Check trap type breakdown in logs
-grep -E "fast_path|slow_path" /var/log/trapninja.log | tail -20
+grep -E "fast_path|slow_path" /var/log/trapninja/trapninja.log | tail -20
 
 # Check metrics
 cat /var/log/trapninja/metrics/trapninja_metrics.prom | grep fast_path
@@ -988,8 +988,8 @@ cat /var/log/trapninja/metrics/trapninja_metrics.json | python -m json.tool
 watch -n 5 'cat /var/log/trapninja/metrics/trapninja_metrics.prom | grep -E "received|forwarded|blocked|rate"'
 ```
 
-See `documentation/METRICS.md` for full metrics reference.
+See [METRICS.md](METRICS.md) for full metrics reference.
 
 ---
 
-**Last Updated**: 2025-01-09
+**Last Updated**: 2026-02-24
