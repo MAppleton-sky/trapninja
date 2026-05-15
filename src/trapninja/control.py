@@ -471,6 +471,7 @@ class ControlSocket(ControlHandlers):
         'stats': ControlHandlers._handle_stats,
         'config_sync': ControlHandlers._handle_config_sync,
         'show_config': ControlHandlers._handle_show_config,
+        'snmpv3_reload': ControlHandlers._handle_snmpv3_reload,
     }
 
     # -----------------------------------------------------------------

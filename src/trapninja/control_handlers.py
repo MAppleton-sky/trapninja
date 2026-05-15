@@ -465,6 +465,49 @@ class ControlHandlers:
             'data': debug_info
         }
 
+    # -----------------------------------------------------------------
+    # SNMPv3 handlers
+    # -----------------------------------------------------------------
+
+    def _handle_snmpv3_reload(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Reload SNMPv3 credentials from disk into the running daemon.
+
+        Called by the CLI after add-user or remove-user so that credential
+        changes take effect immediately without a daemon restart.
+        """
+        try:
+            from .snmpv3_credentials import get_credential_store
+
+            store = get_credential_store()
+            if not store:
+                return {
+                    'status': self.NOT_FOUND,
+                    'error': 'SNMPv3 credential store not initialised'
+                }
+
+            store._load_credentials()
+
+            engine_count = len(store.get_engine_ids())
+            logger.info(
+                f"SNMPv3 credentials reloaded via control socket "
+                f"({engine_count} engine(s) configured)"
+            )
+
+            return {
+                'status': self.SUCCESS,
+                'data': {
+                    'message': 'SNMPv3 credentials reloaded',
+                    'engines': engine_count,
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error reloading SNMPv3 credentials: {e}")
+            return {
+                'status': self.ERROR,
+                'error': f'Error reloading SNMPv3 credentials: {e}'
+            }
+
     # Stats action dispatch table
     _STATS_ACTIONS = {
         'summary': _stats_summary,

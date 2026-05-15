@@ -133,6 +133,25 @@ except ImportError as e:
     decryption_error = str(e)
 
 
+def _signal_daemon_reload() -> None:
+    """
+    Signal the running daemon to reload SNMPv3 credentials from disk.
+
+    Best-effort: silently ignored if the daemon is not running. The file
+    write has already succeeded before this is called, so credentials will
+    be loaded correctly on the next daemon start regardless.
+    """
+    try:
+        from ..control import ControlSocket
+        response = ControlSocket.send_command('snmpv3_reload', timeout=2)
+        if response.get('status') == 'ok' or response.get('status') == 'success':
+            print("  Daemon notified — credentials active immediately.")
+        else:
+            print("  Note: daemon could not be notified. Restart required for changes to take effect.")
+    except Exception:
+        print("  Note: daemon not running or unreachable. Changes will take effect on next start.")
+
+
 def check_dependencies() -> bool:
     """
     Check if SNMPv3 dependencies are available
@@ -228,11 +247,12 @@ def handle_snmpv3_add_user(args) -> int:
         
         if success:
             print(f"✓ {message}")
+            _signal_daemon_reload()
             return 0
         else:
             print(f"✗ Error: {message}")
             return 1
-            
+
     except Exception as e:
         print(f"✗ Error adding SNMPv3 user: {e}")
         return 1
@@ -268,11 +288,12 @@ def handle_snmpv3_remove_user(args) -> int:
         
         if success:
             print(f"✓ {message}")
+            _signal_daemon_reload()
             return 0
         else:
             print(f"✗ Error: {message}")
             return 1
-            
+
     except Exception as e:
         print(f"✗ Error removing SNMPv3 user: {e}")
         return 1
