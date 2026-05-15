@@ -4,9 +4,119 @@ TrapNinja CLI - SNMPv3 Commands
 
 Commands for managing SNMPv3 user credentials.
 """
+import struct
 import sys
 import getpass
-from typing import List
+from typing import List, Optional, Tuple
+
+
+# ---------------------------------------------------------------------------
+# Pcap parsing helpers
+# ---------------------------------------------------------------------------
+
+_PCAP_MAGIC_LE  = b'\xd4\xc3\xb2\xa1'
+_PCAP_MAGIC_BE  = b'\xa1\xb2\xc3\xd4'
+_PCAPNG_MAGIC   = b'\x0a\x0d\x0d\x0a'
+
+# Supported pcap link-layer types and their fixed L2 header sizes
+_LINKTYPE_L2_SIZE = {
+    0:   4,   # NULL / BSD loopback
+    1:   14,  # Ethernet
+    101: 0,   # Raw IP
+    113: 16,  # Linux cooked (SLL)
+    228: 0,   # Raw IPv4
+}
+
+
+def _is_pcap_file(data: bytes) -> bool:
+    """Return True if data starts with a recognised pcap magic number."""
+    return len(data) >= 4 and data[:4] in (
+        _PCAP_MAGIC_LE, _PCAP_MAGIC_BE, _PCAPNG_MAGIC
+    )
+
+
+def _extract_snmp_from_pcap(
+    data: bytes,
+) -> Tuple[List[bytes], Optional[str]]:
+    """
+    Parse a pcap file and return all UDP port-162 SNMP payloads.
+
+    Returns (payloads, error_message). On success error_message is None.
+    Only pcap (not pcapng) is handled; pcapng produces a clear error with
+    a conversion command.
+    """
+    if len(data) < 24:
+        return [], "File too small to be a valid pcap"
+
+    magic = data[:4]
+
+    if magic == _PCAPNG_MAGIC:
+        return [], (
+            "pcapng format is not supported directly.\n"
+            "Convert to pcap first:\n"
+            "  tcpdump -r capture.pcapng -w capture.pcap"
+        )
+
+    if magic == _PCAP_MAGIC_LE:
+        endian = '<'
+    elif magic == _PCAP_MAGIC_BE:
+        endian = '>'
+    else:
+        return [], "Not a pcap file (unrecognised magic bytes)"
+
+    # Global header: magic(4) ver_maj(2) ver_min(2) zone(4) sig(4) snap(4) network(4)
+    network = struct.unpack_from(f'{endian}I', data, 20)[0]
+
+    l2_size = _LINKTYPE_L2_SIZE.get(network)
+    if l2_size is None:
+        return [], (
+            f"Unsupported pcap link type: {network}.\n"
+            "Try capturing with: tcpdump -i <iface> -s0 -w capture.pcap udp port 162"
+        )
+
+    payloads: List[bytes] = []
+    offset = 24  # skip global header
+
+    while offset + 16 <= len(data):
+        # Per-packet header: ts_sec ts_usec incl_len orig_len
+        _, _, incl_len, _ = struct.unpack_from(f'{endian}IIII', data, offset)
+        offset += 16
+
+        if offset + incl_len > len(data):
+            break
+
+        pkt = data[offset:offset + incl_len]
+        offset += incl_len
+
+        # Strip L2
+        if len(pkt) <= l2_size:
+            continue
+        ip = pkt[l2_size:]
+
+        # IPv4 only
+        if len(ip) < 20 or (ip[0] >> 4) != 4:
+            continue
+
+        # Protocol must be UDP (17)
+        if ip[9] != 17:
+            continue
+
+        ip_hlen = (ip[0] & 0x0f) * 4
+        if len(ip) < ip_hlen + 8:
+            continue
+
+        udp = ip[ip_hlen:]
+
+        # Destination port must be 162 (SNMP trap)
+        dst_port = struct.unpack_from('>H', udp, 2)[0]
+        if dst_port != 162:
+            continue
+
+        snmp = udp[8:]
+        if snmp:
+            payloads.append(snmp)
+
+    return payloads, None
 
 try:
     from ..snmpv3_credentials import get_credential_store, SNMPv3User
@@ -250,86 +360,138 @@ def handle_snmpv3_show_user(args) -> int:
 
 def handle_snmpv3_test_decrypt(args) -> int:
     """
-    Test SNMPv3 decryption with a sample trap
-    
-    Args:
-        args: Parsed command-line arguments
-        
-    Returns:
-        Exit code (0 for success, 1 for failure)
+    Test SNMPv3 decryption with a raw binary or pcap capture file.
     """
     if not check_dependencies() or not check_decryption_dependencies():
         return 1
-    
+
     try:
         print("Initializing SNMPv3 decryptor...")
-        
         decryptor = initialize_snmpv3_decryptor()
-        
-        # Read trap data from file or stdin
-        if args.trap_file:
-            with open(args.trap_file, 'rb') as f:
-                trap_data = f.read()
-            print(f"Loaded trap data from {args.trap_file} ({len(trap_data)} bytes)")
-        else:
-            print("Error: --trap-file is required for test-decrypt command")
-            return 1
-        
-        # Attempt decryption
-        print(f"Attempting to decrypt SNMPv3 trap...")
-        
-        result = decryptor.decrypt_snmpv3_trap(trap_data, args.engine_id)
-        
-        if not result:
-            print("✗ Failed to decrypt SNMPv3 trap")
-            print("  Possible issues:")
-            print("  - No matching credentials configured")
-            print("  - Incorrect credentials")
-            print("  - Invalid trap format")
-            return 1
-        
-        engine_id, trap_info = result
-        
-        print(f"✓ Successfully decrypted SNMPv3 trap")
-        print(f"\n  Engine ID:     {engine_id}")
-        print(f"  Varbinds:      {len(trap_info['varbinds'])}")
-        
-        if args.verbose:
-            print("\n  Varbind Details:")
-            for idx, vb in enumerate(trap_info['varbinds'], 1):
-                print(f"    {idx}. OID: {vb['oid']}")
-                print(f"       Type: {vb['type']}")
-                print(f"       Value: {vb['value']}")
-        
-        # Test conversion to SNMPv2c
-        if args.convert:
-            print("\nConverting to SNMPv2c format...")
-            
-            snmpv2c_data = decryptor.convert_to_snmpv2c(trap_info, args.community)
-            
-            if snmpv2c_data:
-                print(f"✓ Conversion successful ({len(snmpv2c_data)} bytes)")
-                
-                if args.output:
-                    with open(args.output, 'wb') as f:
-                        f.write(snmpv2c_data)
-                    print(f"  Saved to: {args.output}")
-            else:
-                print("✗ Conversion to SNMPv2c failed")
+
+        with open(args.trap_file, 'rb') as f:
+            file_data = f.read()
+
+        print(f"Loaded {len(file_data)} bytes from {args.trap_file}")
+
+        # ------------------------------------------------------------------
+        # Pcap path
+        # ------------------------------------------------------------------
+        if _is_pcap_file(file_data):
+            print("Detected pcap format — extracting SNMP trap packets...")
+
+            payloads, err = _extract_snmp_from_pcap(file_data)
+            if err:
+                print(f"✗ Failed to parse pcap: {err}")
                 return 1
-        
-        print()
-        return 0
-        
+
+            if not payloads:
+                print("✗ No SNMP trap packets (UDP dport 162) found in capture.")
+                return 1
+
+            print(f"  Found {len(payloads)} SNMP trap packet(s).")
+
+            if args.all_packets:
+                return _test_decrypt_all(
+                    decryptor, payloads, args
+                )
+            else:
+                idx = args.packet_index
+                if idx >= len(payloads):
+                    print(
+                        f"✗ --packet-index {idx} is out of range "
+                        f"(capture contains {len(payloads)} trap(s), "
+                        f"valid range: 0–{len(payloads) - 1})."
+                    )
+                    return 1
+                print(f"  Attempting decryption of packet {idx}...")
+                trap_data = payloads[idx]
+        else:
+            # ------------------------------------------------------------------
+            # Raw binary path
+            # ------------------------------------------------------------------
+            trap_data = file_data
+
+        return _attempt_decrypt(decryptor, trap_data, args)
+
     except FileNotFoundError:
-        print(f"✗ Error: File not found: {args.trap_file}")
+        print(f"✗ File not found: {args.trap_file}")
         return 1
     except Exception as e:
-        print(f"✗ Error testing SNMPv3 decryption: {e}")
-        import traceback
+        print(f"✗ Error: {e}")
         if args.verbose:
+            import traceback
             traceback.print_exc()
         return 1
+
+
+def _attempt_decrypt(decryptor, trap_data: bytes, args) -> int:
+    """Attempt to decrypt a single SNMP PDU and report results."""
+    engine_id = getattr(args, 'engine_id', None)
+
+    result = decryptor.decrypt_snmpv3_trap(trap_data, engine_id)
+
+    if not result:
+        print("✗ Failed to decrypt SNMPv3 trap")
+        print("  Possible issues:")
+        print("  - No matching credentials configured (run: trapninja snmpv3 list-users)")
+        print("  - Incorrect auth/priv protocol or passphrase")
+        print("  - Packet is not encrypted (authNoPriv or noAuthNoPriv)")
+        return 1
+
+    engine_id_result, trap_info = result
+    decrypted_user = trap_info.get('username', 'N/A')
+    varbind_count = len(trap_info.get('varbinds', []))
+
+    print(f"✓ Successfully decrypted SNMPv3 trap")
+    print(f"\n  Engine ID:  {engine_id_result}")
+    print(f"  Username:   {decrypted_user}")
+    print(f"  Varbinds:   {varbind_count}")
+
+    if args.verbose:
+        print("\n  Varbind Details:")
+        for i, vb in enumerate(trap_info.get('varbinds', []), 1):
+            print(f"    {i}. OID:   {vb['oid']}")
+            print(f"       Type:  {vb['type']}")
+            print(f"       Value: {vb['value']}")
+
+    if args.convert:
+        print("\nConverting to SNMPv2c format...")
+        v2c = decryptor.convert_to_snmpv2c(trap_info, args.community)
+        if v2c:
+            print(f"✓ Conversion successful ({len(v2c)} bytes)")
+            if args.output:
+                with open(args.output, 'wb') as f:
+                    f.write(v2c)
+                print(f"  Saved to: {args.output}")
+        else:
+            print("✗ Conversion to SNMPv2c failed")
+            return 1
+
+    print()
+    return 0
+
+
+def _test_decrypt_all(decryptor, payloads: List[bytes], args) -> int:
+    """Attempt decryption of every SNMP trap in a pcap and print a summary."""
+    success = 0
+    failed = 0
+
+    for i, trap_data in enumerate(payloads):
+        engine_id = getattr(args, 'engine_id', None)
+        result = decryptor.decrypt_snmpv3_trap(trap_data, engine_id)
+        if result:
+            engine_id_result, trap_info = result
+            user = trap_info.get('username', 'N/A')
+            vbs = len(trap_info.get('varbinds', []))
+            print(f"  [{i}] ✓  engine={engine_id_result}  user={user}  varbinds={vbs}")
+            success += 1
+        else:
+            print(f"  [{i}] ✗  Failed to decrypt")
+            failed += 1
+
+    print(f"\nSummary: {success} decrypted, {failed} failed out of {len(payloads)} packets.")
+    return 0 if success > 0 else 1
 
 
 def handle_snmpv3_status(args) -> int:

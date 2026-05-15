@@ -62,13 +62,29 @@ def add_snmpv3_subcommands(subparsers):
     snmpv3_cmds.add_parser('status', help='Show SNMPv3 status')
 
     # test-decrypt
-    test_decrypt = snmpv3_cmds.add_parser('test-decrypt', help='Test decryption')
-    test_decrypt.add_argument('--trap-file', required=True, help='Trap file path')
+    test_decrypt = snmpv3_cmds.add_parser(
+        'test-decrypt',
+        help='Test decryption',
+        description=(
+            'Test SNMPv3 decryption against a raw trap binary or a pcap capture file.\n'
+            'Pcap files (tcpdump -w) are automatically detected and parsed.'
+        ),
+    )
+    test_decrypt.add_argument('--trap-file', required=True,
+                              help='Raw SNMP binary or pcap capture file')
+    test_decrypt.add_argument('--engine-id',
+                              help='Override engine ID (optional; extracted from packet if omitted)')
     test_decrypt.add_argument('--community', default='public',
-                              help='Community for converted trap')
+                              help='Community string for SNMPv2c conversion (default: public)')
     test_decrypt.add_argument('--convert', action='store_true',
-                              help='Convert to SNMPv2c')
-    test_decrypt.add_argument('--output', help='Output file path')
+                              help='Convert decrypted trap to SNMPv2c format')
+    test_decrypt.add_argument('--output', help='Write converted SNMPv2c output to file')
+    test_decrypt.add_argument('--packet-index', type=int, default=0,
+                              help='Pcap only: index of SNMP trap packet to decrypt (0-based, default: 0)')
+    test_decrypt.add_argument('--all-packets', action='store_true',
+                              help='Pcap only: attempt decryption on every SNMP trap in the capture')
+    test_decrypt.add_argument('--verbose', action='store_true',
+                              help='Show varbind details on success')
 
     # help
     snmpv3_cmds.add_parser('help', help='Show SNMPv3 command help')
