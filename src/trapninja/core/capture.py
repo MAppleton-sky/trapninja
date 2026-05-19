@@ -247,6 +247,13 @@ def try_ebpf_capture(handles: 'SubsystemHandles') -> bool:
         if capture_instance.start():
             handles.capture_instance = capture_instance
             handles.use_ebpf = True
+            
+            # Set ebpf_mode_active flag to guard against dual-capture:
+            # prevents UDP socket listeners from starting when eBPF raw
+            # socket is already capturing on the same interface.
+            from ..network import set_ebpf_mode
+            set_ebpf_mode(True)
+            
             logger.info(
                 "Packet capture started successfully with eBPF acceleration"
             )

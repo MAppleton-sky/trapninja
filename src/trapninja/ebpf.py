@@ -14,6 +14,12 @@ import queue
 import ctypes as ct
 import socket
 import ipaddress
+import struct
+import select
+import traceback
+import platform
+
+from .core.constants import FORWARD_SOURCE_PORT
 
 # Get logger instance
 logger = logging.getLogger("trapninja")
@@ -485,7 +491,14 @@ class MinimalTrapCapture:
                     continue
 
                 udph = struct.unpack('!HHHH', packet[udp_start:udp_start + 8])
+                src_port = udph[0]
                 dst_port = udph[1]
+
+                # Skip packets originating from our forwarding port - AF_PACKET sees
+                # outgoing traffic on the same interface. This mirrors the BPF filter
+                # exclusion already present in sniff mode.
+                if src_port == FORWARD_SOURCE_PORT:
+                    continue
 
                 if dst_port not in self.listen_ports:
                     continue

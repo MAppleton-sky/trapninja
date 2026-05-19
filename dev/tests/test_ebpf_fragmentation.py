@@ -424,6 +424,26 @@ class TestNonFragmentedPacketPassthrough:
 
         assert packet_q.empty()
 
+    def test_self_forwarded_packet_skipped(self, capture_no_frag, packet_q, stop_ev):
+        """Packets with src_port=FORWARD_SOURCE_PORT are skipped to prevent loops.
+        
+        When eBPF/raw socket capture is active, the AF_PACKET socket sees
+        outgoing traffic on the same interface. Packets we forward use
+        FORWARD_SOURCE_PORT as the source port, so we must skip these to
+        avoid re-capturing and double-counting traps.
+        """
+        from trapninja.core.constants import FORWARD_SOURCE_PORT
+        
+        snmp_payload = b'\x30\x26' + b'\x00' * 36
+        # Use FORWARD_SOURCE_PORT as source - should be skipped
+        raw_pkt = _build_complete_packet(
+            '10.1.1.5', 162, snmp_payload, src_port=FORWARD_SOURCE_PORT
+        )
+
+        _run_loop_with_packets(capture_no_frag, [raw_pkt], stop_ev)
+
+        assert packet_q.empty(), "Packet with FORWARD_SOURCE_PORT should be skipped"
+
     def test_fragment_buffer_absent_does_not_affect_complete_packets(
         self, capture_no_frag, packet_q, stop_ev
     ):

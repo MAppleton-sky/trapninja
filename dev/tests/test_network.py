@@ -312,18 +312,28 @@ class TestUDPListenerManagement:
         assert result is False
 
     def test_cleanup_udp_sockets(self):
-        """Test UDP socket cleanup."""
+        """Test UDP socket cleanup.
+        
+        Verifies that cleanup_udp_sockets() sets the per-port stop event,
+        closes sockets, and clears the tracking dicts.
+        """
         from trapninja import network
         
         mock_socket = MagicMock()
+        mock_future = MagicMock()
+        mock_stop_event = MagicMock()
+        
         network.udp_sockets = {162: mock_socket}
-        network.udp_threads = {162: MagicMock()}
+        # udp_threads stores (future, stop_event) tuples
+        network.udp_threads = {162: (mock_future, mock_stop_event)}
         network.ebpf_mode_active = False
         
         network.cleanup_udp_sockets()
         
+        mock_stop_event.set.assert_called_once()
         mock_socket.close.assert_called()
         assert network.udp_sockets == {}
+        assert network.udp_threads == {}
 
 
 class TestForwardTrap:

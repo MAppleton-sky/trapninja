@@ -159,7 +159,7 @@ _buffer_pool = BufferPool()
 
 # Socket management
 udp_sockets: Dict[int, socket.socket] = {}
-udp_threads: Dict[int, Any] = {}
+udp_threads: Dict[int, Any] = {}  # port -> (future, stop_event)
 udp_thread_pool: Optional[ThreadPoolExecutor] = None
 
 # Mode flags
@@ -215,8 +215,10 @@ def start_udp_listener(port: int) -> bool:
         
         udp_sockets[port] = sock
         
-        future = udp_thread_pool.submit(_udp_receive_loop, sock, port)
-        udp_threads[port] = future
+        # Per-port stop event for clean shutdown without affecting other ports
+        port_stop_event = threading.Event()
+        future = udp_thread_pool.submit(_udp_receive_loop, sock, port, port_stop_event)
+        udp_threads[port] = (future, port_stop_event)
         
         logger.info(f"UDP listener started on {BIND_ADDRESS}:{port}")
         return True
@@ -229,7 +231,7 @@ def start_udp_listener(port: int) -> bool:
         return False
 
 
-def _udp_receive_loop(sock: socket.socket, port: int):
+def _udp_receive_loop(sock: socket.socket, port: int, port_stop_event: threading.Event):
     """
     Optimized UDP receive loop.
     
@@ -238,6 +240,11 @@ def _udp_receive_loop(sock: socket.socket, port: int):
     - Non-blocking queue insertion
     - Batch statistics updates
     - Minimal per-packet overhead
+    
+    Args:
+        sock: The UDP socket to receive from
+        port: The port number (for logging/stats)
+        port_stop_event: Per-port stop event for clean shutdown
     """
     logger.info(f"UDP receive loop started for port {port}")
     
@@ -245,7 +252,8 @@ def _udp_receive_loop(sock: socket.socket, port: int):
     local_dropped = 0
     last_stats_time = time.time()
     
-    while not stop_event.is_set():
+    # Check both global stop_event (service shutdown) and per-port stop event
+    while not stop_event.is_set() and not port_stop_event.is_set():
         try:
             buffer = _buffer_pool.get()
             
@@ -328,16 +336,25 @@ def restart_udp_listeners() -> bool:
 
 
 def cleanup_udp_sockets():
-    """Clean up UDP sockets"""
+    """Clean up UDP sockets.
+    
+    Signals all per-port receive loops to stop gracefully, then closes
+    sockets and cleans up the thread pool. Uses per-port stop events
+    instead of future.cancel() since cancel() only works for tasks that
+    haven't started yet.
+    """
     global udp_sockets, udp_threads, udp_thread_pool
     
     if ebpf_mode_active:
         return
     
-    for port, future in list(udp_threads.items()):
-        if future:
-            future.cancel()
+    # Signal all receive loops to stop via their per-port stop events
+    for port, entry in list(udp_threads.items()):
+        if entry:
+            future, port_stop_event = entry
+            port_stop_event.set()
     
+    # Close sockets to unblock any pending recv calls
     for port, sock in list(udp_sockets.items()):
         if sock:
             try:
