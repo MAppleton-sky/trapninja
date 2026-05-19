@@ -20,6 +20,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.8.3] - 2026-05-19
+
+### Fixed
+
+#### eBPF Capture - Self-Forwarded Trap Double-Counting
+- **Fixed traps being counted twice per source IP in eBPF/raw socket mode**.
+  The AF_PACKET raw socket sees outgoing traffic on the same interface, causing
+  forwarded traps to be re-captured. Added `FORWARD_SOURCE_PORT` exclusion in
+  `_raw_capture_loop()` to skip packets originating from our forwarding port,
+  matching the BPF filter exclusion already present in sniff mode.
+
+#### UDP Listener Cleanup - Reliable Shutdown
+- **Fixed `cleanup_udp_sockets()` not stopping already-running receive loops**.
+  `Future.cancel()` only works for tasks that haven't started yet. Replaced with
+  per-port `threading.Event` stop flags that reliably signal running loops to
+  exit, preventing dual-capture when switching capture modes.
+
+#### eBPF Mode Flag - Dual-Capture Prevention
+- **Fixed `ebpf_mode_active` flag not being set on successful eBPF start**.
+  Added `set_ebpf_mode(True)` call in `try_ebpf_capture()` to guard against
+  UDP socket listeners accidentally starting when eBPF capture is already active.
+
+---
+
 ## [0.8.0] - 2025-02-11
 
 ### Added
