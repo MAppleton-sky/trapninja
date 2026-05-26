@@ -18,6 +18,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### Capture File Replay Engine
+- **Added `trapninja replay` command** for replaying pcap/pcapng capture files
+  through the trap processing pipeline (`trapninja replay run <file>`).
+- Injects packets into the processing pipeline as if received from the network,
+  passing through parsing, filtering, routing, and forwarding.
+- **Separate replay metrics** that are NEVER merged with production counters:
+  - Ephemeral `trapninja_replay.prom` file created during replay and deleted on exit
+  - Metrics: `trapninja_replay_packets_read`, `_injected`, `_skipped`, `_failed`
+- **Production safety gate** blocks accidental use against live daemons:
+  - Checks for live process via `/var/run/trapninja.pid`
+  - Override with `--i-know-this-is-not-production` flag or `TRAPNINJA_REPLAY_ALLOW=1` env var
+- **Replay options:**
+  - `--replay-realtime` to honour inter-packet timestamps
+  - `--replay-count N` for multiple passes (0 = loop forever)
+  - `--replay-filter-src IP` to filter by source IP
+  - `--replay-dry-run` to parse and count without injection
+  - `--replay-summary-json PATH` to write summary to JSON
+- Supports SNMPv1, v2c, and v3 traps with version detection for statistics
+- Memory-efficient streaming via Scapy PcapReader (handles multi-GB files)
+- Documentation added: `docs/REPLAY.md`
+
 ---
 
 ## [0.8.3] - 2026-05-19

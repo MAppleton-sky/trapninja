@@ -43,6 +43,7 @@ from .shadow import add_shadow_subcommands
 from .failover import add_failover_subcommands
 from .sync import add_sync_subcommands
 from .config import add_config_subcommands
+from .replay import add_replay_subcommands
 from .legacy import add_legacy_arguments
 
 __all__ = ['create_argument_parser']
@@ -103,6 +104,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     add_shadow_subcommands(subparsers)
     add_failover_subcommands(subparsers)
     add_sync_subcommands(subparsers)
+    add_replay_subcommands(subparsers)
 
     # Add legacy flat-style arguments (hidden, for backward compatibility)
     add_legacy_arguments(parser)

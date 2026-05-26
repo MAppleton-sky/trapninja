@@ -583,6 +583,15 @@ def _sync_help(args: Namespace) -> bool:
     return sync_commands.show_sync_help()
 
 
+# -----------------------------------------------------------------------------
+# Replay — development/testing tool only
+# -----------------------------------------------------------------------------
+
+def _replay_run(args: Namespace) -> int:
+    from . import replay_commands
+    return replay_commands.run_replay(args)
+
+
 # =============================================================================
 # SUBCOMMAND REGISTRY
 # =============================================================================
@@ -683,6 +692,9 @@ SUBCOMMANDS: Dict[Tuple[str, str], CommandDef] = {
     # ----- sync -----
     ('sync', 'now'):    CommandDef(_sync_now, returns_bool=True),
     ('sync', 'status'): CommandDef(_sync_status, returns_bool=True),
+
+    # ----- replay (dev/test tool) -----
+    ('replay', 'run'):  CommandDef(_replay_run),
 }
 
 
