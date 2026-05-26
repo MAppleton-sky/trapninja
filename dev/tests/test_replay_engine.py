@@ -166,6 +166,57 @@ class TestSnmpVersionDetection(unittest.TestCase):
         result = _detect_snmp_version(b'\xff\xff\xff\xff\xff')
         self.assertEqual(result, 'unknown')
 
+    def test_detect_v2c_long_form_length(self):
+        """_detect_snmp_version handles ASN.1 long-form length encoding (>127 bytes)."""
+        from trapninja.replay_engine import _detect_snmp_version
+        # SNMP v2c message with long-form length: 0x81 0x80 = 128 bytes content
+        # Structure: SEQUENCE(0x30) + len(0x81 0x80) + INTEGER(0x02 0x01 0x01) + padding
+        payload = bytes([
+            0x30,        # SEQUENCE tag
+            0x81, 0x80,  # Long-form length: 0x81 means 1 length byte follows, value 128
+            0x02,        # INTEGER tag (version)
+            0x01,        # INTEGER length = 1
+            0x01,        # Version = 1 (v2c)
+        ]) + b'\x00' * 122  # Padding to make total content = 128 bytes
+        self.assertEqual(_detect_snmp_version(payload), 'v2c')
+
+    def test_detect_v1_long_form_length(self):
+        """_detect_snmp_version handles long-form length for v1."""
+        from trapninja.replay_engine import _detect_snmp_version
+        payload = bytes([
+            0x30,        # SEQUENCE tag
+            0x81, 0x80,  # Long-form length
+            0x02,        # INTEGER tag (version)
+            0x01,        # INTEGER length = 1
+            0x00,        # Version = 0 (v1)
+        ]) + b'\x00' * 122
+        self.assertEqual(_detect_snmp_version(payload), 'v1')
+
+    def test_detect_v3_long_form_length(self):
+        """_detect_snmp_version handles long-form length for v3."""
+        from trapninja.replay_engine import _detect_snmp_version
+        payload = bytes([
+            0x30,        # SEQUENCE tag
+            0x81, 0x80,  # Long-form length
+            0x02,        # INTEGER tag (version)
+            0x01,        # INTEGER length = 1
+            0x03,        # Version = 3 (v3)
+        ]) + b'\x00' * 122
+        self.assertEqual(_detect_snmp_version(payload), 'v3')
+
+    def test_detect_v2c_two_byte_long_form_length(self):
+        """_detect_snmp_version handles two-byte long-form length (>255 bytes)."""
+        from trapninja.replay_engine import _detect_snmp_version
+        # 0x82 means 2 length bytes follow, value 0x01 0x00 = 256 bytes
+        payload = bytes([
+            0x30,              # SEQUENCE tag
+            0x82, 0x01, 0x00,  # Long-form: 2 length bytes, value 256
+            0x02,              # INTEGER tag (version)
+            0x01,              # INTEGER length = 1
+            0x01,              # Version = 1 (v2c)
+        ]) + b'\x00' * 249  # Padding
+        self.assertEqual(_detect_snmp_version(payload), 'v2c')
+
 
 class TestProductionSafetyGate(unittest.TestCase):
     """Tests for production safety gate."""

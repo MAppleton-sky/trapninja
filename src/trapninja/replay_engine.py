@@ -65,18 +65,15 @@ def _detect_snmp_version(payload: bytes) -> str:
     """
     Heuristic SNMP version detection from raw PDU bytes.
 
-    SNMP PDUs are BER-encoded ASN.1 SEQUENCEs with this structure:
-      Byte 0:  0x30  (SEQUENCE tag)
-      Byte 1:  <length>
-      Byte 2:  0x02  (INTEGER tag)
-      Byte 3:  0x01  (INTEGER length = 1 byte)
-      Byte 4:  <version> where 0x00=v1, 0x01=v2c, 0x03=v3
+    SNMP PDUs are BER-encoded ASN.1 SEQUENCEs. Handles both short-form
+    and long-form length encoding:
+      - Short form (length <= 127): single byte with value
+      - Long form (length > 127): first byte 0x80 | num_octets, then length bytes
 
     Returns: 'v1', 'v2c', 'v3', or 'unknown'
     Never raises — returns 'unknown' on any parse failure.
     """
     try:
-        # Minimum length check: SEQUENCE(1) + len(1) + INT_TAG(1) + INT_LEN(1) + VERSION(1)
         if len(payload) < 5:
             return 'unknown'
 
@@ -84,16 +81,32 @@ def _detect_snmp_version(payload: bytes) -> str:
         if payload[0] != 0x30:
             return 'unknown'
 
-        # Check for INTEGER tag after the length byte
-        if payload[2] != 0x02:
+        # Skip SEQUENCE length (handles short and long form)
+        pos = 1
+        length_byte = payload[pos]
+        if length_byte & 0x80:
+            # Long form: high bit set, low 7 bits = number of length bytes
+            num_len_bytes = length_byte & 0x7F
+            pos += 1 + num_len_bytes
+        else:
+            # Short form
+            pos += 1
+
+        if pos + 3 > len(payload):
             return 'unknown'
+
+        # Check for INTEGER tag (version field)
+        if payload[pos] != 0x02:
+            return 'unknown'
+        pos += 1
 
         # Check that INTEGER length is 1
-        if payload[3] != 0x01:
+        if payload[pos] != 0x01:
             return 'unknown'
+        pos += 1
 
         # Read version byte
-        version_byte = payload[4]
+        version_byte = payload[pos]
 
         if version_byte == 0x00:
             return 'v1'
