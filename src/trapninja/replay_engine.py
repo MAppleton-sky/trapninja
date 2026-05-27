@@ -55,6 +55,9 @@ class ReplayMetrics:
     replay_snmp_v3_count: int = 0
     replay_snmp_unknown_count: int = 0
     replay_start_wall_time: float = field(default_factory=time.time)
+    # SNMPv3 regeneration metrics
+    replay_v3_regenerated: int = 0
+    replay_v3_regen_failed: int = 0
 
 
 # =============================================================================
@@ -220,6 +223,7 @@ class ReplayEngine:
         filter_src_ip: Optional[str] = None,
         dry_run: bool = False,
         skip_safety_check: bool = False,
+        regenerate_v3: bool = False,
     ):
         """
         Initialize the replay engine.
@@ -231,6 +235,7 @@ class ReplayEngine:
             filter_src_ip: Only inject packets from this source IP
             dry_run: Parse/count but do not call put_nowait()
             skip_safety_check: Bypass production safety gate
+            regenerate_v3: Regenerate SNMPv3 traps with fresh security state
         """
         self.capture_file = capture_file
         self.replay_realtime = replay_realtime
@@ -238,6 +243,7 @@ class ReplayEngine:
         self.filter_src_ip = filter_src_ip
         self.dry_run = dry_run
         self.skip_safety_check = skip_safety_check
+        self.regenerate_v3 = regenerate_v3
 
         self.metrics = ReplayMetrics()
         self.metrics.replay_source_file = capture_file
@@ -245,6 +251,11 @@ class ReplayEngine:
         self._last_prom_write_time = 0.0
         self._prom_write_interval = 10.0  # Write at most every 10 seconds
         self._atexit_registered = False
+        
+        # SNMPv3 regeneration components (lazy initialized)
+        self._v3_decryptor = None
+        self._v3_generator = None
+        self._credential_store = None
 
     def run(self) -> int:
         """
@@ -286,7 +297,16 @@ class ReplayEngine:
         print(f"  Passes: {self.replay_count if self.replay_count > 0 else 'infinite (Ctrl-C to stop)'}")
         if self.filter_src_ip:
             print(f"  Filter: {self.filter_src_ip}")
+        if self.regenerate_v3:
+            print(f"  SNMPv3 Regeneration: ENABLED")
         print()
+
+        # 5. Initialize SNMPv3 regeneration if enabled
+        if self.regenerate_v3:
+            if not self._init_v3_regeneration():
+                print("Error: Failed to initialize SNMPv3 regeneration.")
+                print("Check that credentials are configured and pycryptodome is installed.")
+                return 1
 
         # Track start time
         start_time = time.time()
@@ -358,6 +378,18 @@ class ReplayEngine:
                                 self.metrics.replay_snmp_v3_count += 1
                             else:
                                 self.metrics.replay_snmp_unknown_count += 1
+
+                            # SNMPv3 regeneration: decrypt, convert, re-encrypt
+                            if self.regenerate_v3 and version == 'v3':
+                                regenerated = self._regenerate_v3_trap(src_ip, payload)
+                                if regenerated is not None:
+                                    payload = regenerated
+                                    self.metrics.replay_v3_regenerated += 1
+                                    logger.debug(f"Regenerated SNMPv3 trap from {src_ip}")
+                                else:
+                                    self.metrics.replay_v3_regen_failed += 1
+                                    logger.debug(f"SNMPv3 regeneration failed for {src_ip}, using original")
+                                    # Continue with original payload
 
                             # Realtime mode: sleep between packets
                             if self.replay_realtime and prev_packet_time is not None:
@@ -496,6 +528,12 @@ trapninja_replay_packets_failed {self.metrics.replay_packets_failed}
         """Print the summary table to stdout."""
         mode_str = "[DRY RUN] " if self.dry_run else ""
 
+        v3_regen_lines = ""
+        if self.regenerate_v3:
+            v3_regen_lines = f"""  ─────────────────────────────────────────────
+  V3 Regenerated: {self.metrics.replay_v3_regenerated:,}
+  V3 Regen Failed: {self.metrics.replay_v3_regen_failed:,}"""
+
         print(f"""
 ═══════════════════════════════════════════════
   {mode_str}TrapNinja Capture Replay — Summary
@@ -510,6 +548,100 @@ trapninja_replay_packets_failed {self.metrics.replay_packets_failed}
   SNMP v1       : {self.metrics.replay_snmp_v1_count:,}
   SNMP v2c      : {self.metrics.replay_snmp_v2c_count:,}
   SNMP v3       : {self.metrics.replay_snmp_v3_count:,}
-  Unknown       : {self.metrics.replay_snmp_unknown_count:,}
+  Unknown       : {self.metrics.replay_snmp_unknown_count:,}{v3_regen_lines}
 ═══════════════════════════════════════════════
 """)
+
+    def _init_v3_regeneration(self) -> bool:
+        """
+        Initialize SNMPv3 regeneration components.
+        
+        Loads the credential store and creates decryptor/generator instances.
+        
+        Returns:
+            True if initialization successful, False otherwise
+        """
+        try:
+            from .snmpv3_credentials import SNMPv3CredentialStore
+            from .snmpv3_decryption import SNMPv3Decryptor, CRYPTO_AVAILABLE
+            from .snmpv3_generator import SNMPv3Generator
+            from .config import SNMPV3_CREDENTIALS_FILE
+            
+            if not CRYPTO_AVAILABLE:
+                logger.error("pycryptodome not available for SNMPv3 operations")
+                return False
+            
+            # Load credential store
+            if not os.path.exists(SNMPV3_CREDENTIALS_FILE):
+                logger.error(f"SNMPv3 credentials file not found: {SNMPV3_CREDENTIALS_FILE}")
+                print(f"\nNo SNMPv3 credentials configured.")
+                print(f"Add credentials with: trapninja snmpv3 add-user")
+                return False
+            
+            self._credential_store = SNMPv3CredentialStore(SNMPV3_CREDENTIALS_FILE)
+            
+            # Check we have at least one engine ID configured
+            engine_ids = self._credential_store.get_engine_ids()
+            if not engine_ids:
+                logger.error("No SNMPv3 credentials configured")
+                print(f"\nNo SNMPv3 credentials configured.")
+                print(f"Add credentials with: trapninja snmpv3 add-user")
+                return False
+            
+            logger.info(f"Loaded SNMPv3 credentials for {len(engine_ids)} engine(s)")
+            
+            # Create decryptor and generator
+            self._v3_decryptor = SNMPv3Decryptor(self._credential_store)
+            self._v3_generator = SNMPv3Generator(self._credential_store)
+            
+            return True
+            
+        except ImportError as e:
+            logger.error(f"Failed to import SNMPv3 modules: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to initialize SNMPv3 regeneration: {e}")
+            return False
+
+    def _regenerate_v3_trap(self, src_ip: str, payload: bytes) -> Optional[bytes]:
+        """
+        Regenerate an SNMPv3 trap with fresh security state.
+        
+        Process:
+        1. Decrypt the original trap using configured credentials
+        2. Convert to neutral TrapEvent format
+        3. Generate new SNMPv3 message with fresh auth/priv
+        
+        Args:
+            src_ip: Source IP of the trap
+            payload: Original SNMPv3 message bytes
+            
+        Returns:
+            Regenerated SNMPv3 message bytes, or None if regeneration fails
+        """
+        if not self._v3_decryptor or not self._v3_generator:
+            return None
+        
+        try:
+            # Import TrapEvent here to avoid circular imports
+            from .snmpv3_generator import TrapEvent
+            
+            # Step 1: Decrypt
+            result = self._v3_decryptor.decrypt_snmpv3_trap(payload)
+            if result is None:
+                logger.debug(f"Failed to decrypt SNMPv3 trap from {src_ip}")
+                return None
+            
+            engine_id, trap_data = result
+            
+            # Step 2: Convert to TrapEvent
+            event = TrapEvent.from_decrypted_trap(src_ip, engine_id, trap_data)
+            
+            # Step 3: Regenerate with fresh security state
+            regenerated = self._v3_generator.generate(event)
+            
+            return regenerated
+            
+        except Exception as e:
+            logger.debug(f"SNMPv3 regeneration error: {e}")
+            return None

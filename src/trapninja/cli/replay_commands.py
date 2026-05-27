@@ -52,6 +52,7 @@ def run_replay(args: Namespace) -> int:
         filter_src_ip=getattr(args, 'replay_filter_src', None),
         dry_run=getattr(args, 'replay_dry_run', False),
         skip_safety_check=getattr(args, 'i_know_this_is_not_production', False),
+        regenerate_v3=getattr(args, 'regenerate_v3', False),
     )
 
     exit_code = engine.run()

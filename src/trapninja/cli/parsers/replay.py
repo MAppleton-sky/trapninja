@@ -102,5 +102,13 @@ def add_replay_subcommands(subparsers):
         help='Bypass the production safety gate (use with extreme caution)'
     )
 
+    run_cmd.add_argument(
+        '--regenerate-v3',
+        action='store_true',
+        dest='regenerate_v3',
+        help='Regenerate SNMPv3 traps with fresh security state. '
+             'Requires pycryptodome and credentials in /etc/trapninja/snmpv3_credentials.json'
+    )
+
     # help command
     replay_cmds.add_parser('help', help='Show comprehensive replay help')

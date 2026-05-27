@@ -261,6 +261,7 @@ REDIRECTED_IPS_FILE = os.path.join(CONFIG_DIR, "redirected_ips.json")
 REDIRECTED_OIDS_FILE = os.path.join(CONFIG_DIR, "redirected_oids.json")
 REDIRECTED_DESTINATIONS_FILE = os.path.join(CONFIG_DIR, "redirected_destinations.json")
 CACHE_CONFIG_FILE = os.path.join(CONFIG_DIR, "cache_config.json")
+SNMPV3_CREDENTIALS_FILE = os.path.join(CONFIG_DIR, "snmpv3_credentials.json")
 
 # Daemon settings
 PID_FILE = "/var/run/trapninja.pid"

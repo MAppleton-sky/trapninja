@@ -646,5 +646,135 @@ class TestReplayCommandsCLI(unittest.TestCase):
         mock_engine_class.assert_not_called()
 
 
+class TestRegenerateV3Flag(unittest.TestCase):
+    """Tests for --regenerate-v3 flag functionality."""
+
+    def setUp(self):
+        """Create temporary pcap files for tests."""
+        self.pcap_path = None
+
+    def tearDown(self):
+        """Clean up temporary files."""
+        if self.pcap_path and os.path.exists(self.pcap_path):
+            os.unlink(self.pcap_path)
+
+    def test_regenerate_v3_flag_defaults_false(self):
+        """ReplayEngine defaults regenerate_v3 to False."""
+        from trapninja.replay_engine import ReplayEngine
+        
+        with tempfile.NamedTemporaryFile(suffix='.pcap', delete=False) as f:
+            self.pcap_path = f.name
+        
+        engine = ReplayEngine(capture_file=self.pcap_path)
+        self.assertFalse(engine.regenerate_v3)
+
+    def test_regenerate_v3_flag_can_be_set(self):
+        """ReplayEngine accepts regenerate_v3=True."""
+        from trapninja.replay_engine import ReplayEngine
+        
+        with tempfile.NamedTemporaryFile(suffix='.pcap', delete=False) as f:
+            self.pcap_path = f.name
+        
+        engine = ReplayEngine(capture_file=self.pcap_path, regenerate_v3=True)
+        self.assertTrue(engine.regenerate_v3)
+
+    @patch('trapninja.replay_engine.ReplayEngine._init_v3_regeneration', return_value=False)
+    @patch('trapninja.replay_engine._check_production_safety', return_value=(True, 'test'))
+    def test_regenerate_v3_fails_without_credentials(self, mock_safety, mock_init):
+        """Engine returns error 1 when v3 regeneration init fails."""
+        from trapninja.replay_engine import ReplayEngine
+        
+        with tempfile.NamedTemporaryFile(suffix='.pcap', delete=False) as f:
+            self.pcap_path = f.name
+        
+        engine = ReplayEngine(capture_file=self.pcap_path, regenerate_v3=True)
+        result = engine.run()
+        
+        self.assertEqual(result, 1)
+        mock_init.assert_called_once()
+
+    def test_metrics_include_v3_regeneration_counters(self):
+        """ReplayMetrics includes v3 regeneration counters."""
+        from trapninja.replay_engine import ReplayMetrics
+        
+        metrics = ReplayMetrics()
+        
+        self.assertEqual(metrics.replay_v3_regenerated, 0)
+        self.assertEqual(metrics.replay_v3_regen_failed, 0)
+
+    @patch('trapninja.network.packet_queue')
+    @patch('trapninja.replay_engine._check_production_safety', return_value=(True, 'test'))
+    @patch('trapninja.config.LISTEN_PORTS', [162])
+    def test_without_flag_v2c_unchanged(self, mock_safety, mock_queue):
+        """Without regenerate_v3, v2c packets are injected unchanged."""
+        from trapninja.replay_engine import ReplayEngine
+        
+        self.pcap_path = _make_snmp_pcap_file(version='v2c', count=3)
+        
+        engine = ReplayEngine(capture_file=self.pcap_path, regenerate_v3=False)
+        engine.run()
+        
+        # All packets should be injected
+        self.assertEqual(engine.metrics.replay_packets_injected, 3)
+        self.assertEqual(engine.metrics.replay_snmp_v2c_count, 3)
+        # No regeneration should have occurred
+        self.assertEqual(engine.metrics.replay_v3_regenerated, 0)
+        self.assertEqual(engine.metrics.replay_v3_regen_failed, 0)
+
+
+class TestV3RegenerationMethods(unittest.TestCase):
+    """Tests for V3 regeneration helper methods."""
+
+    def test_init_v3_regeneration_fails_without_credentials_file(self):
+        """_init_v3_regeneration returns False when credentials file doesn't exist."""
+        from trapninja.replay_engine import ReplayEngine
+        
+        with tempfile.NamedTemporaryFile(suffix='.pcap', delete=False) as f:
+            pcap_path = f.name
+        
+        try:
+            engine = ReplayEngine(capture_file=pcap_path, regenerate_v3=True)
+            
+            with patch('trapninja.config.SNMPV3_CREDENTIALS_FILE', '/nonexistent/creds.json'):
+                result = engine._init_v3_regeneration()
+                self.assertFalse(result)
+        finally:
+            os.unlink(pcap_path)
+
+    def test_init_v3_regeneration_fails_without_crypto(self):
+        """_init_v3_regeneration returns False when crypto not available."""
+        from trapninja.replay_engine import ReplayEngine
+        from trapninja import snmpv3_decryption
+        
+        with tempfile.NamedTemporaryFile(suffix='.pcap', delete=False) as f:
+            pcap_path = f.name
+        
+        try:
+            engine = ReplayEngine(capture_file=pcap_path, regenerate_v3=True)
+            
+            # Patch the module attribute directly (call site pattern)
+            with patch.object(snmpv3_decryption, 'CRYPTO_AVAILABLE', False):
+                result = engine._init_v3_regeneration()
+                self.assertFalse(result)
+        finally:
+            os.unlink(pcap_path)
+
+    def test_regenerate_v3_trap_returns_none_without_init(self):
+        """_regenerate_v3_trap returns None when not initialized."""
+        from trapninja.replay_engine import ReplayEngine
+        
+        with tempfile.NamedTemporaryFile(suffix='.pcap', delete=False) as f:
+            pcap_path = f.name
+        
+        try:
+            engine = ReplayEngine(capture_file=pcap_path)
+            # Don't call _init_v3_regeneration
+            
+            result = engine._regenerate_v3_trap('10.0.0.1', b'\x30\x00')
+            self.assertIsNone(result)
+        finally:
+            os.unlink(pcap_path)
+
+
 if __name__ == '__main__':
     unittest.main()
