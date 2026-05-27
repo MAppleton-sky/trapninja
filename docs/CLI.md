@@ -355,6 +355,51 @@ See [SNMPV3_CREDENTIALS.md](SNMPV3_CREDENTIALS.md) for complete documentation.
 
 ---
 
+## Replay Commands
+
+Development/testing tool for replaying pcap capture files through the processing pipeline.
+
+```bash
+trapninja replay --help
+```
+
+### Basic Usage
+
+```bash
+# Replay a capture file
+trapninja replay run /path/to/traps.pcap
+
+# Dry run (preview without injecting)
+trapninja replay run /path/to/traps.pcap --replay-dry-run
+
+# Replay with original inter-packet timing
+trapninja replay run /path/to/traps.pcap --replay-realtime
+
+# Replay multiple passes
+trapninja replay run /path/to/traps.pcap --replay-count 5
+```
+
+### SNMPv3 Regeneration
+
+```bash
+# Regenerate SNMPv3 traps with fresh security state
+trapninja replay run /path/to/v3-traps.pcap --regenerate-v3
+
+# Combine with dry run to test credentials
+trapninja replay run /path/to/v3-traps.pcap --regenerate-v3 --replay-dry-run
+```
+
+### Filtering
+
+```bash
+# Only replay from a specific source IP
+trapninja replay run /path/to/traps.pcap --replay-filter-src 10.0.0.1
+```
+
+See [REPLAY.md](REPLAY.md) for complete documentation.
+
+---
+
 ## Cache Commands
 
 Manage the Redis-based trap cache for backfill operations.

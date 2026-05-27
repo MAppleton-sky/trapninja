@@ -125,6 +125,16 @@ Save replay statistics to a JSON file:
 trapninja replay run /path/to/traps.pcap --replay-summary-json /tmp/summary.json
 ```
 
+### SNMPv3 trap regeneration
+
+Regenerate SNMPv3 traps with fresh security state using configured credentials:
+
+```bash
+trapninja replay run /path/to/v3-traps.pcap --regenerate-v3
+```
+
+See [SNMPv3 Trap Regeneration](#snmpv3-trap-regeneration) below for details.
+
 ### Override production safety gate
 
 ```bash
@@ -143,6 +153,7 @@ trapninja replay run /path/to/traps.pcap --i-know-this-is-not-production
 | `--replay-filter-src IP` | Only replay packets from this source IP | None (all) |
 | `--replay-dry-run` | Parse and count but do NOT inject | Off |
 | `--replay-summary-json PATH` | Write summary to JSON file | None |
+| `--regenerate-v3` | Regenerate SNMPv3 traps with fresh security state | Off |
 | `--i-know-this-is-not-production` | Bypass production safety gate | Off |
 
 ---
@@ -176,6 +187,93 @@ The replay engine supports all SNMP versions:
 - **v3** — Replayed and processed through the existing SNMPv3 decryption path
 
 Version detection is heuristic (BER/ASN.1 byte parsing) and used for the version counters in the summary. The actual SNMP processing uses the full pysnmp parser.
+
+---
+
+## SNMPv3 Trap Regeneration
+
+The `--regenerate-v3` flag enables regeneration of SNMPv3 traps with fresh security state. This is useful when:
+
+- Original traps were captured with different credentials than your test environment
+- Testing the SNMPv3 decryption/encryption pipeline end-to-end
+- Validating credential configurations before production deployment
+
+### How It Works
+
+1. SNMPv3 packets are decrypted using credentials from `/etc/trapninja/snmpv3_credentials.json`
+2. Trap data is converted to a neutral internal representation (TrapEvent)
+3. A fresh SNMPv3 packet is generated with new:
+   - Message ID and Request ID
+   - Authentication parameters (HMAC using configured auth protocol)
+   - Encryption (if privacy protocol configured)
+4. v1/v2c packets pass through unchanged
+
+### Requirements
+
+- `pycryptodome` package installed
+- Credentials configured in `/etc/trapninja/snmpv3_credentials.json`
+- Matching engine ID and username for the traps being replayed
+
+### Usage Examples
+
+```bash
+# Replay with SNMPv3 regeneration
+trapninja replay run /path/to/v3-traps.pcap --regenerate-v3
+
+# Combined with dry run to verify credentials work
+trapninja replay run /path/to/v3-traps.pcap --regenerate-v3 --replay-dry-run
+
+# Filter to specific source and regenerate
+trapninja replay run /path/to/mixed.pcap --replay-filter-src 10.0.0.1 --regenerate-v3
+```
+
+### Adding Credentials for Replay
+
+Before using `--regenerate-v3`, ensure credentials are configured:
+
+```bash
+# Extract engine ID from pcap (optional - use tshark)
+tshark -r traps.pcap -T fields -e snmp.engineid | sort -u
+
+# Add SNMPv3 user for the engine ID in your capture
+trapninja snmpv3 add-user \
+    --username testuser \
+    --engine-id 80001f888056565656565656 \
+    --auth-protocol SHA256 \
+    --priv-protocol AES128
+
+# Verify credentials
+trapninja snmpv3 list-users
+```
+
+### Regeneration Metrics
+
+When using `--regenerate-v3`, additional counters are tracked:
+
+- `v3_regenerated` — SNMPv3 traps successfully regenerated
+- `v3_regen_failed` — SNMPv3 traps that failed regeneration (missing credentials, crypto error)
+
+These appear in the console output and JSON summary.
+
+### Troubleshooting Regeneration
+
+**"Cannot generate SNMPv3: pycryptodome not available"**
+
+Install pycryptodome:
+```bash
+pip3 install pycryptodome
+```
+
+**"No credentials found for engine ID"**
+
+The SNMPv3 traps use an engine ID not in your credential store. Add the user:
+```bash
+trapninja snmpv3 add-user --engine-id <engine-id-from-trap> ...
+```
+
+**"V3 regeneration failed" in output**
+
+Check that credentials match the engine ID AND username in the trap, and that auth/priv protocols match what the original trap used.
 
 ---
 
