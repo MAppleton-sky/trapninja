@@ -422,13 +422,14 @@ def safe_load_json(file_path, fallback):
         return fallback
 
 
-def load_config(restart_udp_listeners_callback=None):
+def load_config(restart_udp_listeners_callback=None, schedule_next=True):
     """
     Load configuration files and update global variables
     Optimized to only reload files that have changed
 
     Args:
         restart_udp_listeners_callback: Callback function to restart UDP listeners when needed
+        schedule_next: Whether to schedule periodic reload timer
 
     Returns:
         bool: True if any configuration changed, False otherwise
@@ -638,7 +639,7 @@ def load_config(restart_udp_listeners_callback=None):
     log.debug(f"  Blocked IPs: {len(blocked_ips)}")
 
     # Schedule next config check if not stopping
-    if not stop_event.is_set():
+    if schedule_next and not stop_event.is_set():
         Timer(CONFIG_CHECK_INTERVAL, load_config, args=[restart_udp_listeners_callback]).start()
 
     return config_changed

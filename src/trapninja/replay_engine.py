@@ -340,9 +340,20 @@ class ReplayEngine:
         # 6. Load config so workers have destinations and filtering rules.
         # Without this, config.destinations is [] and nothing gets forwarded.
         if not self.dry_run:
-            load_config()
+            load_config(schedule_next=False)
 
-        # 7. Start packet processors in replay process so injected packets
+        # 7. Initialise SNMPv3 decryptor for normal replay path so v3 packets
+        # follow the same decrypt/forward logic as live processing.
+        if not self.dry_run:
+            try:
+                from .snmpv3_decryption import initialize_snmpv3_decryptor
+
+                initialize_snmpv3_decryptor()
+            except Exception as e:
+                # Replay must continue even if SNMPv3 features are unavailable.
+                logger.debug(f"SNMPv3 decryptor init skipped for replay: {e}")
+
+        # 8. Start packet processors in replay process so injected packets
         # are actually consumed and forwarded before replay exits.
         if not self.dry_run and isinstance(packet_queue, queue.Queue):
             try:

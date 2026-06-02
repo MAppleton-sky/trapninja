@@ -26,7 +26,32 @@ def run_replay(args: Namespace) -> int:
     Returns:
         int: 0=success, 1=error, 2=safety gate blocked
     """
+    from ..config import LOG_FILE, LOG_LEVEL, LOG_MAX_SIZE, LOG_BACKUP_COUNT, LOG_COMPRESS
+    from ..logger import setup_logging
     from ..replay_engine import ReplayEngine
+
+    # Use a dedicated replay log file by default to avoid mixing replay
+    # diagnostics with normal operations logs.
+    replay_log_file = getattr(args, 'replay_log_file', None)
+    if replay_log_file:
+        replay_log_file = os.path.abspath(replay_log_file)
+    else:
+        replay_log_file = os.path.join(
+            os.path.dirname(LOG_FILE),
+            'trapninja_replay.log'
+        )
+
+    try:
+        setup_logging(
+            console=True,
+            log_file=replay_log_file,
+            log_level=LOG_LEVEL,
+            max_size=LOG_MAX_SIZE,
+            backup_count=LOG_BACKUP_COUNT,
+            compress=LOG_COMPRESS,
+        )
+    except Exception as e:
+        print(f"Warning: failed to initialize replay logging at {replay_log_file}: {e}")
 
     capture_file = getattr(args, 'capture_file', None)
     if not capture_file:

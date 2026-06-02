@@ -96,6 +96,13 @@ def add_replay_subcommands(subparsers):
     )
 
     run_cmd.add_argument(
+        '--replay-log-file',
+        dest='replay_log_file',
+        metavar='PATH',
+        help='Write replay logs to this file (default: /var/log/trapninja/trapninja_replay.log)'
+    )
+
+    run_cmd.add_argument(
         '--i-know-this-is-not-production',
         action='store_true',
         dest='i_know_this_is_not_production',
