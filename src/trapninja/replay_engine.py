@@ -290,7 +290,7 @@ class ReplayEngine:
         Returns:
             Exit code: 0=success, 1=error, 2=safety gate blocked
         """
-        from .config import LISTEN_PORTS, LOG_FILE, stop_event
+        from .config import LISTEN_PORTS, LOG_FILE, stop_event, load_config
         from .network import packet_queue
 
         processor_threads = []
@@ -337,7 +337,12 @@ class ReplayEngine:
                 print("Check that credentials are configured and pycryptodome is installed.")
                 return 1
 
-        # 6. Start packet processors in replay process so injected packets
+        # 6. Load config so workers have destinations and filtering rules.
+        # Without this, config.destinations is [] and nothing gets forwarded.
+        if not self.dry_run:
+            load_config()
+
+        # 7. Start packet processors in replay process so injected packets
         # are actually consumed and forwarded before replay exits.
         if not self.dry_run and isinstance(packet_queue, queue.Queue):
             try:
@@ -426,10 +431,12 @@ class ReplayEngine:
                                 self.metrics.replay_snmp_unknown_count += 1
 
                             # SNMPv3 regeneration: decrypt, convert, re-encrypt
+                            pre_processed = False
                             if self.regenerate_v3 and version == 'v3':
                                 regenerated = self._regenerate_v3_trap(src_ip, payload)
                                 if regenerated is not None:
                                     payload = regenerated
+                                    pre_processed = True
                                     self.metrics.replay_v3_regenerated += 1
                                     logger.debug(f"Regenerated SNMPv3 trap from {src_ip}")
                                 else:
@@ -457,6 +464,7 @@ class ReplayEngine:
                                         'src_ip': src_ip,
                                         'dst_port': dst_port,
                                         'payload': payload,
+                                        'pre_processed': pre_processed,
                                     })
                                     self.metrics.replay_packets_injected += 1
                                     logger.debug(
