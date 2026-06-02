@@ -20,6 +20,7 @@ import atexit
 import logging
 import os
 import queue
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
@@ -257,6 +258,31 @@ class ReplayEngine:
         self._v3_generator = None
         self._credential_store = None
 
+    def _wait_for_queue_drain(self, packet_queue_obj, timeout: float = 5.0) -> bool:
+        """
+        Wait briefly for injected packets to be consumed by packet workers.
+
+        Args:
+            packet_queue_obj: Queue instance used for injection
+            timeout: Max seconds to wait for queue depth to reach zero
+
+        Returns:
+            True if queue drained, False if timed out or unsupported queue type
+        """
+        if not isinstance(packet_queue_obj, queue.Queue):
+            return False
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                if packet_queue_obj.qsize() == 0:
+                    return True
+            except Exception:
+                return False
+            time.sleep(0.05)
+
+        return False
+
     def run(self) -> int:
         """
         Execute the replay operation.
@@ -266,6 +292,9 @@ class ReplayEngine:
         """
         from .config import LISTEN_PORTS, LOG_FILE, stop_event
         from .network import packet_queue
+
+        processor_threads = []
+        processor_stop_event = None
 
         # 1. Safety check
         is_safe, reason = _check_production_safety(skip_check=self.skip_safety_check)
@@ -306,6 +335,23 @@ class ReplayEngine:
             if not self._init_v3_regeneration():
                 print("Error: Failed to initialize SNMPv3 regeneration.")
                 print("Check that credentials are configured and pycryptodome is installed.")
+                return 1
+
+        # 6. Start packet processors in replay process so injected packets
+        # are actually consumed and forwarded before replay exits.
+        if not self.dry_run and isinstance(packet_queue, queue.Queue):
+            try:
+                from .processing import start_workers
+
+                processor_stop_event = threading.Event()
+                processor_threads = start_workers(
+                    packet_queue,
+                    stop_event=processor_stop_event,
+                    num_workers=min(max((os.cpu_count() or 2), 2), 8),
+                )
+            except Exception as e:
+                logger.error(f"Failed to start replay packet processors: {e}")
+                print(f"Error: failed to start replay packet processors: {e}")
                 return 1
 
         # Track start time
@@ -441,6 +487,29 @@ class ReplayEngine:
             print("Install with: pip install scapy")
             return 1
         finally:
+            # Give workers a short window to drain queued packets before
+            # printing summary and exiting.
+            if not self.dry_run and processor_threads:
+                drained = self._wait_for_queue_drain(packet_queue, timeout=5.0)
+                if not drained:
+                    remaining = 0
+                    try:
+                        remaining = packet_queue.qsize()
+                    except Exception:
+                        pass
+                    logger.warning(
+                        "Replay finished before queue fully drained "
+                        f"({remaining} packet(s) still queued)"
+                    )
+
+                if processor_stop_event is not None:
+                    processor_stop_event.set()
+                for thread in processor_threads:
+                    try:
+                        thread.join(timeout=0.2)
+                    except Exception:
+                        pass
+
             # Record duration
             self.metrics.replay_duration_seconds = time.time() - start_time
 
