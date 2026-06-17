@@ -236,7 +236,12 @@ Resets all granular statistics. Requires `--yes` confirmation.
 
 ## Metrics Files
 
-Statistics are automatically exported every 60 seconds:
+Statistics are exported every 60 seconds as part of the **unified export
+timer** owned by `metrics/collector.py`. Both `trapninja_metrics.prom` and
+`trapninja_granular.prom` are written in the same timer callback, guaranteeing
+they always reflect a consistent point-in-time snapshot. `GranularStatsCollector`
+does not run its own export timer — its `export_now()` method is called by
+the unified timer.
 
 ### JSON Format
 **Location:** `/var/log/trapninja/metrics/trapninja_granular.json`
@@ -244,31 +249,60 @@ Statistics are automatically exported every 60 seconds:
 ### Prometheus Format
 **Location:** `/var/log/trapninja/metrics/trapninja_granular.prom`
 
-The export contains only counters and gauges that Grafana/Prometheus **cannot derive on its own**.
-Current-rate metrics are intentionally absent — use `rate()` or `increase()` in your Grafana queries instead.
+The export contains only counters and gauges that Grafana/Prometheus **cannot
+derive on its own**. Current-rate metrics are intentionally absent — use
+`rate()` or `increase()` in Grafana instead.
+
+### What Is and Is Not in This File (v0.8.1+)
+
+As of v0.8.1, the global trap total counters (`trapninja_traps_total`,
+`trapninja_traps_forwarded_total`, `trapninja_traps_blocked_total`,
+`trapninja_traps_redirected_total`) are **no longer exported here**. They are
+the responsibility of `trapninja_metrics.prom` (written by
+`metrics/exporter.py`). Removing them from this file prevents Prometheus from
+double-counting when node_exporter picks up both `.prom` files.
+
+The internal `_total_*` counters on `GranularStatsCollector` still exist and
+are the source of truth read by `metrics/collector.py` — they are simply no
+longer written to this file.
+
+### Counter Reset Protection (`_created` timestamps)
+
+Every counter in this file includes a `_created` timestamp line. This tells
+Prometheus when the counter was last reset (process start time), preventing
+false rate spikes in Grafana after a TrapNinja restart:
+
+```
+trapninja_src_ip_traps_total{ip="10.0.0.1"} 45678
+trapninja_src_ip_traps_total_created{ip="10.0.0.1"} 1718042400.000
+```
+
+All `_created` values within a single process lifetime are identical — they
+all reference the same process start timestamp. Only a restart or an explicit
+`trapninja stats reset` changes the value.
+
+### Example File Content
 
 ```prometheus
-# Global counters
-trapninja_traps_total 1234567
-trapninja_traps_forwarded_total 1200000
-trapninja_traps_blocked_total 30000
-trapninja_traps_redirected_total 4567
-
-# Global gauges
+# Global gauges (unique source/OID counts and uptime)
 trapninja_unique_sources 3456
 trapninja_unique_oids 892
 trapninja_uptime_seconds 86400
 
-# Per-IP counters (top 50 by volume)
+# Per-IP counters (top 50 by volume, with _created timestamps)
 trapninja_src_ip_traps_total{ip="10.0.0.1"} 45678
+trapninja_src_ip_traps_total_created{ip="10.0.0.1"} 1718042400.000
 trapninja_src_ip_blocked_total{ip="10.0.0.2"} 281
+trapninja_src_ip_blocked_total_created{ip="10.0.0.2"} 1718042400.000
 
 # Per-IP peak rate gauge (preserves burst data between Prometheus scrapes)
 trapninja_src_ip_peak_rate_per_minute{ip="10.0.0.1"} 1450.00
 
 # Per-OID counters (top 50 by volume)
 trapninja_oid_traps_total{oid="1.3.6.1.4.1.9.9.41.2.0.1"} 123456
+trapninja_oid_traps_total_created{oid="1.3.6.1.4.1.9.9.41.2.0.1"} 1718042400.000
 trapninja_oid_blocked_total{oid="1.3.6.1.4.1.9.9.41.2.0.2"} 500
+trapninja_oid_blocked_total_created{oid="1.3.6.1.4.1.9.9.41.2.0.2"} 1718042400.000
 
 # Per-OID gauges
 trapninja_oid_unique_sources{oid="1.3.6.1.4.1.9.9.41.2.0.1"} 247
@@ -276,18 +310,22 @@ trapninja_oid_peak_rate_per_minute{oid="1.3.6.1.4.1.9.9.41.2.0.1"} 3200.00
 
 # Per-destination counters
 trapninja_dest_forwards_total{destination="default"} 1200000
+trapninja_dest_forwards_total_created{destination="default"} 1718042400.000
 trapninja_dest_failures_total{destination="voice"} 12
+trapninja_dest_failures_total_created{destination="voice"} 1718042400.000
 
 # IP×OID combination counters (top 100 by volume)
 trapninja_src_ip_oid_traps_total{ip="10.0.0.1",oid="1.3.6.1.4.1.9.9.41.2.0.1"} 38000
+trapninja_src_ip_oid_traps_total_created{ip="10.0.0.1",oid="1.3.6.1.4.1.9.9.41.2.0.1"} 1718042400.000
 ```
 
-**Metrics NOT exported (calculate in Grafana instead):**
+**Metrics not exported here (use Grafana queries instead):**
 
-| Removed metric | Grafana equivalent |
+| Not in file | Grafana equivalent |
 |---|---|
-| `trapninja_ip_rate_per_minute` | `rate(trapninja_src_ip_traps_total[1m]) * 60` |
-| `trapninja_oid_rate_per_minute` | `rate(trapninja_oid_traps_total[1m]) * 60` |
+| Global trap totals | In `trapninja_metrics.prom` |
+| `trapninja_ip_rate_per_minute` | `rate(trapninja_src_ip_traps_total[2m])` |
+| `trapninja_oid_rate_per_minute` | `rate(trapninja_oid_traps_total[2m])` |
 | `trapninja_dest_forwards_60s` | `increase(trapninja_dest_forwards_total[60s])` |
 
 ## Configuration
@@ -339,25 +377,49 @@ The LRU eviction ensures memory stays bounded even under heavy traffic.
 
 ## Grafana Integration
 
-**Prometheus scrape config (file-based):**
-```yaml
-scrape_configs:
-  - job_name: 'trapninja-granular'
-    file_sd_configs:
-      - files:
-        - '/var/log/trapninja/metrics/trapninja_granular.prom'
+**Prometheus scrape config (via node_exporter textfile collector):**
+
+Point node_exporter at the metrics directory — it will pick up both
+`trapninja_metrics.prom` and `trapninja_granular.prom` automatically. See
+`METRICS.md` for the node_exporter configuration.
+
+**Sample Grafana queries:**
+
+```promql
+# Top sources by total volume
+topk(10, trapninja_src_ip_traps_total)
+
+# Current rate per IP (traps/second)
+topk(10, rate(trapninja_src_ip_traps_total[2m]))
+
+# Current rate per IP (traps/minute)
+topk(10, rate(trapninja_src_ip_traps_total[2m]) * 60)
+
+# OID distribution by volume
+topk(10, trapninja_oid_traps_total)
+
+# OID rate (traps/second)
+topk(10, rate(trapninja_oid_traps_total[2m]))
+
+# Destination forward rate
+rate(trapninja_dest_forwards_total[2m])
+
+# Destination recent trap count (last 60s)
+increase(trapninja_dest_forwards_total[60s])
+
+# Peak rates — burst detection (preserves sub-scrape-interval bursts)
+topk(10, trapninja_src_ip_peak_rate_per_minute)
+
+# Widespread network events (OID arriving from many sources simultaneously)
+topk(5, trapninja_oid_unique_sources)
+
+# Per-IP blocked traps
+topk(10, trapninja_src_ip_blocked_total)
 ```
 
-**Sample queries:**
-- Top sources by total volume: `topk(10, trapninja_src_ip_traps_total)`
-- Current rate per IP (traps/min): `topk(10, rate(trapninja_src_ip_traps_total[1m]) * 60)`
-- OID distribution: `topk(10, trapninja_oid_traps_total)`
-- OID rate (traps/min): `topk(10, rate(trapninja_oid_traps_total[1m]) * 60)`
-- Destination forward rate: `rate(trapninja_dest_forwards_total[1m])`
-- Destination recent activity: `increase(trapninja_dest_forwards_total[60s])`
-- Peak rates (burst detection): `topk(10, trapninja_src_ip_peak_rate_per_minute)`
-- Widespread events (OID from many sources): `topk(5, trapninja_oid_unique_sources)`
-- Per-IP blocked: `topk(10, trapninja_src_ip_blocked_total)`
+Use `[2m]` range windows (rather than `[1m]`) in `rate()` queries to ensure
+the calculation always spans at least two scrape intervals, which avoids
+zero-value artefacts when a scrape is missed.
 
 ## Performance Impact
 
