@@ -360,3 +360,33 @@ class TestParserWiring:
         parser = create_argument_parser()
         args = parser.parse_args(['--metrics-show'])
         assert getattr(args, 'metrics_show', False) is True
+
+    def test_metrics_show_json_flag_after_subcommand(self):
+        """'trapninja metrics show --json' works now that --json is also
+        defined on the show subparser, matching the documented epilog
+        example."""
+        from trapninja.cli.parser import create_argument_parser
+
+        parser = create_argument_parser()
+        args = parser.parse_args(['metrics', 'show', '--json'])
+        assert args.json is True
+
+    def test_metrics_show_json_pretty_after_subcommand(self):
+        """'trapninja metrics show --json --pretty' — the exact epilog
+        example — parses correctly."""
+        from trapninja.cli.parser import create_argument_parser
+
+        parser = create_argument_parser()
+        args = parser.parse_args(['metrics', 'show', '--json', '--pretty'])
+        assert args.json is True
+        assert args.pretty is True
+
+    def test_metrics_show_json_before_subcommand_still_works(self):
+        """Regression check: 'trapninja --json metrics show' (the original,
+        pre-existing test case) still works now that --json is defined on
+        both the root parser and the show subparser."""
+        from trapninja.cli.parser import create_argument_parser
+
+        parser = create_argument_parser()
+        args = parser.parse_args(['--json', 'metrics', 'show'])
+        assert args.json is True

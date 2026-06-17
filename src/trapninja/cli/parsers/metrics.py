@@ -5,6 +5,7 @@ TrapNinja Metrics Parser - Prometheus metrics configuration subcommands.
 Commands: config, set-dir, add-label, remove-label, set-interval
 """
 
+import argparse
 import textwrap
 
 from .base import TrapNinjaHelpFormatter
@@ -37,8 +38,26 @@ def add_metrics_subcommands(subparsers):
         'show',
         help='Show live metrics including load-test diagnostics'
     )
-    # --json is a global option (added by add_global_options in base.py);
-    # only --pretty is added here since it is not a global flag.
+    # --json also exists as a global option (added by add_global_options in
+    # base.py), but argparse's subparsers only recognise a parent's optionals
+    # if they appear BEFORE the subcommand token (e.g. `trapninja --json
+    # metrics show`). Adding it here too lets `trapninja metrics show --json`
+    # work as well, matching the examples in this module's epilog and
+    # matching --pretty, which already works in this position. Defining the
+    # same flag on both the root parser and this subparser does not conflict
+    # — they are independent parser objects sharing one Namespace, and
+    # argparse's per-action default-setting only fills in a dest that the
+    # namespace doesn't already have, so whichever position actually
+    # supplies --json is the one that takes effect.
+    # default=SUPPRESS prevents argparse from writing json=False into the
+    # Namespace when --json isn't provided in this position.  Without it,
+    # the subparser would overwrite json=True set by the root parser via
+    # `trapninja --json metrics show` with its own default of False.
+    # With SUPPRESS, a token of --json here writes True; the absence of the
+    # token leaves whatever the root parser already put in the Namespace.
+    show_cmd.add_argument('--json', action='store_true',
+                          default=argparse.SUPPRESS,
+                          help='Output as JSON')
     show_cmd.add_argument('--pretty', action='store_true',
                           help='Pretty-print JSON output (use with --json)')
 
