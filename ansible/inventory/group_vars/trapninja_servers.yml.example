@@ -13,7 +13,7 @@ trapninja_config_dest: /etc/trapninja
 # Service settings
 trapninja_user: root
 trapninja_group: root
-trapninja_python: python3.9
+trapninja_python: python3.14
 
 # Feature flags
 trapninja_enable_cache: true

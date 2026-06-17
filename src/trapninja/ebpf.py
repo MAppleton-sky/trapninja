@@ -35,7 +35,7 @@ def _import_bcc():
     RHEL 8 installs python3-bcc to Python 3.6 site-packages regardless of
     runtime Python version. We need to temporarily add this path for the BCC
     import, but then carefully manage sys.path to avoid polluting it with
-    Python 3.6 packages that conflict with Python 3.9 (e.g., cffi).
+    Python 3.6 packages that conflict with Python 3.14 (e.g., cffi).
     
     Returns:
         tuple: (BPF class or None, error message or None)
@@ -60,7 +60,7 @@ def _import_bcc():
             sys.version_info.major, sys.version_info.minor
         ),
         # CMake/source build locations (last)
-        '/usr/local/lib/python3.9/site-packages',
+        '/usr/local/lib/python3.14/site-packages',
         '/usr/local/lib/python{}.{}/site-packages'.format(
             sys.version_info.major, sys.version_info.minor
         ),
@@ -92,7 +92,7 @@ def _import_bcc():
     
     # Try each path, but only keep the one that works in sys.path
     # This avoids polluting sys.path with Python 3.6 packages that
-    # conflict with Python 3.9 modules (e.g., cffi version mismatch)
+    # conflict with Python 3.14 modules (e.g., cffi version mismatch)
     for path in BCC_PATHS:
         if not os.path.exists(path) or path in sys.path:
             continue

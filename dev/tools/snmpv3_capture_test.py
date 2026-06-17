@@ -6,7 +6,7 @@ This script captures packets on port 162 and shows what's being received,
 to help diagnose why SNMPv3 traps might not be detected.
 
 Usage:
-    sudo python3.9 snmpv3_capture_test.py [interface]
+    sudo python3.14 snmpv3_capture_test.py [interface]
 """
 import sys
 import os

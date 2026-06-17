@@ -108,12 +108,12 @@ rm src/trapninja/packet_processor.py.bak
 
 Before removing .bak files, verify:
 
-- [ ] Service starts correctly: `sudo python3.9 -O trapninja.py --debug`
-- [ ] HA status works: `sudo python3.9 -O trapninja.py --ha-status`
+- [ ] Service starts correctly: `sudo python3.14 -O trapninja.py --debug`
+- [ ] HA status works: `sudo python3.14 -O trapninja.py --ha-status`
 - [ ] Trap forwarding works (send test trap, verify delivery)
 - [ ] HA failover works (if HA enabled)
-- [ ] Statistics work: `sudo python3.9 -O trapninja.py --stats-summary`
-- [ ] Unit tests pass: `cd dev/tests && python3.9 trapninja-tests.py`
+- [ ] Statistics work: `sudo python3.14 -O trapninja.py --stats-summary`
+- [ ] Unit tests pass: `cd dev/tests && python3.14 trapninja-tests.py`
 
 ## Phase 2: Service Module Split (Deferred)
 

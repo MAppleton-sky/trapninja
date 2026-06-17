@@ -75,12 +75,12 @@ def main():
     # 3. Search for bcc in site-packages
     print_header("Step 3: Search for BCC in Python paths")
     search_paths = [
-        '/usr/lib/python3.9/site-packages',
-        '/usr/lib64/python3.9/site-packages',
+        '/usr/lib/python3.14/site-packages',
+        '/usr/lib64/python3.14/site-packages',
         '/usr/lib/python3/site-packages',
         '/usr/lib64/python3/site-packages',
-        '/usr/local/lib/python3.9/site-packages',
-        '/usr/local/lib64/python3.9/site-packages',
+        '/usr/local/lib/python3.14/site-packages',
+        '/usr/local/lib64/python3.14/site-packages',
     ]
     
     # Add current Python's site-packages

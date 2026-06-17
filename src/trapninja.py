@@ -69,7 +69,7 @@ def check_ebpf_support():
         
         # Try to import BCC, temporarily adding paths only for the import
         # We remove them afterward to avoid polluting sys.path with Python 3.6
-        # packages that could conflict with Python 3.9 modules (e.g., cffi)
+        # packages that could conflict with Python 3.14 modules (e.g., cffi)
         bpf_imported = False
         added_paths = []
         
@@ -91,7 +91,7 @@ def check_ebpf_support():
         
         # Clean up: remove ALL paths we added to prevent cffi version conflicts
         # BCC is already imported into memory, so we don't need the path anymore
-        # This prevents Python 3.6 cffi from conflicting with Python 3.9 cffi
+        # This prevents Python 3.6 cffi from conflicting with Python 3.14 cffi
         for path in added_paths:
             if path in sys.path:
                 sys.path.remove(path)

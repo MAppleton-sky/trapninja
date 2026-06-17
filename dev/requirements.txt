@@ -3,7 +3,7 @@
 #
 # Install with: pip3 install --break-system-packages -r requirements.txt
 #
-# Note: On RHEL 8, use pip3.9 if python3.9 is installed separately
+# Note: On RHEL 8, use pip3.14 if python3.14 is installed separately
 
 # =============================================================================
 # REQUIRED - Core Dependencies

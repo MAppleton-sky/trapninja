@@ -144,7 +144,7 @@ graph TD
 
 ```mermaid
 graph TD
-    subgraph TrapNinjaNode ["🥷 TrapNinja Node - Python 3.9"]
+    subgraph TrapNinjaNode ["🥷 TrapNinja Node - Python 3.14"]
 
         subgraph CaptureLayer ["Capture Layer"]
             eBPF["⚡ eBPF Capture<br/>ebpf.py<br/>Kernel-space filtering"]
@@ -245,7 +245,7 @@ graph TD
 
 ### Container Diagram Explanation
 
-TrapNinja is implemented as a Python 3.9 application with modular architecture for maintainability and performance. The system is organized into distinct layers:
+TrapNinja is implemented as a Python 3.14 application with modular architecture for maintainability and performance. The system is organized into distinct layers:
 
 **Capture Layer:** Three capture methods with automatic fallback hierarchy. eBPF provides kernel-space filtering for maximum performance (30k+ traps/sec), Socket capture uses UDP listeners for standard operation (10k+ traps/sec), and Scapy Sniff provides libpcap-based fallback for compatibility (5k+ traps/sec). Only ONE capture method runs at a time to prevent packet duplication.
 
@@ -325,7 +325,7 @@ sequenceDiagram
 ## Technology Stack
 
 **Runtime & Languages:**
-- Python 3.9 (with `-O` optimization flag for production)
+- Python 3.14 (with `-O` optimization flag for production)
 - Scapy 2.5+ (packet capture and parsing)
 - BCC/eBPF (kernel-space packet acceleration on Linux 4.4+)
 
@@ -1174,7 +1174,7 @@ graph TD
 | Disk | 10 GB | 50+ GB (for cache) |
 | Network | 1 Gbps | 10 Gbps |
 | OS | RHEL 8.x | RHEL 8.10 |
-| Python | 3.9+ | 3.9 with -O flag |
+| Python | 3.14 | 3.14 with -O flag |
 
 ---
 

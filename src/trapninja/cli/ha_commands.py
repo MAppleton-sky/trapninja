@@ -260,7 +260,7 @@ def show_ha_status() -> bool:
                 print(f"  ")
                 print(f"  To fix:")
                 print(f"    • Check if daemon is running: python trapninja.py --status")
-                print(f"    • If running, restart with new code: sudo python3.9 -O trapninja.py --restart")
+                print(f"    • If running, restart with new code: sudo python3.14 -O trapninja.py --restart")
                 print(f"    • Check control socket exists: ls -la /tmp/trapninja_control.sock")
                 print(f"  ")
                 print(f"  Without live status, you'll only see static configuration above.")

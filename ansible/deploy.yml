@@ -47,18 +47,18 @@
     trapninja_config_dest: /etc/trapninja
     trapninja_user: root
     trapninja_group: root
-    trapninja_python: python3.9
+    trapninja_python: python3.14
 
   tasks:
     # =========================================================================
     # Prerequisites
     # =========================================================================
-    - name: Install Python 3.9 and dependencies
+    - name: Install Python 3.14 and dependencies
       tags: [install, prereq]
       dnf:
         name:
-          - python39
-          - python39-pip
+          - python314
+          - python314-pip
           - libpcap
           - libpcap-devel
         state: present
@@ -134,7 +134,7 @@
       tags: [install, pip]
       pip:
         requirements: /tmp/trapninja-requirements.txt
-        executable: pip3.9
+        executable: pip3.14
         extra_args: "--break-system-packages"
 
     - name: Clean up temporary requirements file

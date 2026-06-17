@@ -23,14 +23,14 @@ git clone <repository-url>
 cd trapninja
 
 # Install dependencies
-pip3.9 install --break-system-packages -r dev/requirements.txt
+pip3.14 install --break-system-packages -r dev/requirements.txt
 
 # Configure destinations
 echo '[["192.168.1.100", 162]]' > src/config/destinations.json
 
 # Start forwarding (from src directory)
 cd src
-sudo python3.9 -O trapninja.py
+sudo python3.14 -O trapninja.py
 ```
 
 ## Repository Structure
@@ -73,24 +73,24 @@ trapninja/
 ### Requirements
 
 - RHEL 8.x / CentOS 8 / Rocky Linux 8 (or compatible)
-- Python 3.9+
+- Python 3.14+
 - Root privileges (for raw socket access)
 
 ### Package Installation (Recommended)
 
 ```bash
 # Install system dependencies
-sudo dnf install -y python39 python39-pip libpcap libpcap-devel
+sudo dnf install -y python314 python314-pip libpcap libpcap-devel
 
 # Minimal installation (basic forwarding)
-pip3.9 install --break-system-packages trapninja
+pip3.14 install --break-system-packages trapninja
 
 # Full installation (all features)
-pip3.9 install --break-system-packages "trapninja[full]"
+pip3.14 install --break-system-packages "trapninja[full]"
 
 # Feature-specific installation
-pip3.9 install --break-system-packages "trapninja[cache]"      # Redis caching
-pip3.9 install --break-system-packages "trapninja[snmpv3]"     # SNMPv3 decryption
+pip3.14 install --break-system-packages "trapninja[cache]"      # Redis caching
+pip3.14 install --break-system-packages "trapninja[snmpv3]"     # SNMPv3 decryption
 ```
 
 ### Build from Source
@@ -99,11 +99,11 @@ pip3.9 install --break-system-packages "trapninja[snmpv3]"     # SNMPv3 decrypti
 # Clone and build
 git clone <repository-url>
 cd trapninja
-pip3.9 install --break-system-packages build
-python3.9 -m build
+pip3.14 install --break-system-packages build
+python3.14 -m build
 
 # Install built wheel
-pip3.9 install --break-system-packages dist/trapninja-*.whl
+pip3.14 install --break-system-packages dist/trapninja-*.whl
 ```
 
 ### Development Installation
@@ -114,17 +114,17 @@ git clone <repository-url>
 cd trapninja
 
 # Install from requirements (all features)
-pip3.9 install --break-system-packages -r dev/requirements.txt
+pip3.14 install --break-system-packages -r dev/requirements.txt
 
 # Or install in editable mode
-pip3.9 install --break-system-packages -e ".[dev]"
+pip3.14 install --break-system-packages -e ".[dev]"
 ```
 
 ### Install System Packages
 
 ```bash
 # Required
-sudo dnf install -y python39 python39-pip libpcap libpcap-devel
+sudo dnf install -y python314 python314-pip libpcap libpcap-devel
 
 # Optional - Redis for trap caching
 sudo dnf install -y redis
@@ -143,21 +143,21 @@ See [docs/INSTALL.md](docs/INSTALL.md) for detailed installation instructions.
 cd src
 
 # Start the service
-sudo python3.9 -O trapninja.py
+sudo python3.14 -O trapninja.py
 
 # Check status
-sudo python3.9 -O trapninja.py --status
+sudo python3.14 -O trapninja.py --status
 
 # View statistics
-sudo python3.9 -O trapninja.py --stats-summary
-sudo python3.9 -O trapninja.py --stats-top-ips
-sudo python3.9 -O trapninja.py --stats-top-oids
+sudo python3.14 -O trapninja.py --stats-summary
+sudo python3.14 -O trapninja.py --stats-top-ips
+sudo python3.14 -O trapninja.py --stats-top-oids
 
 # Block an IP
-sudo python3.9 -O trapninja.py --block-ip 10.0.0.1
+sudo python3.14 -O trapninja.py --block-ip 10.0.0.1
 
 # Block an OID
-sudo python3.9 -O trapninja.py --block-oid 1.3.6.1.4.1.9.9.41.2.0.1
+sudo python3.14 -O trapninja.py --block-oid 1.3.6.1.4.1.9.9.41.2.0.1
 ```
 
 See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for complete usage instructions.

@@ -11,7 +11,7 @@ A high-performance SNMP trap forwarder for telecommunications environments.
 Throughout this guide, TrapNinja is invoked using:
 
 ```bash
-python3.9 -O trapninja.py <subcommand> [options]
+python3.14 -O trapninja.py <subcommand> [options]
 ```
 
 The `-O` flag enables Python optimizations for better performance.

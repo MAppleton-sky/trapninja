@@ -78,7 +78,7 @@ def check_credentials():
         
         if not users:
             print("  ⚠ No SNMPv3 users configured")
-            print("    Add users with: python3.9 -O trapninja.py --snmpv3-add-user ...")
+            print("    Add users with: python3.14 -O trapninja.py --snmpv3-add-user ...")
             return []
         
         print(f"  ✓ Found {len(users)} configured user(s) for {len(engine_ids)} engine(s)")

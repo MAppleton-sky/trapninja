@@ -137,15 +137,15 @@ After refactoring:
 
 - [ ] Unit tests pass
   ```bash
-  cd dev/tests && python3.9 trapninja-tests.py
+  cd dev/tests && python3.14 trapninja-tests.py
   ```
 - [ ] Service starts correctly
   ```bash
-  sudo python3.9 -O trapninja.py --debug
+  sudo python3.14 -O trapninja.py --debug
   ```
 - [ ] HA status works
   ```bash
-  sudo python3.9 -O trapninja.py --ha-status
+  sudo python3.14 -O trapninja.py --ha-status
   ```
 - [ ] Trap forwarding works
   ```bash

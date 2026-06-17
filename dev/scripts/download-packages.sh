@@ -13,7 +13,7 @@
 #
 # On target server:
 #   tar xzvf trapninja-packages.tar.gz
-#   pip3.9 install --break-system-packages --no-index \
+#   pip3.14 install --break-system-packages --no-index \
 #       --find-links=./trapninja-packages/ \
 #       scapy redis pysnmp pyasn1 cryptography
 # =============================================================================
@@ -67,11 +67,11 @@ if command -v docker &> /dev/null; then
     docker run --rm -v "$OUTPUT_DIR:/packages" \
         quay.io/centos/centos:stream8 \
         bash -c "
-            echo 'Installing Python 3.9...'
-            dnf install -y python39 python39-pip > /dev/null 2>&1
+            echo 'Installing Python 3.14...'
+            dnf install -y python314 python314-pip > /dev/null 2>&1
             
             echo 'Downloading packages...'
-            pip3.9 download -d /packages \
+            pip3.14 download -d /packages \
                 scapy \
                 redis \
                 pysnmp \
@@ -98,7 +98,7 @@ else
         --dest "$OUTPUT_DIR" \
         --platform manylinux2014_x86_64 \
         --platform manylinux_2_17_x86_64 \
-        --python-version 3.9 \
+        --python-version 3.14 \
         --only-binary=:all: \
         $ALL_PACKAGES 2>/dev/null || true
     
@@ -112,7 +112,7 @@ else
     
     echo ""
     echo -e "${YELLOW}Download complete using pip method${NC}"
-    echo -e "${YELLOW}Note: Target server will need gcc and python39-devel for source packages${NC}"
+    echo -e "${YELLOW}Note: Target server will need gcc and python314-devel for source packages${NC}"
 fi
 
 # List downloaded files
@@ -148,7 +148,7 @@ echo ""
 echo "Transfer this file to your RHEL 8 server, then run:"
 echo ""
 echo "  tar xzvf $TARBALL"
-echo "  pip3.9 install --break-system-packages --no-index \\"
+echo "  pip3.14 install --break-system-packages --no-index \\"
 echo "      --find-links=./$DIRNAME/ \\"
 echo "      scapy redis pysnmp pyasn1 cryptography"
 echo ""

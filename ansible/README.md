@@ -66,7 +66,7 @@ ansible/
 | `trapninja_config_dest` | `/etc/trapninja` | Configuration directory |
 | `trapninja_user` | `root` | Service user |
 | `trapninja_group` | `root` | Service group |
-| `trapninja_python` | `python3.9` | Python interpreter |
+| `trapninja_python` | `python3.14` | Python interpreter |
 | `trapninja_minimal_install` | `false` | Use minimal dependencies |
 | `trapninja_enable_cache` | `true` | Install Redis |
 | `trapninja_enable_metrics` | `true` | Open metrics firewall port |

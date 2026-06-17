@@ -18,17 +18,17 @@ For production deployments using pip:
 
 ```bash
 # Install system packages
-sudo dnf install -y python39 python39-pip libpcap libpcap-devel
+sudo dnf install -y python314 python314-pip libpcap libpcap-devel
 
 # Install TrapNinja (minimal - basic forwarding)
-pip3.9 install --break-system-packages trapninja
+pip3.14 install --break-system-packages trapninja
 
 # Or with all features
-pip3.9 install --break-system-packages "trapninja[full]"
+pip3.14 install --break-system-packages "trapninja[full]"
 
 # Or specific features
-pip3.9 install --break-system-packages "trapninja[cache]"      # Redis caching
-pip3.9 install --break-system-packages "trapninja[snmpv3]"     # SNMPv3 decryption
+pip3.14 install --break-system-packages "trapninja[cache]"      # Redis caching
+pip3.14 install --break-system-packages "trapninja[snmpv3]"     # SNMPv3 decryption
 ```
 
 ## Building from Source
@@ -41,13 +41,13 @@ git clone <repository-url>
 cd trapninja
 
 # Install build tools
-pip3.9 install --break-system-packages build
+pip3.14 install --break-system-packages build
 
 # Build package (creates dist/trapninja-x.x.x-py3-none-any.whl)
-python3.9 -m build
+python3.14 -m build
 
 # Install from built wheel
-pip3.9 install --break-system-packages dist/trapninja-*.whl
+pip3.14 install --break-system-packages dist/trapninja-*.whl
 ```
 
 ## Development Installation
@@ -60,7 +60,7 @@ git clone <repository-url>
 cd trapninja
 
 # Install in editable mode with dev dependencies
-pip3.9 install --break-system-packages -e ".[dev]"
+pip3.14 install --break-system-packages -e ".[dev]"
 ```
 
 ## Full Installation
@@ -70,7 +70,7 @@ pip3.9 install --break-system-packages -e ".[dev]"
 | Component | Minimum | Recommended |
 |-----------|---------|-------------|
 | OS | RHEL 8.4+ / CentOS 8 / Rocky 8 | RHEL 8.10 |
-| Python | 3.9+ | 3.9.x |
+| Python | 3.14+ | 3.14.x |
 | Kernel | 4.18+ | 4.18+ (RHEL 8 default) |
 | Memory | 512 MB | 2 GB+ |
 | CPU | 1 core | 4+ cores |
@@ -85,9 +85,9 @@ sudo dnf install -y epel-release
 
 # Core packages (required)
 sudo dnf install -y \
-    python39 \
-    python39-pip \
-    python39-devel \
+    python314 \
+    python314-pip \
+    python314-devel \
     libpcap \
     libpcap-devel \
     gcc
@@ -141,18 +141,18 @@ sudo dnf install -y \
 
 ```bash
 # Install all dependencies (requirements file is in dev/ directory)
-pip3.9 install --break-system-packages -r dev/requirements.txt
+pip3.14 install --break-system-packages -r dev/requirements.txt
 
 # Or install individually:
 
 # Required
-pip3.9 install --break-system-packages scapy
+pip3.14 install --break-system-packages scapy
 
 # Optional - Redis caching
-pip3.9 install --break-system-packages redis
+pip3.14 install --break-system-packages redis
 
 # Optional - SNMPv3 decryption
-pip3.9 install --break-system-packages pysnmp pyasn1 cryptography pycryptodome
+pip3.14 install --break-system-packages pysnmp pyasn1 cryptography pycryptodome
 ```
 
 #### Air-Gapped Installation (No Internet)
@@ -165,13 +165,13 @@ On a machine with internet access:
 # Clone and build TrapNinja wheel
 git clone <repository-url>
 cd trapninja
-pip3.9 install --break-system-packages build
-python3.9 -m build --wheel
+pip3.14 install --break-system-packages build
+python3.14 -m build --wheel
 
 # Download all dependencies
 mkdir -p /tmp/trapninja-offline
 cp dist/*.whl /tmp/trapninja-offline/
-pip3.9 download -d /tmp/trapninja-offline \
+pip3.14 download -d /tmp/trapninja-offline \
     scapy redis pysnmp pyasn1 cryptography pycryptodome
 
 # Create tarball
@@ -184,7 +184,7 @@ On the air-gapped system:
 ```bash
 # Transfer trapninja-offline.tar.gz to the system, then:
 tar xzvf trapninja-offline.tar.gz
-pip3.9 install --break-system-packages --no-index \
+pip3.14 install --break-system-packages --no-index \
     --find-links=/path/to/trapninja-offline/ \
     trapninja
 ```
@@ -196,7 +196,7 @@ On a machine with internet access:
 ```bash
 # Download packages
 mkdir -p /tmp/trapninja-packages
-pip3.9 download -d /tmp/trapninja-packages \
+pip3.14 download -d /tmp/trapninja-packages \
     scapy \
     redis \
     pysnmp \
@@ -214,7 +214,7 @@ On the air-gapped system:
 ```bash
 # Transfer trapninja-packages.tar.gz to the system, then:
 tar xzvf trapninja-packages.tar.gz
-pip3.9 install --break-system-packages --no-index \
+pip3.14 install --break-system-packages --no-index \
     --find-links=/path/to/trapninja-packages/ \
     scapy redis pysnmp pyasn1 cryptography pycryptodome
 ```
@@ -223,15 +223,15 @@ pip3.9 install --break-system-packages --no-index \
 
 ```bash
 # Check Python version
-python3.9 --version
+python3.14 --version
 
 # Verify required packages
-python3.9 -c "import scapy; print(f'Scapy: {scapy.VERSION}')"
+python3.14 -c "import scapy; print(f'Scapy: {scapy.VERSION}')"
 
 # Verify optional packages
-python3.9 -c "import redis; print(f'Redis: {redis.__version__}')" 2>/dev/null || echo "Redis: Not installed"
-python3.9 -c "import pysnmp; print(f'PySNMP: Available')" 2>/dev/null || echo "PySNMP: Not installed"
-python3.9 -c "from bcc import BPF; print('BCC: Available')" 2>/dev/null || echo "BCC: Not installed"
+python3.14 -c "import redis; print(f'Redis: {redis.__version__}')" 2>/dev/null || echo "Redis: Not installed"
+python3.14 -c "import pysnmp; print(f'PySNMP: Available')" 2>/dev/null || echo "PySNMP: Not installed"
+python3.14 -c "from bcc import BPF; print('BCC: Available')" 2>/dev/null || echo "BCC: Not installed"
 
 # Test Redis connection (if installed)
 redis-cli ping
@@ -267,7 +267,7 @@ EOF
 
 # Verify configuration (run from src directory)
 cd src
-python3.9 -O trapninja.py --check-config
+python3.14 -O trapninja.py --check-config
 ```
 
 ## Package Dependencies Summary
@@ -276,19 +276,19 @@ python3.9 -O trapninja.py --check-config
 
 | Package | Purpose | Install Command |
 |---------|---------|-----------------|
-| scapy | Packet capture/forwarding | `pip3.9 install --break-system-packages scapy` |
+| scapy | Packet capture/forwarding | `pip3.14 install --break-system-packages scapy` |
 | libpcap | Packet capture library | `dnf install libpcap libpcap-devel` |
 
 ### Optional
 
 | Package | Purpose | Install Command |
 |---------|---------|-----------------|
-| redis (Python) | Trap caching backend | `pip3.9 install --break-system-packages redis` |
+| redis (Python) | Trap caching backend | `pip3.14 install --break-system-packages redis` |
 | redis-server | Redis daemon | `dnf install redis` |
-| pysnmp | SNMPv3 decryption | `pip3.9 install --break-system-packages pysnmp` |
-| pyasn1 | ASN.1 parsing for SNMP | `pip3.9 install --break-system-packages pyasn1` |
-| cryptography | Credential encryption | `pip3.9 install --break-system-packages cryptography` |
-| pycryptodome | SNMPv3 AES/DES decryption | `pip3.9 install --break-system-packages pycryptodome` |
+| pysnmp | SNMPv3 decryption | `pip3.14 install --break-system-packages pysnmp` |
+| pyasn1 | ASN.1 parsing for SNMP | `pip3.14 install --break-system-packages pyasn1` |
+| cryptography | Credential encryption | `pip3.14 install --break-system-packages cryptography` |
+| pycryptodome | SNMPv3 AES/DES decryption | `pip3.14 install --break-system-packages pycryptodome` |
 | bcc/python3-bcc | eBPF acceleration | `dnf install bcc python3-bcc` |
 
 ## Feature Availability
@@ -312,10 +312,10 @@ TrapNinja requires root privileges for raw socket access:
 
 ```bash
 # Run with sudo
-sudo python3.9 -O trapninja.py
+sudo python3.14 -O trapninja.py
 
 # Or set capabilities (less secure)
-sudo setcap cap_net_raw,cap_net_admin=eip /usr/bin/python3.9
+sudo setcap cap_net_raw,cap_net_admin=eip /usr/bin/python3.14
 ```
 
 ### Redis Connection Failed
@@ -349,17 +349,17 @@ sudo dnf install kernel-devel-$(uname -r)
 
 ```bash
 # Verify pysnmp installation
-python3.9 -c "from pysnmp.entity import engine; print('OK')"
+python3.14 -c "from pysnmp.entity import engine; print('OK')"
 
 # Check cryptography
-python3.9 -c "from cryptography.fernet import Fernet; print('OK')"
+python3.14 -c "from cryptography.fernet import Fernet; print('OK')"
 ```
 
 ## Updating
 
 ```bash
 # Update Python packages
-pip3.9 install --break-system-packages --upgrade \
+pip3.14 install --break-system-packages --upgrade \
     scapy redis pysnmp pyasn1 cryptography
 
 # Restart service
@@ -374,7 +374,7 @@ sudo systemctl stop trapninja
 sudo systemctl disable trapninja
 
 # Remove Python packages
-pip3.9 uninstall -y scapy redis pysnmp pyasn1 cryptography
+pip3.14 uninstall -y scapy redis pysnmp pyasn1 cryptography
 
 # Remove configuration (optional)
 sudo rm -rf /etc/trapninja

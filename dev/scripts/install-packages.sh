@@ -9,8 +9,8 @@
 #   ./install-packages.sh [packages-dir]
 #
 # Prerequisites:
-#   - Python 3.9 installed: dnf install -y python39 python39-pip
-#   - For source packages: dnf install -y python39-devel gcc libffi-devel openssl-devel
+#   - Python 3.14 installed: dnf install -y python314 python314-pip
+#   - For source packages: dnf install -y python314-devel gcc libffi-devel openssl-devel
 # =============================================================================
 
 set -e
@@ -33,14 +33,14 @@ if [ "$EUID" -ne 0 ]; then
     echo -e "${YELLOW}Warning: Not running as root. You may need sudo.${NC}"
 fi
 
-# Check Python 3.9
-if ! command -v python3.9 &> /dev/null; then
-    echo -e "${RED}Error: Python 3.9 not found${NC}"
-    echo "Install with: sudo dnf install -y python39 python39-pip"
+# Check Python 3.14
+if ! command -v python3.14 &> /dev/null; then
+    echo -e "${RED}Error: Python 3.14 not found${NC}"
+    echo "Install with: sudo dnf install -y python314 python314-pip"
     exit 1
 fi
 
-echo "Python version: $(python3.9 --version)"
+echo "Python version: $(python3.14 --version)"
 echo "Packages directory: $PACKAGES_DIR"
 echo ""
 
@@ -61,7 +61,7 @@ echo ""
 # Install required package
 echo "Installing required package: scapy"
 echo "----------------------------------------"
-pip3.9 install --break-system-packages --no-index \
+pip3.14 install --break-system-packages --no-index \
     --find-links="$PACKAGES_DIR/" \
     scapy
 
@@ -75,7 +75,7 @@ echo "----------------------------------------"
 
 for pkg in redis pysnmp pyasn1 cryptography; do
     echo -n "  $pkg: "
-    if pip3.9 install --break-system-packages --no-index \
+    if pip3.14 install --break-system-packages --no-index \
         --find-links="$PACKAGES_DIR/" \
         "$pkg" 2>/dev/null; then
         echo -e "${GREEN}OK${NC}"
@@ -92,19 +92,19 @@ echo ""
 
 # Verify installations
 echo -n "scapy: "
-python3.9 -c "import scapy; print(scapy.VERSION)" 2>/dev/null || echo -e "${RED}FAILED${NC}"
+python3.14 -c "import scapy; print(scapy.VERSION)" 2>/dev/null || echo -e "${RED}FAILED${NC}"
 
 echo -n "redis: "
-python3.9 -c "import redis; print(redis.__version__)" 2>/dev/null || echo "Not installed"
+python3.14 -c "import redis; print(redis.__version__)" 2>/dev/null || echo "Not installed"
 
 echo -n "pysnmp: "
-python3.9 -c "import pysnmp; print('OK')" 2>/dev/null || echo "Not installed"
+python3.14 -c "import pysnmp; print('OK')" 2>/dev/null || echo "Not installed"
 
 echo -n "pyasn1: "
-python3.9 -c "import pyasn1; print(pyasn1.__version__)" 2>/dev/null || echo "Not installed"
+python3.14 -c "import pyasn1; print(pyasn1.__version__)" 2>/dev/null || echo "Not installed"
 
 echo -n "cryptography: "
-python3.9 -c "import cryptography; print(cryptography.__version__)" 2>/dev/null || echo "Not installed"
+python3.14 -c "import cryptography; print(cryptography.__version__)" 2>/dev/null || echo "Not installed"
 
 echo ""
 echo "=============================================="
@@ -112,5 +112,5 @@ echo -e "${GREEN}Installation complete${NC}"
 echo "=============================================="
 echo ""
 echo "You can now run TrapNinja:"
-echo "  sudo python3.9 -O trapninja.py"
+echo "  sudo python3.14 -O trapninja.py"
 echo ""
