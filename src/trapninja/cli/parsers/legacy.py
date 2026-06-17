@@ -210,6 +210,7 @@ def add_legacy_arguments(parser: argparse.ArgumentParser):
     parser.add_argument('--metrics-set-interval', type=int, metavar='SECONDS',
                         help=_S)
     parser.add_argument('--metrics-help', action='store_true', help=_S)
+    parser.add_argument('--metrics-show', action='store_true', help=_S)
 
     # Metrics parameters (legacy)
     parser.add_argument('--label-name', type=str, help=_S)

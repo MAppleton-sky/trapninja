@@ -278,6 +278,160 @@ def set_export_interval(seconds: int) -> int:
         return 1
 
 
+def _get_metrics_from_file() -> Optional[dict]:
+    """
+    Read the live metrics summary from trapninja_metrics.json.
+
+    Fallback path used when the daemon's control socket isn't reachable —
+    mirrors the same daemon-then-file pattern stats_commands.py already
+    uses for the granular stats file, applied to the main metrics file
+    instead.
+    """
+    try:
+        from ..metrics import load_metrics_config
+        config = load_metrics_config()
+        if not os.path.exists(config.json_path):
+            return None
+        with open(config.json_path) as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error reading metrics file: {e}")
+        return None
+
+
+def show_metrics_live(json_output: bool = False, pretty: bool = False) -> int:
+    """
+    Show live metrics, including the Phase 1 load-test diagnostics
+    (pipeline latency percentiles, resource telemetry, capture-mode drop
+    visibility) that exist in trapninja_metrics.json/.prom but have no
+    other CLI surface.
+
+    Tries the running daemon first via the control socket's existing
+    service_status command (which already wraps get_metrics_summary()),
+    falling back to reading trapninja_metrics.json directly if the daemon
+    isn't reachable.
+
+    Args:
+        json_output: If True, print the raw metrics dict as JSON instead
+            of the formatted summary
+        pretty: If True and json_output, pretty-print the JSON
+
+    Returns:
+        Exit code (0 for success, 1 if no data could be retrieved)
+    """
+    from ..control import ControlSocket
+
+    metrics = None
+
+    try:
+        response = ControlSocket.send_command('service_status')
+        if response.get('status') == ControlSocket.SUCCESS:
+            metrics = response.get('data', {}).get('metrics')
+    except (ConnectionRefusedError, TimeoutError, OSError):
+        pass
+    except Exception:
+        pass
+
+    if metrics is None:
+        metrics = _get_metrics_from_file()
+
+    if not metrics:
+        print("Error: Could not retrieve metrics.")
+        print("Make sure TrapNinja is running, or check the metrics file at:")
+        try:
+            from ..metrics import load_metrics_config
+            print(f"  {load_metrics_config().json_path}")
+        except Exception:
+            print("  (metrics directory not configured)")
+        return 1
+
+    if json_output:
+        if pretty:
+            print(json.dumps(metrics, indent=2, default=str))
+        else:
+            print(json.dumps(metrics, default=str))
+        return 0
+
+    _print_metrics_summary(metrics)
+    return 0
+
+
+def _print_metrics_summary(metrics: dict):
+    """Pretty-print a metrics summary, with emphasis on the Phase 1 fields."""
+    print("\n" + "=" * 70)
+    print("  TrapNinja Live Metrics")
+    print("=" * 70)
+    ts = metrics.get('timestamp')
+    if ts:
+        print(f"  Snapshot: {ts}")
+    print(f"  Uptime:   {metrics.get('uptime_seconds', 0):.0f}s\n")
+
+    print("TRAP TOTALS:")
+    print(f"  Received:    {metrics.get('total_traps_received', 0):>12,}")
+    print(f"  Forwarded:   {metrics.get('total_traps_forwarded', 0):>12,}")
+    print(f"  Blocked:     {metrics.get('total_traps_blocked', 0):>12,}")
+    print(f"  Redirected:  {metrics.get('total_traps_redirected', 0):>12,}")
+    print(f"  Dropped:     {metrics.get('total_traps_dropped', 0):>12,}")
+
+    print("\nQUEUE:")
+    print(f"  Current Depth:  {metrics.get('queue_current_depth', 0):>10,}")
+    print(f"  Max Depth:      {metrics.get('queue_max_depth', 0):>10,}")
+    print(f"  Capacity:       {metrics.get('queue_capacity', 0):>10,}")
+    print(f"  Utilization:    {metrics.get('queue_utilization', 0):>10.1%}")
+
+    pt = metrics.get('pipeline_timing') or {}
+    qw = pt.get('queue_wait_seconds', {})
+    pd = pt.get('processing_duration_seconds', {})
+    print("\nPIPELINE LATENCY (load-test diagnostics):")
+    if qw.get('samples', 0) > 0 or pd.get('samples', 0) > 0:
+        print(f"  Queue Wait:        p50={qw.get('p50', 0) * 1000:.2f}ms  "
+              f"p95={qw.get('p95', 0) * 1000:.2f}ms  "
+              f"p99={qw.get('p99', 0) * 1000:.2f}ms  "
+              f"max={qw.get('max', 0) * 1000:.2f}ms  "
+              f"(n={qw.get('samples', 0)})")
+        print(f"  Processing Time:   p50={pd.get('p50', 0) * 1000:.2f}ms  "
+              f"p95={pd.get('p95', 0) * 1000:.2f}ms  "
+              f"p99={pd.get('p99', 0) * 1000:.2f}ms  "
+              f"max={pd.get('max', 0) * 1000:.2f}ms  "
+              f"(n={pd.get('samples', 0)})")
+    else:
+        print("  No samples yet (instrumentation disabled, or no traps processed)")
+
+    res = metrics.get('resource') or {}
+    print("\nRESOURCE:")
+    if 'rss_bytes' in res:
+        print(f"  RSS:             {res['rss_bytes'] / (1024 * 1024):>10.1f} MB")
+    if 'open_fds' in res:
+        print(f"  Open FDs:        {res['open_fds']:>10,}")
+    if 'gc_collections' in res:
+        gc_str = ", ".join(
+            f"gen{g}={c}" for g, c in sorted(res['gc_collections'].items())
+        )
+        print(f"  GC Collections:  {gc_str}")
+    if not res:
+        print("  (not available)")
+
+    sd = metrics.get('socket_drops') or {}
+    ebpf = metrics.get('ebpf') or {}
+    print("\nCAPTURE-MODE DROP VISIBILITY:")
+    if sd:
+        print("  Socket mode — kernel-level UDP receive buffer drops (/proc/net/udp):")
+        for port, drops in sorted(sd.items()):
+            print(f"    Port {port}: {drops:,} drops")
+    if ebpf:
+        print("  eBPF/raw-capture mode:")
+        if 'raw_socket_drops' in ebpf:
+            print(f"    AF_PACKET raw socket drops (actual data-path loss): "
+                  f"{ebpf['raw_socket_drops']:,}")
+        if 'lost_samples' in ebpf:
+            print(f"    Perf-buffer lost notifications (side channel, NOT "
+                  f"trap loss): {ebpf['lost_samples']:,}")
+    if not sd and not ebpf:
+        print("  (no drop data — capture mode may not be active yet)")
+
+    print()
+
+
 def show_metrics_help() -> int:
     """
     Show comprehensive metrics configuration help.

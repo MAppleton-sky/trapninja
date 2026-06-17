@@ -19,6 +19,9 @@ def add_metrics_subcommands(subparsers):
         formatter_class=TrapNinjaHelpFormatter,
         epilog=textwrap.dedent('''\
             Examples:
+              trapninja metrics show               Show live metrics (incl. load-test diagnostics)
+              trapninja metrics show --json        Output as JSON
+              trapninja metrics show --json --pretty  Pretty-print JSON
               trapninja metrics config            Show current configuration
               trapninja metrics set-dir /opt/metrics
               trapninja metrics add-label --name region --value us-west
@@ -28,6 +31,16 @@ def add_metrics_subcommands(subparsers):
     metrics_parser.set_defaults(command_category='metrics')
 
     metrics_cmds = metrics_parser.add_subparsers(dest='command', metavar='<command>')
+
+    # show
+    show_cmd = metrics_cmds.add_parser(
+        'show',
+        help='Show live metrics including load-test diagnostics'
+    )
+    # --json is a global option (added by add_global_options in base.py);
+    # only --pretty is added here since it is not a global flag.
+    show_cmd.add_argument('--pretty', action='store_true',
+                          help='Pretty-print JSON output (use with --json)')
 
     # config
     metrics_cmds.add_parser('config', help='Show metrics configuration')

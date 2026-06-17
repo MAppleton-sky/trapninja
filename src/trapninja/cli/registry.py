@@ -473,6 +473,14 @@ def _stats_help(args: Namespace) -> int:
 # Metrics — return int directly
 # -----------------------------------------------------------------------------
 
+def _metrics_show(args: Namespace) -> int:
+    from . import metrics_commands
+    return metrics_commands.show_metrics_live(
+        json_output=getattr(args, 'json', False),
+        pretty=getattr(args, 'pretty', False),
+    )
+
+
 def _metrics_config(args: Namespace) -> int:
     from . import metrics_commands
     return metrics_commands.show_metrics_config(json_output=getattr(args, 'json', False))
@@ -674,6 +682,7 @@ SUBCOMMANDS: Dict[Tuple[str, str], CommandDef] = {
     ('stats', 'debug'):        CommandDef(_stats_debug),
 
     # ----- metrics -----
+    ('metrics', 'show'):         CommandDef(_metrics_show),
     ('metrics', 'config'):       CommandDef(_metrics_config),
     ('metrics', 'set-dir'):      CommandDef(_metrics_set_dir),
     ('metrics', 'add-label'):    CommandDef(_metrics_add_label),
@@ -834,6 +843,7 @@ LEGACY_COMMANDS: List[Tuple[str, LegacyMapping]] = [
     ('shadow_export',  LegacyMapping('shadow', 'export')),
 
     # Metrics commands
+    ('metrics_show',         LegacyMapping('metrics', 'show')),
     ('metrics_config',       LegacyMapping('metrics', 'config')),
     ('metrics_set_dir',      LegacyMapping('metrics', 'set-dir')),
     ('metrics_add_label',    LegacyMapping('metrics', 'add-label')),
