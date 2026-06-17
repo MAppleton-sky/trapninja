@@ -295,6 +295,120 @@ These metrics carry both global labels and metric-specific labels:
 |--------|------|-------------|
 | `trapninja_uptime_seconds` | counter | Time since service started |
 
+### Pipeline Timing Metrics (Phase 1 load-test instrumentation)
+
+Per-stage latency percentiles computed from lock-free per-worker ring
+buffers (4096 samples per worker by default, configurable via
+`diagnostics_config.json`). Percentiles are computed once per unified
+export cycle. Metrics are **absent** when timing is disabled or before
+the first export cycle.
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `trapninja_queue_wait_seconds_p50` | gauge | Median time a packet spends waiting in the queue (capture → dequeue) |
+| `trapninja_queue_wait_seconds_p95` | gauge | 95th-percentile queue wait time |
+| `trapninja_queue_wait_seconds_p99` | gauge | 99th-percentile queue wait time |
+| `trapninja_queue_wait_seconds_max` | gauge | Maximum queue wait time in the current ring buffer window |
+| `trapninja_queue_wait_seconds_samples` | gauge | Number of samples in the ring buffer used for queue wait computation |
+| `trapninja_processing_duration_seconds_p50` | gauge | Median time spent processing a single packet (dequeue → forward complete) |
+| `trapninja_processing_duration_seconds_p95` | gauge | 95th-percentile processing duration |
+| `trapninja_processing_duration_seconds_p99` | gauge | 99th-percentile processing duration |
+| `trapninja_processing_duration_seconds_max` | gauge | Maximum processing duration in the current ring buffer window |
+| `trapninja_processing_duration_seconds_samples` | gauge | Number of samples in the ring buffer used for processing duration computation |
+
+**Notes:**
+- Queue wait is only recorded for live traps. Replay packets (injected via
+  `--replay`) do not carry a `_capture_ts` and are excluded from queue wait
+  calculations, though their processing duration is still recorded.
+- Both metrics aggregate across all worker threads; p99 reflects the
+  worst worker in that export cycle.
+- These are gauges (not histograms) because they are computed from a
+  fixed-size rolling window, not a cumulative distribution.
+
+**Configuration (`diagnostics_config.json`):**
+```json
+{
+  "pipeline_timing": {
+    "enabled": true,
+    "ring_buffer_size": 4096,
+    "percentiles": [50, 95, 99]
+  }
+}
+```
+
+See `config.example/diagnostics_config.json` for the full annotated example.
+
+### Resource Telemetry Metrics (Phase 1 load-test instrumentation)
+
+Process-level resource snapshot sampled once per export cycle. Useful for
+correlating memory growth or FD leaks with trap load during load tests.
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `trapninja_process_rss_bytes` | gauge | Resident set size (RSS) of the TrapNinja process in bytes |
+| `trapninja_process_open_fds` | gauge | Number of open file descriptors (Linux only; absent on other platforms) |
+| `trapninja_gc_collections_total{generation="0"}` | counter | CPython GC collection count for generation 0 (youngest objects) |
+| `trapninja_gc_collections_total{generation="1"}` | counter | CPython GC collection count for generation 1 |
+| `trapninja_gc_collections_total{generation="2"}` | counter | CPython GC collection count for generation 2 (oldest objects — most expensive) |
+
+**Notes:**
+- `trapninja_gc_collections_total` does **not** include a `_created`
+  timestamp. These are kernel/runtime counters reset by the OS/interpreter,
+  not by TrapNinja's process lifetime, so a `_created` line would be
+  misleading. Use `increase()` rather than `rate()` for GC collection trends.
+- `trapninja_process_open_fds` reads `/proc/<pid>/fd` and is silently
+  omitted on platforms where that path is unavailable (e.g., Windows dev
+  environments). On RHEL production it is always present.
+
+### Socket Drop Metrics (Phase 1 load-test instrumentation)
+
+Kernel-level UDP receive-buffer drops, read from `/proc/net/udp` once per
+export cycle. Only active in **socket capture mode** (eBPF disabled). In
+eBPF/raw-capture mode, see `trapninja_ebpf_raw_socket_drops_total` instead.
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `trapninja_socket_drops_total{port="162"}` | counter | Cumulative kernel UDP receive-buffer drops on the given listen port |
+
+**Notes:**
+- One label series per configured listen port (typically just `port="162"`).
+- This metric does **not** include a `_created` timestamp. The kernel's drop
+  counter is not owned by TrapNinja and may have non-zero values before
+  TrapNinja starts. Use `increase()` rather than `rate()` in Grafana.
+- A non-zero and growing value here means traps are arriving faster than the
+  kernel socket buffer can absorb them — consider increasing the socket
+  receive buffer (`SO_RCVBUF`) or reducing burst load.
+
+### eBPF Capture Metrics (Phase 1 load-test instrumentation)
+
+Only present when eBPF/raw-capture mode is active. Both metrics are absent
+when TrapNinja is running in socket capture mode.
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `trapninja_ebpf_lost_samples_total` | counter | Lost notifications on the eBPF perf-buffer side channel |
+| `trapninja_ebpf_raw_socket_drops_total` | counter | Cumulative AF_PACKET-level drops on the raw capture socket |
+
+**Important distinction:**
+
+`trapninja_ebpf_lost_samples_total` counts dropped *notifications* on the
+eBPF perf buffer, which is a filtering/counting side channel — **not** the
+path packets take into the processing queue. A lost notification does not
+necessarily mean the corresponding trap was lost. This metric is a stress
+signal (perf-buffer overrun under extreme kernel load), not a direct
+trap-loss count.
+
+`trapninja_ebpf_raw_socket_drops_total` is the actual data-path drop counter.
+It reads `getsockopt(SOL_PACKET, PACKET_STATISTICS)` on the AF_PACKET raw
+socket that `_raw_capture_loop()` reads from. A drop here means the kernel
+discarded a packet before TrapNinja could read it — a genuine trap loss.
+
+**Neither metric includes a `_created` timestamp.** `PACKET_STATISTICS` resets
+the kernel's internal counter on every read; TrapNinja accumulates the deltas
+into a monotonically-increasing running total, which means the counter behaves
+correctly with `rate()` and `increase()` in Grafana, but a `_created` line
+would misrepresent when the accumulation started.
+
 ## Prometheus Integration
 
 ### Node Exporter Textfile Collector
@@ -361,6 +475,36 @@ trapninja_ha_is_primary
 **Top 10 blocked IPs:**
 ```promql
 topk(10, trapninja_blocked_ip_count)
+```
+
+**Processing pipeline p99 latency:**
+```promql
+trapninja_processing_duration_seconds_p99
+```
+
+**Queue wait p95 (time packets spend waiting before a worker picks them up):**
+```promql
+trapninja_queue_wait_seconds_p95
+```
+
+**RSS memory trend:**
+```promql
+trapninja_process_rss_bytes / 1024 / 1024
+```
+
+**GC gen-2 collection rate (high values indicate memory pressure):**
+```promql
+increase(trapninja_gc_collections_total{generation="2"}[5m])
+```
+
+**AF_PACKET raw socket drop rate (eBPF mode only):**
+```promql
+rate(trapninja_ebpf_raw_socket_drops_total[2m])
+```
+
+**UDP socket drop rate (socket capture mode only):**
+```promql
+rate(trapninja_socket_drops_total[2m])
 ```
 
 For per-IP and per-OID rate queries, use the granular metrics in
