@@ -228,6 +228,91 @@ class TestResetMetrics:
         assert len(collector._redirected_oid_counter) == 0
 
 
+# =============================================================================
+# PIPELINE TIMING INTEGRATION (A4)
+# =============================================================================
+
+class TestPipelineTimingInScheduleExport:
+    """Verify _export_pipeline_timing() is called from the unified export timer."""
+
+    def test_schedule_export_calls_pipeline_timing(self):
+        """_schedule_metrics_export() calls _export_pipeline_timing() after _export_granular_stats()."""
+        from trapninja.metrics import collector
+
+        original_config = collector._current_config
+        try:
+            collector._current_config = MagicMock(export_interval_seconds=3600)
+            call_order = []
+
+            with patch('trapninja.metrics.exporter.export_metrics',
+                       side_effect=lambda *a, **kw: call_order.append('metrics')), \
+                 patch.object(collector, '_export_granular_stats',
+                              side_effect=lambda: call_order.append('granular')), \
+                 patch.object(collector, '_export_pipeline_timing',
+                              side_effect=lambda: call_order.append('pipeline')), \
+                 patch('trapninja.metrics.collector.Timer'):
+                collector._schedule_metrics_export()
+        finally:
+            collector._current_config = original_config
+
+        assert 'granular' in call_order
+        assert 'pipeline' in call_order
+        assert call_order.index('granular') < call_order.index('pipeline')
+
+    def test_pipeline_timing_exception_does_not_stop_timer_rescheduling(self):
+        """If _export_pipeline_timing() raises, the finally block still reschedules."""
+        from trapninja.metrics import collector
+
+        rescheduled = []
+
+        def fake_timer(interval, fn):
+            rescheduled.append(interval)
+            t = MagicMock()
+            t.daemon = False
+            return t
+
+        original_config = collector._current_config
+        try:
+            collector._current_config = MagicMock(export_interval_seconds=60)
+
+            with patch.object(collector, '_export_pipeline_timing',
+                              side_effect=RuntimeError("simulated failure")), \
+                 patch.object(collector, '_export_granular_stats'), \
+                 patch('trapninja.metrics.exporter.export_metrics'), \
+                 patch('trapninja.metrics.collector.Timer', side_effect=fake_timer):
+                collector._schedule_metrics_export()
+        finally:
+            collector._current_config = original_config
+
+        # Timer was rescheduled despite the exception in _export_pipeline_timing
+        assert len(rescheduled) > 0
+
+
+class TestGetMetricsSummaryNewKeys:
+    """Verify get_metrics_summary() includes the three new Phase 1 keys."""
+
+    def test_contains_pipeline_timing(self):
+        """get_metrics_summary() includes pipeline_timing key."""
+        from trapninja.metrics.collector import get_metrics_summary
+
+        result = get_metrics_summary()
+        assert 'pipeline_timing' in result
+
+    def test_contains_resource(self):
+        """get_metrics_summary() includes resource key."""
+        from trapninja.metrics.collector import get_metrics_summary
+
+        result = get_metrics_summary()
+        assert 'resource' in result
+
+    def test_contains_socket_drops(self):
+        """get_metrics_summary() includes socket_drops key."""
+        from trapninja.metrics.collector import get_metrics_summary
+
+        result = get_metrics_summary()
+        assert 'socket_drops' in result
+
+
 class TestLegacyCompatibility:
     """Tests for legacy compatibility functions."""
 

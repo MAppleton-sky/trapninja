@@ -127,6 +127,100 @@ def get_queue_stats() -> Dict[str, Any]:
 
 
 # =============================================================================
+# SOCKET DROP MONITOR (kernel-level visibility)
+# =============================================================================
+
+class SocketDropMonitor:
+    """
+    Reads /proc/net/udp to surface kernel-level UDP receive buffer drops.
+
+    These drops happen below this application entirely — the kernel
+    discarded a datagram before recvfrom() ever saw it, because the
+    socket's receive buffer was full. QueueStats only sees packets that
+    made it into packet_queue, so this is a genuine blind spot under burst
+    load in socket capture mode.
+
+    Linux-specific (reads /proc/net/udp, standard on RHEL 8/9). Only
+    meaningful when CAPTURE_MODE is "socket" — eBPF and sniff modes do not
+    bind UDP sockets the same way; their drop visibility (eBPF perf-buffer
+    lost samples) is handled separately in ebpf.py (see Part B2).
+    """
+
+    PROC_UDP_PATH = "/proc/net/udp"
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._cumulative: Dict[int, int] = {}  # port -> cumulative drops
+
+    def poll(self, ports: List[int]) -> Dict[int, int]:
+        """
+        Read /proc/net/udp and return cumulative drop counts per port.
+
+        Returns {} (never raises) if /proc/net/udp is unavailable or
+        unparseable — this must never affect packet processing. Format:
+        each line's local_address field is "HEXADDR:HEXPORT"; the drops
+        column is the 13th whitespace-separated field (index 12).
+        """
+        try:
+            wanted_hex_ports = {f"{p:04X}": p for p in ports}
+            result: Dict[int, int] = {}
+
+            with open(self.PROC_UDP_PATH, "r") as f:
+                next(f)  # skip header line
+                for line in f:
+                    fields = line.split()
+                    if len(fields) < 13:
+                        continue
+                    local_address = fields[1]
+                    try:
+                        hex_port = local_address.split(":")[1]
+                    except IndexError:
+                        continue
+                    if hex_port not in wanted_hex_ports:
+                        continue
+                    port = wanted_hex_ports[hex_port]
+                    try:
+                        drops = int(fields[12])
+                    except (ValueError, IndexError):
+                        continue
+                    result[port] = result.get(port, 0) + drops
+
+            with self._lock:
+                self._cumulative.update(result)
+                return dict(self._cumulative)
+
+        except FileNotFoundError:
+            logger.debug("/proc/net/udp not available (non-Linux or restricted environment)")
+            return {}
+        except Exception as e:
+            logger.debug(f"Socket drop monitor poll failed: {e}")
+            return {}
+
+
+_socket_drop_monitor: Optional[SocketDropMonitor] = None
+
+
+def get_socket_drop_monitor() -> SocketDropMonitor:
+    """Get or create the global SocketDropMonitor singleton."""
+    global _socket_drop_monitor
+    if _socket_drop_monitor is None:
+        _socket_drop_monitor = SocketDropMonitor()
+    return _socket_drop_monitor
+
+
+def get_socket_drops() -> Dict[int, int]:
+    """
+    Get current cumulative kernel-level UDP drop counts per listen port.
+
+    Returns {} when eBPF capture mode is active, since this socket-level
+    check is not meaningful there.
+    """
+    if ebpf_mode_active:
+        return {}
+    return get_socket_drop_monitor().poll(LISTEN_PORTS)
+
+
+# =============================================================================
 # BUFFER POOL (Reduce memory allocation overhead)
 # =============================================================================
 
@@ -272,9 +366,10 @@ def _udp_receive_loop(sock: socket.socket, port: int, port_stop_event: threading
                 packet_data = {
                     'src_ip': addr[0],
                     'dst_port': port,
-                    'payload': bytes(buffer[:nbytes])
+                    'payload': bytes(buffer[:nbytes]),
+                    '_capture_ts': time.monotonic(),
                 }
-                
+
                 try:
                     packet_queue.put_nowait(packet_data)
                     local_queued += 1
@@ -465,9 +560,10 @@ def forward_trap(packet):
         packet_data = {
             'src_ip': packet[IP].src,
             'dst_port': packet[UDP].dport,
-            'payload': bytes(packet[UDP].payload)
+            'payload': bytes(packet[UDP].payload),
+            '_capture_ts': time.monotonic(),
         }
-        
+
         try:
             packet_queue.put_nowait(packet_data)
             _queue_stats.record_queued()

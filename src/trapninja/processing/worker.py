@@ -29,6 +29,7 @@ from typing import Optional, List, Dict, Any
 
 from .stats import StatsCollector, get_global_stats
 from .packet_handler import PacketHandler
+from .pipeline_timing import get_pipeline_timing_collector
 
 # Re-export from submodules for backward-compatible import paths.
 # Tests and downstream code may import these from worker rather than
@@ -86,6 +87,16 @@ class PacketWorker(PacketHandler):
         # Initialise packet handler state (granular stats, cache refs)
         self._init_handler()
 
+        # Pipeline timing (Phase 1 load-test instrumentation). Reading
+        # collector.enabled once here, not per-packet, keeps the hot-path
+        # check to a single attribute read.
+        _timing_collector = get_pipeline_timing_collector()
+        self._timing_enabled = _timing_collector.enabled
+        self._timing = (
+            _timing_collector.register_worker(worker_id)
+            if self._timing_enabled else None
+        )
+
     def start(self) -> threading.Thread:
         """
         Start worker thread.
@@ -120,6 +131,8 @@ class PacketWorker(PacketHandler):
                         packet = self.packet_queue.get(
                             timeout=min(remaining, 0.05)
                         )
+                        if self._timing_enabled:
+                            packet['_dequeue_ts'] = time.monotonic()
                         batch.append(packet)
                     except queue.Empty:
                         break
@@ -135,12 +148,26 @@ class PacketWorker(PacketHandler):
 
         # Final flush
         self.stats.flush()
+        if self._timing_enabled:
+            get_pipeline_timing_collector().unregister_worker(self.worker_id)
         logger.info(f"Packet worker {self.worker_id} stopped")
 
     def _process_batch(self, batch: List[Dict[str, Any]]):
         """Process a batch of packets."""
+        timing_enabled = self._timing_enabled
         for packet in batch:
-            self._process_packet(packet)
+            if timing_enabled:
+                capture_ts = packet.get('_capture_ts')
+                dequeue_ts = packet.get('_dequeue_ts')
+                if capture_ts is not None and dequeue_ts is not None:
+                    self._timing.queue_wait.record(dequeue_ts - capture_ts)
+
+                t0 = time.monotonic()
+                self._process_packet(packet)
+                self._timing.processing_duration.record(time.monotonic() - t0)
+            else:
+                self._process_packet(packet)
+
             try:
                 self.packet_queue.task_done()
             except ValueError:

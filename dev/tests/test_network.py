@@ -658,3 +658,97 @@ class TestStartAllUDPListeners:
             assert result is True
         finally:
             network.ebpf_mode_active = False
+
+
+# =============================================================================
+# SOCKET DROP MONITOR (B1)
+# =============================================================================
+
+# Synthetic /proc/net/udp content matching the Linux kernel format.
+# Fields (whitespace-separated):
+#   sl  local_address  rem_address  st  tx_queue  rx_queue  tr  retrnsmt
+#   uid  timeout  inode  ref  pointer  drops
+_PROC_UDP_SAMPLE = """  sl  local_address rem_address   st tx_queue rx_queue tr retrnsmt   uid  timeout inode ref pointer drops
+   0: 0F02000A:00A2 00000000:0000 07 00000000:00000000 00:00000000 00000000   500        0 12345 2 0000000000000000 7
+   1: 00000000:00A2 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 12346 2 0000000000000000 0
+   2: 00000000:0050 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 12347 2 0000000000000000 3
+"""
+
+# 0x00A2 = decimal 162 (standard SNMP trap port)
+
+
+class TestSocketDropMonitor:
+    """Tests for SocketDropMonitor.poll() (B1)."""
+
+    def test_poll_extracts_drops_for_matching_port(self):
+        """poll() returns correct drop count for a matching port."""
+        from trapninja.network import SocketDropMonitor
+        from unittest.mock import mock_open, patch
+
+        monitor = SocketDropMonitor()
+
+        with patch("builtins.open", mock_open(read_data=_PROC_UDP_SAMPLE)):
+            result = monitor.poll([162])
+
+        # Port 162 (0x00A2) appears twice in the sample: 7 + 0 drops = 7 cumulative
+        assert 162 in result
+        assert result[162] == 7
+
+    def test_poll_missing_file_returns_empty(self):
+        """FileNotFoundError on /proc/net/udp returns {} without raising."""
+        from trapninja.network import SocketDropMonitor
+        from unittest.mock import patch
+
+        monitor = SocketDropMonitor()
+
+        with patch("builtins.open", side_effect=FileNotFoundError):
+            result = monitor.poll([162])
+
+        assert result == {}
+
+    def test_poll_skips_malformed_lines(self):
+        """Lines with too few fields are skipped; valid lines still parse."""
+        from trapninja.network import SocketDropMonitor
+        from unittest.mock import mock_open, patch
+
+        malformed = (
+            "  sl  local_address rem_address   st tx_queue rx_queue"
+            " tr retrnsmt   uid  timeout inode ref pointer drops\n"
+            "   0: TOOSHORT\n"
+            "   1: 00000000:00A2 00000000:0000 07 00000000:00000000"
+            " 00:00000000 00000000     0        0 12346 2"
+            " 0000000000000000 5\n"
+        )
+
+        monitor = SocketDropMonitor()
+
+        with patch("builtins.open", mock_open(read_data=malformed)):
+            result = monitor.poll([162])
+
+        assert 162 in result
+        assert result[162] == 5
+
+    def test_poll_unrelated_port_not_in_result(self):
+        """Ports not in the wanted list are excluded from the result."""
+        from trapninja.network import SocketDropMonitor
+        from unittest.mock import mock_open, patch
+
+        monitor = SocketDropMonitor()
+
+        with patch("builtins.open", mock_open(read_data=_PROC_UDP_SAMPLE)):
+            # 0x0050 = port 80 is in the sample but not in our wanted list
+            result = monitor.poll([162])
+
+        assert 80 not in result
+
+    def test_get_socket_drops_returns_empty_in_ebpf_mode(self):
+        """get_socket_drops() returns {} when eBPF capture mode is active."""
+        from trapninja import network
+
+        original = network.ebpf_mode_active
+        try:
+            network.ebpf_mode_active = True
+            result = network.get_socket_drops()
+            assert result == {}
+        finally:
+            network.ebpf_mode_active = original

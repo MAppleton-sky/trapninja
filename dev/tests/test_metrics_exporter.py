@@ -710,3 +710,145 @@ class TestPrometheusFormatCompliance:
         
         # Should not have empty label values like label=""
         assert '=""' not in content
+
+
+# =============================================================================
+# PIPELINE TIMING + RESOURCE + SOCKET DROP EXPORT (A5)
+# =============================================================================
+
+def _base_summary():
+    """Minimal metrics summary that satisfies export_metrics() key requirements."""
+    return {
+        'timestamp': '2026-01-01T00:00:00',
+        'uptime_seconds': 100.0,
+        'metrics_start_time': 1700000000.0,
+        'metrics_config': {'directory': '/tmp', 'global_labels': {}},
+        'total_traps_received': 0,
+        'total_traps_forwarded': 0,
+        'total_traps_blocked': 0,
+        'total_traps_redirected': 0,
+        'total_traps_dropped': 0,
+        'processing_errors': 0,
+        'window_60s_received': 0,
+        'window_60s_forwarded': 0,
+        'window_60s_dropped': 0,
+        'window_60s_errors': 0,
+        'ha_blocked': 0,
+        'ha': {'enabled': False},
+        'traps_cached': 0,
+        'cache_failures': 0,
+        'cache': {'available': False},
+        'fast_path_hits': 0,
+        'slow_path_hits': 0,
+        'fast_path_ratio': 0.0,
+        'queue_current_depth': 0,
+        'queue_max_depth': 0,
+        'queue_capacity': 200000,
+        'queue_utilization': 0.0,
+        'queue_total_queued': 0,
+        'queue_total_dropped': 0,
+        'queue_full_events': 0,
+        'blocked_ips': {},
+        'blocked_oids': {},
+        'redirected_ips': {},
+        'redirected_oids': {},
+        'pipeline_timing': {},
+        'resource': {},
+        'socket_drops': {},
+        'ebpf': {},
+    }
+
+
+class TestPipelineTimingExport:
+    """Tests for A5 pipeline timing metrics export."""
+
+    def test_emits_queue_wait_p99_when_populated(self, tmp_path):
+        """With a populated pipeline_timing summary, p99 gauge is emitted."""
+        from trapninja.metrics.exporter import export_metrics
+        from trapninja.metrics.config import MetricsConfig
+
+        config = MetricsConfig(directory=str(tmp_path))
+        summary = _base_summary()
+        summary['pipeline_timing'] = {
+            'queue_wait_seconds': {'p50': 0.001, 'p95': 0.005, 'p99': 0.01, 'max': 0.02, 'samples': 100},
+            'processing_duration_seconds': {'p50': 0.002, 'p95': 0.008, 'p99': 0.015, 'max': 0.05, 'samples': 100},
+        }
+
+        with patch('trapninja.metrics.collector.get_current_config', return_value=config):
+            with patch('trapninja.metrics.collector.get_metrics_summary', return_value=summary):
+                export_metrics(summary)
+
+        content = (tmp_path / config.prometheus_file).read_text()
+        assert 'trapninja_queue_wait_seconds_p99' in content
+        assert 'trapninja_processing_duration_seconds_p99' in content
+
+    def test_no_pipeline_timing_lines_when_empty(self, tmp_path):
+        """Empty pipeline_timing dict emits no timing lines and no exception."""
+        from trapninja.metrics.exporter import export_metrics
+        from trapninja.metrics.config import MetricsConfig
+
+        config = MetricsConfig(directory=str(tmp_path))
+        summary = _base_summary()
+        summary['pipeline_timing'] = {}
+
+        with patch('trapninja.metrics.collector.get_current_config', return_value=config):
+            with patch('trapninja.metrics.collector.get_metrics_summary', return_value=summary):
+                result = export_metrics(summary)
+
+        assert result is True
+        content = (tmp_path / config.prometheus_file).read_text()
+        assert 'trapninja_queue_wait_seconds' not in content
+        assert 'trapninja_processing_duration_seconds' not in content
+
+    def test_socket_drops_no_created_line(self, tmp_path):
+        """trapninja_socket_drops_total must not include a _created line."""
+        from trapninja.metrics.exporter import export_metrics
+        from trapninja.metrics.config import MetricsConfig
+
+        config = MetricsConfig(directory=str(tmp_path))
+        summary = _base_summary()
+        summary['socket_drops'] = {162: 42}
+
+        with patch('trapninja.metrics.collector.get_current_config', return_value=config):
+            with patch('trapninja.metrics.collector.get_metrics_summary', return_value=summary):
+                export_metrics(summary)
+
+        content = (tmp_path / config.prometheus_file).read_text()
+        assert 'trapninja_socket_drops_total' in content
+        assert 'trapninja_socket_drops_total_created' not in content
+
+    def test_gc_collections_no_created_line(self, tmp_path):
+        """trapninja_gc_collections_total must not include a _created line."""
+        from trapninja.metrics.exporter import export_metrics
+        from trapninja.metrics.config import MetricsConfig
+
+        config = MetricsConfig(directory=str(tmp_path))
+        summary = _base_summary()
+        summary['resource'] = {
+            'rss_bytes': 1024 * 1024 * 50,
+            'gc_collections': {'0': 1000, '1': 50, '2': 3},
+        }
+
+        with patch('trapninja.metrics.collector.get_current_config', return_value=config):
+            with patch('trapninja.metrics.collector.get_metrics_summary', return_value=summary):
+                export_metrics(summary)
+
+        content = (tmp_path / config.prometheus_file).read_text()
+        assert 'trapninja_gc_collections_total' in content
+        assert 'trapninja_gc_collections_total_created' not in content
+
+    def test_rss_bytes_emitted(self, tmp_path):
+        """trapninja_process_rss_bytes is emitted when rss_bytes is present."""
+        from trapninja.metrics.exporter import export_metrics
+        from trapninja.metrics.config import MetricsConfig
+
+        config = MetricsConfig(directory=str(tmp_path))
+        summary = _base_summary()
+        summary['resource'] = {'rss_bytes': 52428800}
+
+        with patch('trapninja.metrics.collector.get_current_config', return_value=config):
+            with patch('trapninja.metrics.collector.get_metrics_summary', return_value=summary):
+                export_metrics(summary)
+
+        content = (tmp_path / config.prometheus_file).read_text()
+        assert 'trapninja_process_rss_bytes' in content

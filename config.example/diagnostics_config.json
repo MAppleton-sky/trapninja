@@ -1,0 +1,18 @@
+{
+  "_comment": "TrapNinja Diagnostics Configuration",
+  "_comment2": "Controls load-test instrumentation and diagnostic visibility",
+
+  "pipeline_timing": {
+    "_comment": "Per-stage latency percentiles for trap processing pipeline (Phase 1 load-test)",
+    "_comment2": "Changing these values requires a TrapNinja restart to take effect",
+
+    "enabled": true,
+    "_enabled_comment": "Set false to disable timing entirely (reduces hot-path cost to a single boolean check)",
+
+    "ring_buffer_size": 4096,
+    "_ring_buffer_size_comment": "Samples retained per worker per metric; wraps on overflow (bounded memory)",
+
+    "percentiles": [50, 95, 99],
+    "_percentiles_comment": "Percentiles to compute and export (p50, p95, p99 by default)"
+  }
+}

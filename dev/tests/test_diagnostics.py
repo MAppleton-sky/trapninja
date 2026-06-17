@@ -494,3 +494,72 @@ class TestLongFormLengthParsing:
         assert result['asn1_structure'] is not None
         assert result['asn1_structure']['length_encoding'] == 'long_form'
         assert result['asn1_structure']['declared_length'] == 256
+
+
+# =============================================================================
+# RESOURCE TELEMETRY (Part C)
+# =============================================================================
+
+class TestGetResourceTelemetry:
+    """Tests for get_resource_telemetry() (Part C)."""
+
+    def test_returns_dict(self):
+        """get_resource_telemetry() returns a dict without raising."""
+        from trapninja.diagnostics import get_resource_telemetry
+
+        result = get_resource_telemetry()
+        assert isinstance(result, dict)
+
+    def test_contains_rss_bytes_on_linux(self):
+        """rss_bytes is populated on Linux (RHEL target platform)."""
+        from trapninja.diagnostics import get_resource_telemetry
+
+        # resource module is stdlib and available on Linux; skip on Windows/macOS
+        import sys
+        try:
+            import resource as _resource_mod
+        except ImportError:
+            pytest.skip("resource module not available on this platform")
+
+        result = get_resource_telemetry()
+        assert 'rss_bytes' in result
+        assert result['rss_bytes'] > 0
+
+    def test_fd_read_failure_does_not_raise(self):
+        """If /proc/<pid>/fd is unreadable, result is partial but never raises."""
+        from trapninja.diagnostics import get_resource_telemetry
+        from unittest.mock import patch
+
+        with patch('os.listdir', side_effect=PermissionError("no perms")):
+            result = get_resource_telemetry()
+
+        # open_fds must be absent (failed), but other keys should still be present
+        assert isinstance(result, dict)
+        assert 'open_fds' not in result
+
+    def test_other_keys_unaffected_by_fd_failure(self):
+        """rss_bytes and gc_collections are not disturbed by FD read failure."""
+        from trapninja.diagnostics import get_resource_telemetry
+        from unittest.mock import patch
+
+        try:
+            import resource as _resource_mod
+        except ImportError:
+            pytest.skip("resource module not available on this platform")
+
+        with patch('os.listdir', side_effect=PermissionError("no perms")):
+            result = get_resource_telemetry()
+
+        # rss_bytes should still be there despite FD failure
+        assert 'rss_bytes' in result
+
+    def test_gc_stats_present(self):
+        """gc_collections dict is populated with per-generation counts."""
+        from trapninja.diagnostics import get_resource_telemetry
+
+        result = get_resource_telemetry()
+        if 'gc_collections' in result:
+            # gc has 3 generations on CPython
+            assert len(result['gc_collections']) >= 1
+            for key in result['gc_collections']:
+                assert isinstance(result['gc_collections'][key], int)

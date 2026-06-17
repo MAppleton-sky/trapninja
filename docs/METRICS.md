@@ -2,57 +2,125 @@
 
 ## Overview
 
-TrapNinja provides comprehensive metrics collection and export in Prometheus format for monitoring system integration. The metrics system collects data from all processing components and exports it in both Prometheus (`.prom`) and JSON formats.
+TrapNinja provides comprehensive metrics collection and export in Prometheus
+format for monitoring system integration. The metrics system collects data
+from all processing components and exports it in both Prometheus (`.prom`)
+and JSON formats.
 
 **Key Features:**
 - Configurable output directory for metrics files
 - Global labels/tags applied to all Prometheus metrics
 - Configurable export intervals
 - Integration with Prometheus via Node Exporter textfile collector
+- `_created` timestamps on all counters for accurate Grafana rate calculation
 
 ## Architecture
 
-The unified metrics system integrates with multiple data sources:
+### Counter Source of Truth (v0.8.1+)
+
+As of v0.8.1, trap total counters (received, forwarded, blocked, redirected,
+dropped) are owned exclusively by `GranularStatsCollector`. This is the
+**single source of truth** for all trap counts. Counters increment directly
+on every trap with no buffering, ensuring values are always current at export
+time.
+
+`ProcessingStats` retains responsibility for: sliding-window gauges (60s),
+fast/slow path hit counts, queue metrics, HA-blocked counts, and processing
+errors.
+
+### Unified Export Timer (v0.8.1+)
+
+Both `.prom` files are written by a **single coordinated timer** owned by
+`metrics/collector.py`. `GranularStatsCollector` no longer runs its own
+export timer — instead its `export_now()` method is called synchronously
+by the unified timer immediately after `export_metrics()`. This guarantees
+both files always reflect the same point-in-time snapshot.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Metrics Package                             │
-│            (trapninja/metrics/__init__.py)                      │
-│                                                                 │
-│  ┌───────────────┐ ┌───────────────┐ ┌───────────────────────┐  │
-│  │ config.py     │ │ collector.py  │ │ exporter.py           │  │
-│  │ Configuration │ │ Data          │ │ Prometheus/JSON       │  │
-│  │ Management    │ │ Aggregation   │ │ Output                │  │
-│  └───────────────┘ └───────────────┘ └───────────────────────┘  │
-│           │                │                    │                │
-│           ▼                ▼                    ▼                │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ Data Sources:                                              │  │
-│  │ • Packet Processor (AtomicStats)                          │  │
-│  │ • Network Module (QueueStats)                             │  │
-│  │ • HA Cluster (if enabled)                                 │  │
-│  │ • Cache System (if enabled)                               │  │
-│  │ • Detailed IP/OID Tracking                                │  │
-│  └───────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                          Packet Processing                               │
+│                                                                          │
+│  Every trap calls _record_granular_stats()                               │
+│       │                                                                  │
+│       ▼                                                                  │
+│  GranularStatsCollector (single source of truth for totals)              │
+│  ├── _total_traps          (unbuffered, always current)                  │
+│  ├── _total_forwarded                                                    │
+│  ├── _total_blocked                                                      │
+│  ├── _total_redirected                                                   │
+│  └── _total_dropped                                                      │
+│                                                                          │
+│  ProcessingStats (windows, performance, queue)                           │
+│  ├── _window_received      (60s sliding window)                          │
+│  ├── _window_forwarded                                                   │
+│  ├── _window_dropped                                                     │
+│  ├── _window_errors                                                      │
+│  ├── fast_path_hits / slow_path_hits                                     │
+│  ├── ha_blocked                                                          │
+│  └── queue_full_events / max_queue_depth                                 │
+└──────────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
-              ┌───────────────────────────────────┐
-              │  Configurable Output Directory    │
-              │  (default: /var/log/trapninja/metrics)│
-              │                                   │
-              │  trapninja_metrics.prom           │
-              │  trapninja_metrics.json           │
-              └───────────────────────────────────┘
+       metrics/collector.py  _schedule_metrics_export()  ← single unified timer
+       │
+       ├─ 1. export_metrics()        → trapninja_metrics.prom + .json
+       │     reads totals from GranularStatsCollector,
+       │     windows/performance/queue from ProcessingStats
+       │
+       └─ 2. collector.export_now()  → trapninja_granular.prom + .json
+             reads per-IP/OID/destination from GranularStatsCollector
+
+       Both files written in the same callback — always consistent.
 ```
+
+This architecture eliminates two classes of divergence that existed in earlier
+versions:
+- **Flush-lag divergence**: total counters were buffered per-worker and could
+  lag behind granular per-IP stats during load changes (fixed in v0.8.1 by
+  making GranularStatsCollector the counter source of truth)
+- **Timer-drift divergence**: two independent timers wrote files at different
+  moments, producing different snapshots for the same Prometheus scrape
+  (fixed in v0.8.1 by the unified export timer)
+
+### Relationship to Granular Statistics
+
+TrapNinja writes two `.prom` files. They are designed to complement each
+other without overlap:
+
+| File | Contents |
+|---|---|
+| `trapninja_metrics.prom` | Global trap totals, HA, cache, queue, performance, uptime |
+| `trapninja_granular.prom` | Per-IP, per-OID, per-destination, IP×OID combinations, unique source/OID gauges |
+
+The global trap totals (`trapninja_traps_received_total` etc.) appear **only**
+in `trapninja_metrics.prom`. They were removed from `trapninja_granular.prom`
+in v0.8.1 to prevent Prometheus from double-counting when node_exporter picks
+up both files. Both files read from the same `GranularStatsCollector` counters,
+so the values are always identical.
+
+### Counter Reset Protection (`_created` timestamps)
+
+Every counter metric includes a `_created` timestamp line. This tells
+Prometheus exactly when the counter was last reset (i.e. process start time),
+preventing false rate spikes in Grafana after a TrapNinja restart:
+
+```
+trapninja_traps_received_total 87432
+trapninja_traps_received_total_created 1718042400.000
+```
+
+When Prometheus sees the `_created` value change between scrapes it knows a
+new process lifetime has started and anchors its rate calculation correctly
+rather than treating the counter drop as a spike. See `GRANULAR_STATS.md` for
+the same pattern applied to per-IP and per-OID counters.
 
 ## Configuration
 
-The metrics system is configured via `metrics_config.json` in your TrapNinja configuration directory.
+The metrics system is configured via `metrics_config.json` in your TrapNinja
+configuration directory.
 
 ### Configuration File Location
 
-The configuration file should be placed alongside other TrapNinja config files:
 - `/etc/trapninja/metrics_config.json` (production)
 - `config/metrics_config.json` (development)
 
@@ -86,23 +154,22 @@ The configuration file should be placed alongside other TrapNinja config files:
 
 ### Global Labels
 
-Global labels are applied to **every** Prometheus metric, making it easy to:
-- Distinguish between on-prem and cloud deployments
-- Identify environment (dev/staging/production)
-- Tag by datacenter, region, or cluster
-- Support multi-tenant monitoring
+Global labels are applied to **every** Prometheus metric in
+`trapninja_metrics.prom`, making it easy to distinguish deployments,
+environments, and datacenters:
 
-**Example output with global labels:**
 ```
-# HELP trapninja_traps_received_total Total number of SNMP traps received
-# TYPE trapninja_traps_received_total counter
 trapninja_traps_received_total{environment="production",on_prem="1"} 12345
+trapninja_traps_received_total_created{environment="production",on_prem="1"} 1718042400.000
 ```
 
-**Important notes on global labels:**
-- Label names must be Prometheus-compliant (start with letter/underscore, contain only alphanumeric/underscore)
-- Invalid characters are automatically converted to underscores
-- Values are always strings
+Global labels configured here are independent of any global labels configured
+in `stats_config.json` (which apply to `trapninja_granular.prom`). Configure
+both consistently for a unified Prometheus label set.
+
+**Label name rules:** Must start with a letter or underscore; contain only
+alphanumeric characters and underscores. Invalid characters are automatically
+converted to underscores.
 
 ### Example Configurations
 
@@ -116,21 +183,6 @@ trapninja_traps_received_total{environment="production",on_prem="1"} 12345
     "on_prem": "1",
     "environment": "production",
     "site": "datacenter-east"
-  }
-}
-```
-
-**Cloud/Test Environment:**
-```json
-{
-  "enabled": true,
-  "directory": "/var/log/trapninja/metrics",
-  "export_interval_seconds": 30,
-  "global_labels": {
-    "on_prem": "0",
-    "environment": "staging",
-    "cloud_provider": "aws",
-    "region": "us-east-1"
   }
 }
 ```
@@ -151,7 +203,10 @@ trapninja_traps_received_total{environment="production",on_prem="1"} 12345
 
 All metrics include any configured global labels.
 
-### Core Packet Processing Metrics
+### Core Trap Processing Counters
+
+These counters are sourced from `GranularStatsCollector` and are always
+current — no flush buffer between trap processing and metric export.
 
 | Metric | Type | Description |
 |--------|------|-------------|
@@ -161,6 +216,25 @@ All metrics include any configured global labels.
 | `trapninja_traps_redirected_total` | counter | Total traps redirected to alternate destinations |
 | `trapninja_traps_dropped_total` | counter | Total traps dropped due to queue full |
 | `trapninja_processing_errors_total` | counter | Total packet processing errors |
+
+Each counter is accompanied by a `_created` line (e.g.
+`trapninja_traps_received_total_created`) containing the Unix timestamp of
+the last process start. Do not use these `_created` lines directly in Grafana
+panels — they are consumed automatically by Prometheus for accurate
+`rate()` calculation.
+
+### Sliding Window Gauges (60-second)
+
+These gauges report trap counts observed in the last 60 seconds. They update
+directly from the hot path with no buffering, making them suitable for
+current-activity panels in Grafana without requiring `rate()` calculation.
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `trapninja_traps_received_60s` | gauge | Traps received in the last 60 seconds |
+| `trapninja_traps_forwarded_60s` | gauge | Traps forwarded in the last 60 seconds |
+| `trapninja_traps_dropped_60s` | gauge | Traps dropped in the last 60 seconds |
+| `trapninja_processing_errors_60s` | gauge | Processing errors in the last 60 seconds |
 
 ### High Availability Metrics
 
@@ -188,7 +262,11 @@ All metrics include any configured global labels.
 | `trapninja_fast_path_hits_total` | counter | Packets using optimized SNMPv2c fast path |
 | `trapninja_slow_path_hits_total` | counter | Packets requiring full SNMP parsing |
 | `trapninja_fast_path_ratio` | gauge | Percentage of packets using fast path |
-| `trapninja_processing_rate` | gauge | Current processing rate (packets/second) |
+
+Note: `trapninja_processing_rate` (lifetime average packets/second) was
+removed from the Prometheus export in v0.8.0 as it is not a meaningful
+instantaneous rate metric. Use `rate(trapninja_traps_received_total[2m])`
+in Grafana instead.
 
 ### Queue Metrics
 
@@ -197,12 +275,12 @@ All metrics include any configured global labels.
 | `trapninja_queue_depth` | gauge | Current packets in processing queue |
 | `trapninja_queue_max_depth` | gauge | Maximum queue depth observed |
 | `trapninja_queue_capacity` | gauge | Maximum queue capacity |
-| `trapninja_queue_utilization` | gauge | Queue utilization ratio (0.0-1.0) |
+| `trapninja_queue_utilization` | gauge | Queue utilization ratio (0.0–1.0) |
 | `trapninja_queue_full_events_total` | counter | Times queue reached capacity |
 
 ### Detailed Tracking Metrics
 
-These metrics include both global labels AND metric-specific labels:
+These metrics carry both global labels and metric-specific labels:
 
 | Metric | Labels | Description |
 |--------|--------|-------------|
@@ -211,12 +289,7 @@ These metrics include both global labels AND metric-specific labels:
 | `trapninja_redirected_ip_count` | `ip`, `tag` + global | Traps redirected from specific IP |
 | `trapninja_redirected_oid_count` | `oid`, `tag` + global | Traps redirected with specific OID |
 
-**Example with global labels:**
-```
-trapninja_blocked_ip_count{environment="production",ip="10.0.0.100",on_prem="1"} 50
-```
-
-### Uptime Metric
+### Uptime
 
 | Metric | Type | Description |
 |--------|------|-------------|
@@ -224,109 +297,86 @@ trapninja_blocked_ip_count{environment="production",ip="10.0.0.100",on_prem="1"}
 
 ## Prometheus Integration
 
-### Using Node Exporter Textfile Collector
+### Node Exporter Textfile Collector
 
-The recommended approach for Prometheus integration is using the Node Exporter textfile collector.
-
-1. **Configure Node Exporter** with your metrics directory:
-   ```bash
-   # If using default directory
-   node_exporter --collector.textfile.directory=/var/log/trapninja/metrics
-   
-   # If using custom directory (e.g., /opt/metrics)
-   node_exporter --collector.textfile.directory=/opt/metrics
-   ```
-
-2. **Add to Prometheus config** (`prometheus.yml`):
-   ```yaml
-   scrape_configs:
-     - job_name: 'trapninja'
-       static_configs:
-         - targets: ['trapninja-server:9100']
-       metric_relabel_configs:
-         - source_labels: [__name__]
-           regex: 'trapninja_.*'
-           action: keep
-   ```
-
-### Filtering by Global Labels
-
-With global labels configured, you can easily filter and aggregate metrics:
-
-```promql
-# Get metrics only from on-prem deployments
-trapninja_traps_received_total{on_prem="1"}
-
-# Filter by environment
-sum(trapninja_traps_forwarded_total{environment="production"})
-
-# Compare across datacenters
-sum by (datacenter) (rate(trapninja_traps_received_total[5m]))
+```bash
+# Start node_exporter pointing at the metrics directory
+node_exporter --collector.textfile.directory=/var/log/trapninja/metrics
 ```
 
-### Example Grafana Dashboard Queries
+Node_exporter will pick up both `trapninja_metrics.prom` and
+`trapninja_granular.prom`. The files are designed to contain no overlapping
+metric names, so Prometheus will not double-count any values.
 
-**Processing Rate by Environment:**
-```promql
-sum by (environment) (rate(trapninja_traps_received_total[5m]))
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: 'trapninja'
+    static_configs:
+      - targets: ['trapninja-server:9100']
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'trapninja_.*'
+        action: keep
 ```
 
-**Fast Path Efficiency:**
+### Recommended Grafana Queries
+
+**Current trap rate (traps/second):**
 ```promql
-trapninja_fast_path_ratio{on_prem="1"}
+rate(trapninja_traps_received_total[2m])
 ```
 
-**Queue Utilization Across Sites:**
+Use a `[2m]` range window rather than `[1m]` to ensure the calculation spans
+at least two scrape intervals, avoiding single-point artefacts.
+
+**Current trap rate (traps/minute) — alternative using 60s gauge:**
+```promql
+trapninja_traps_received_60s
+```
+
+This gauge is updated directly on the hot path with no buffering, making it
+slightly more responsive than `rate()` for current-activity panels.
+
+**Forwarding efficiency:**
+```promql
+rate(trapninja_traps_forwarded_total[2m]) / rate(trapninja_traps_received_total[2m])
+```
+
+**Queue utilisation:**
 ```promql
 trapninja_queue_utilization * 100
 ```
 
-**HA Status Dashboard:**
+**Fast path ratio:**
 ```promql
-# Show which servers are primary
-trapninja_ha_is_primary == 1
+trapninja_fast_path_ratio
 ```
 
-**Blocked Traps by IP (Top 10):**
+**HA primary/secondary status:**
+```promql
+trapninja_ha_is_primary
+```
+
+**Top 10 blocked IPs:**
 ```promql
 topk(10, trapninja_blocked_ip_count)
 ```
 
-## Programmatic Configuration
-
-You can also configure metrics programmatically:
-
-```python
-from trapninja.metrics import init_metrics, MetricsConfig
-
-# Using MetricsConfig object
-config = MetricsConfig(
-    enabled=True,
-    directory="/opt/metrics",
-    export_interval_seconds=60,
-    global_labels={
-        "on_prem": "1",
-        "environment": "production"
-    }
-)
-init_metrics(config=config)
-
-# Or using individual parameters
-init_metrics(
-    metrics_directory="/opt/metrics",
-    export_interval=60,
-    global_labels={"on_prem": "1"}
-)
-```
+For per-IP and per-OID rate queries, use the granular metrics in
+`trapninja_granular.prom` — see `GRANULAR_STATS.md`.
 
 ## JSON Format
 
-The JSON export includes all metrics plus configuration metadata:
+The JSON export mirrors the Prometheus content and includes configuration
+metadata. Trap totals are sourced from the same `GranularStatsCollector`
+counters as the `.prom` file.
 
 ```json
 {
   "timestamp": "2025-06-15T10:30:00.000000",
   "uptime_seconds": 3600.5,
+  "metrics_start_time": 1718042400.0,
   "interval_seconds": 60,
   "metrics_config": {
     "directory": "/opt/metrics",
@@ -347,13 +397,14 @@ The JSON export includes all metrics plus configuration metadata:
   "fast_path_hits": 14000,
   "slow_path_hits": 1000,
   "fast_path_ratio": 93.3,
-  "processing_rate": 250.5,
+  "window_60s_received": 250,
+  "window_60s_forwarded": 242,
+  "window_60s_dropped": 0,
+  "window_60s_errors": 0,
   "queue_current_depth": 10,
   "queue_max_depth": 500,
   "queue_capacity": 200000,
   "queue_utilization": 0.00005,
-  "queue_total_queued": 15000,
-  "queue_total_dropped": 5,
   "queue_full_events": 0,
   "ha": {
     "enabled": true,
@@ -368,8 +419,7 @@ The JSON export includes all metrics plus configuration metadata:
     "available": true
   },
   "blocked_ips": {
-    "10.0.0.100": 50,
-    "192.168.1.5": 25
+    "10.0.0.100": 50
   },
   "blocked_oids": {},
   "redirected_ips": {},
@@ -377,95 +427,107 @@ The JSON export includes all metrics plus configuration metadata:
 }
 ```
 
+Note: `processing_rate` (lifetime average) is present in the JSON export for
+CLI and diagnostic tooling but is intentionally absent from the `.prom` file.
+
 ## Directory Permissions
 
-Ensure the metrics directory is writable by the TrapNinja service:
-
 ```bash
-# Create custom metrics directory
 sudo mkdir -p /opt/metrics
-
-# Set ownership (if running as trapninja user)
 sudo chown trapninja:trapninja /opt/metrics
-
-# Set permissions
 sudo chmod 755 /opt/metrics
 ```
 
 ## Troubleshooting
 
+### Metrics Show Zero After Upgrade to v0.8.1
+
+If you are upgrading from a version prior to v0.8.1, ensure the granular
+statistics collector is initialised before the metrics export timer fires.
+The startup sequence initialises the granular collector first, but if metrics
+are exported before the first trap is processed, `_get_granular_totals()` will
+return zeros until the collector is ready. This self-corrects within the first
+export interval.
+
+### Rate Spikes in Grafana After Restart
+
+TrapNinja emits `_created` timestamps on all counters to prevent this. If you
+are still seeing spikes, verify the running version is v0.8.0+ and that the
+`.prom` file contains `_created` lines:
+
+```bash
+grep "_created" /var/log/trapninja/metrics/trapninja_metrics.prom | head -5
+```
+
+If no `_created` lines are present, the running process is stale — restart
+TrapNinja to pick up the updated code.
+
+### `trapninja_traps_received_total` Dips Not Seen in Other Metrics
+
+Prior to v0.8.1 this had two root causes, both now resolved:
+
+1. **Flush-lag** — `trapninja_traps_received_total` was sourced from a
+   per-worker buffered counter (flushed every 1,000 operations) while the
+   granular per-IP totals were sourced from an unbuffered direct counter.
+   Fixed by making `GranularStatsCollector` the single counter source.
+
+2. **Timer-drift** — two independent 60-second export timers started at
+   different times and drifted apart, writing the two `.prom` files at
+   different moments from different snapshots. During periods of I/O or
+   CPU pressure one timer could lag significantly behind the other,
+   producing Grafana dips that did not reflect actual trap volume changes.
+   Fixed by the unified export timer: both files are now written in the
+   same callback, always from a consistent snapshot.
+
+If you are still seeing this on v0.8.1+, confirm both fixes are deployed
+and that the running process has been restarted after deployment.
+
+### Double-Counted Metrics in Prometheus
+
+If Prometheus shows values twice the expected amount, check that node_exporter
+is not scraping a directory containing both old and new `.prom` files with
+overlapping metric names. In v0.8.1 the global trap totals were removed from
+`trapninja_granular.prom` — if you have an older `trapninja_granular.prom`
+file on disk alongside a new `trapninja_metrics.prom`, delete the old granular
+file and restart TrapNinja to regenerate it cleanly.
+
 ### Node Exporter Not Reading Metrics File
 
-If node_exporter's textfile collector isn't picking up metrics but copying a single line to a new file works:
-
-1. **Missing trailing newline** - Fixed in v0.5.1+. If running an older version, ensure the `.prom` file ends with a newline.
-
-2. **File permissions** - Ensure node_exporter can read the metrics directory and files:
-   ```bash
-   ls -la /opt/metrics/trapninja_metrics.prom
-   ```
-
-3. **Syntax errors** - Check for malformed metrics:
-   ```bash
-   promtool check metrics < /opt/metrics/trapninja_metrics.prom
-   ```
-
-4. **Directory not configured** - Verify node_exporter is using the correct textfile directory:
-   ```bash
-   ps aux | grep node_exporter | grep textfile
-   ```
-
-### Metrics Directory Not Created
-
-If metrics files aren't appearing:
-
-1. Check directory permissions
-2. Verify configuration file syntax
-3. Check service logs for errors:
-   ```bash
-   tail -f /var/log/trapninja/trapninja.log | grep -i metric
-   ```
-
-### Global Labels Not Appearing
-
-1. Verify JSON syntax in `metrics_config.json`
-2. Check for invalid label names (must be Prometheus-compliant)
-3. Restart TrapNinja after configuration changes
+1. **Missing trailing newline** — fixed in v0.5.1+. Check the file ends with
+   a blank line: `tail -c 2 /opt/metrics/trapninja_metrics.prom | xxd`
+2. **File permissions** — `ls -la /opt/metrics/trapninja_metrics.prom`
+3. **Syntax errors** — `promtool check metrics < /opt/metrics/trapninja_metrics.prom`
+4. **Directory not configured** — `ps aux | grep node_exporter | grep textfile`
 
 ### All Metrics Show Zero
 
-1. Check if service is running and processing packets
-2. Verify packet flow with tcpdump:
-   ```bash
-   tcpdump -i eth0 udp port 162
-   ```
-3. Check metrics file timestamps
+1. Check the service is running and processing packets
+2. Verify packet flow: `tcpdump -i eth0 udp port 162`
+3. Check logs: `tail -f /var/log/trapninja/trapninja.log | grep -i metric`
 
-### Metrics Not Updating
+### Queue Utilisation Consistently High
 
-1. Check export interval configuration
-2. View service logs for export errors
-3. Verify disk space in metrics directory
-
-### Queue Utilization High
-
-If `trapninja_queue_utilization` is consistently above 0.8:
-
+If `trapninja_queue_utilization` is above 0.8:
 1. Consider increasing worker count
-2. Check for slow destinations
+2. Check for slow destinations causing back-pressure
 3. Monitor network latency to forwarding targets
 
-## Testing
+## Programmatic Configuration
 
-Verify the metrics system is working:
+```python
+from trapninja.metrics import init_metrics, MetricsConfig
 
-```bash
-# Check configuration is loaded
-python3 -c "from trapninja.metrics import load_metrics_config; print(load_metrics_config())"
-
-# View current metrics
-cat /opt/metrics/trapninja_metrics.prom
-
-# View JSON output
-cat /opt/metrics/trapninja_metrics.json | python3 -m json.tool
+config = MetricsConfig(
+    enabled=True,
+    directory="/opt/metrics",
+    export_interval_seconds=60,
+    global_labels={"on_prem": "1", "environment": "production"}
+)
+init_metrics(config=config)
 ```
+
+## See Also
+
+- [GRANULAR_STATS.md](GRANULAR_STATS.md) — Per-IP, per-OID, per-destination metrics
+- [ARCHITECTURE.md](ARCHITECTURE.md) — System architecture overview
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — General troubleshooting guide

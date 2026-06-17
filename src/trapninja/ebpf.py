@@ -264,6 +264,34 @@ packet_queue = None
 # Stop event for graceful shutdown
 stop_event = None
 
+# Cumulative count of samples the kernel reported as lost from the perf buffer.
+# Incremented by _ebpf_lost_cb; read by get_ebpf_lost_samples() for metrics.
+# Incremented with the GIL held (Python int += is atomic under CPython) —
+# no explicit lock needed for the same reason QueueStats uses bare integers.
+_ebpf_lost_samples: int = 0
+
+
+def _ebpf_lost_cb(lost_count: int) -> None:
+    """
+    BCC perf-buffer lost-sample callback.
+
+    Called by BCC when the kernel reports that `lost_count` samples were
+    dropped from the perf buffer before userspace could consume them.  Each
+    lost sample represents a packet that will never reach packet_queue —
+    invisible to QueueStats and to this process entirely.
+    """
+    global _ebpf_lost_samples
+    _ebpf_lost_samples += lost_count
+    logger.warning(
+        f"eBPF perf buffer: {lost_count} sample(s) lost "
+        f"(total lost: {_ebpf_lost_samples})"
+    )
+
+
+def get_ebpf_lost_samples() -> int:
+    """Return the cumulative number of kernel-reported lost perf-buffer samples."""
+    return _ebpf_lost_samples
+
 
 class MinimalTrapCapture:
     """Minimal eBPF-based SNMP trap capture with fallback mechanisms"""
@@ -384,6 +412,7 @@ class MinimalTrapCapture:
                 'src_ip': src_ip,
                 'dst_port': dst_port,
                 'payload': payload,
+                '_capture_ts': time.monotonic(),
             }
             try:
                 packet_queue.put_nowait(packet_data)
@@ -780,8 +809,11 @@ class MinimalTrapCapture:
             try:
                 # Only set up perf buffer if program uses perf events
                 if getattr(self, '_uses_perf', False):
-                    # Open the perf buffer for events from kernel
-                    self.bpf["events"].open_perf_buffer(self._process_event)
+                    # Open the perf buffer; lost_cb fires when the kernel drops
+                    # samples before userspace can read them (invisible trap loss).
+                    self.bpf["events"].open_perf_buffer(
+                        self._process_event, lost_cb=_ebpf_lost_cb
+                    )
                     logger.info("eBPF perf buffer opened successfully")
 
                     # Start the polling thread

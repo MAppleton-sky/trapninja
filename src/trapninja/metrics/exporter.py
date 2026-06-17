@@ -476,6 +476,107 @@ def export_metrics(metrics_summary: Dict[str, Any] = None) -> bool:
         ))
 
         # =================================================================
+        # PIPELINE TIMING METRICS (Phase 1 load-test instrumentation)
+        # =================================================================
+
+        pipeline_timing = metrics_summary.get("pipeline_timing", {})
+        queue_wait = pipeline_timing.get("queue_wait_seconds", {})
+        processing_duration = pipeline_timing.get("processing_duration_seconds", {})
+
+        if queue_wait:
+            for pct in ("p50", "p95", "p99", "max"):
+                lines.append(format_prometheus(
+                    f"trapninja_queue_wait_seconds_{pct}",
+                    round(queue_wait.get(pct, 0.0), 6),
+                    global_labels=global_labels,
+                    help_text="Time a trap spent in the processing queue before a worker picked it up",
+                    metric_type="gauge"
+                ))
+
+            lines.append(format_prometheus(
+                "trapninja_pipeline_timing_samples",
+                queue_wait.get("samples", 0),
+                global_labels=global_labels,
+                help_text="Number of latency samples in the current export window",
+                metric_type="gauge"
+            ))
+
+        if processing_duration:
+            for pct in ("p50", "p95", "p99", "max"):
+                lines.append(format_prometheus(
+                    f"trapninja_processing_duration_seconds_{pct}",
+                    round(processing_duration.get(pct, 0.0), 6),
+                    global_labels=global_labels,
+                    help_text="Time spent processing a single trap (parse, filter, forward, stats, cache)",
+                    metric_type="gauge"
+                ))
+
+        # =================================================================
+        # RESOURCE TELEMETRY METRICS
+        # =================================================================
+
+        resource_stats = metrics_summary.get("resource", {})
+
+        if "rss_bytes" in resource_stats:
+            lines.append(format_prometheus(
+                "trapninja_process_rss_bytes",
+                resource_stats["rss_bytes"],
+                global_labels=global_labels,
+                help_text="Resident set size of the TrapNinja process",
+                metric_type="gauge"
+            ))
+
+        if "open_fds" in resource_stats:
+            lines.append(format_prometheus(
+                "trapninja_process_open_fds",
+                resource_stats["open_fds"],
+                global_labels=global_labels,
+                help_text="Number of open file descriptors",
+                metric_type="gauge"
+            ))
+
+        if "gc_collections" in resource_stats:
+            lines.append("# HELP trapninja_gc_collections_total Garbage collector run count per generation")
+            lines.append("# TYPE trapninja_gc_collections_total counter")
+            for generation, count in resource_stats["gc_collections"].items():
+                labels = {"generation": str(generation)}
+                all_labels = dict(global_labels) if global_labels else {}
+                all_labels.update(labels)
+                sorted_labels = sorted(all_labels.items())
+                label_str = ",".join([f'{k}="{v}"' for k, v in sorted_labels])
+                lines.append(f"trapninja_gc_collections_total{{{label_str}}} {count}")
+
+        # =================================================================
+        # SOCKET DROP METRICS (kernel-level, socket capture mode only)
+        # =================================================================
+
+        socket_drops = metrics_summary.get("socket_drops", {})
+        if socket_drops:
+            lines.append("# HELP trapninja_socket_drops_total Kernel-level UDP receive buffer drops per port")
+            lines.append("# TYPE trapninja_socket_drops_total counter")
+            for port, drops in socket_drops.items():
+                labels = {"port": str(port)}
+                all_labels = dict(global_labels) if global_labels else {}
+                all_labels.update(labels)
+                sorted_labels = sorted(all_labels.items())
+                label_str = ",".join([f'{k}="{v}"' for k, v in sorted_labels])
+                lines.append(f"trapninja_socket_drops_total{{{label_str}}} {drops}")
+
+        # =================================================================
+        # EBPF METRICS (perf-buffer lost samples, eBPF mode only)
+        # =================================================================
+
+        ebpf_info = metrics_summary.get("ebpf", {})
+        if "lost_samples" in ebpf_info:
+            lines.append(format_prometheus(
+                "trapninja_ebpf_lost_samples_total",
+                ebpf_info["lost_samples"],
+                global_labels=global_labels,
+                help_text="Cumulative kernel-reported perf-buffer lost samples in eBPF capture mode",
+                metric_type="counter"
+            ))
+
+        # =================================================================
         # DETAILED IP/OID METRICS (if any tracked)
         # =================================================================
 

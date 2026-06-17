@@ -45,6 +45,13 @@ _redirected_oid_counter = defaultdict(Counter)  # Maps tag -> Counter of OIDs
 _start_time = time.time()
 _last_reset_time = time.time()
 
+# Cache of the last computed pipeline timing percentiles. Computed once per
+# unified export cycle (see _export_pipeline_timing) because percentile
+# computation sorts every sample across every worker — cheap at export-
+# interval frequency, too expensive to recompute on every ad-hoc
+# get_metrics_summary() call (e.g. from `trapninja stats`).
+_last_pipeline_timing: Dict[str, Any] = {}
+
 # Export timer reference
 _export_timer: Optional[Timer] = None
 _initialized = False
@@ -144,6 +151,25 @@ def _export_granular_stats():
         logger.error(f"Granular stats export failed in unified timer: {e}")
 
 
+def _export_pipeline_timing():
+    """
+    Compute pipeline timing percentiles as part of the unified export cycle
+    and cache the result for get_metrics_summary() to read.
+
+    Independently exception-guarded, like _export_granular_stats() — a
+    failure here must never prevent the metrics/granular exports from
+    completing or the timer from rescheduling.
+    """
+    global _last_pipeline_timing
+    try:
+        from ..processing.pipeline_timing import get_pipeline_timing_collector
+        collector = get_pipeline_timing_collector()
+        if collector.enabled:
+            _last_pipeline_timing = collector.compute_percentiles()
+    except Exception as e:
+        logger.error(f"Pipeline timing export failed in unified timer: {e}")
+
+
 def _schedule_metrics_export():
     """
     Unified export timer callback — writes both .prom files then reschedules.
@@ -185,6 +211,15 @@ def _schedule_metrics_export():
         # Step 2 — write trapninja_granular.prom + trapninja_granular.json
         # Always runs even if Step 1 failed.
         _export_granular_stats()
+
+        # Step 3 — compute pipeline timing percentiles (Phase 1 load-test
+        # instrumentation). Always runs even if Steps 1-2 failed.
+        try:
+            _export_pipeline_timing()
+        except Exception as e:
+            logger.error(
+                f"pipeline timing export failed (skipping this cycle): {e}"
+            )
 
     finally:
         # Always reschedule — export failures must never stop the timer.
@@ -346,6 +381,46 @@ def _get_cache_stats() -> Dict[str, Any]:
     return {'enabled': False, 'available': False}
 
 
+def _get_resource_telemetry_stats() -> Dict[str, Any]:
+    """
+    Get process resource telemetry (RSS, FD count, GC stats).
+
+    Computed fresh on every call (unlike pipeline timing) — these are
+    cheap stdlib reads, not worth caching.
+    """
+    try:
+        from ..diagnostics import get_resource_telemetry
+        return get_resource_telemetry()
+    except ImportError:
+        return {}
+
+
+def _get_socket_drop_stats() -> Dict[str, Any]:
+    """
+    Get kernel-level UDP socket drop counts (socket capture mode only).
+
+    Returns {} in eBPF/sniff capture modes or on any read failure.
+    """
+    try:
+        from ..network import get_socket_drops
+        return get_socket_drops()
+    except ImportError:
+        return {}
+
+
+def _get_ebpf_stats() -> Dict[str, Any]:
+    """
+    Get eBPF perf-buffer lost-sample count.
+
+    Returns {} when eBPF module is unavailable.
+    """
+    try:
+        from ..ebpf import get_ebpf_lost_samples
+        return {'lost_samples': get_ebpf_lost_samples()}
+    except ImportError:
+        return {}
+
+
 def _get_granular_totals() -> Dict[str, Any]:
     """
     Get trap total counters from GranularStatsCollector.
@@ -399,6 +474,11 @@ def get_metrics_summary() -> Dict[str, Any]:
 
     # Get cache stats
     cache_stats = _get_cache_stats()
+
+    # Get resource telemetry and socket drop stats (fresh reads)
+    resource_stats = _get_resource_telemetry_stats()
+    socket_drop_stats = _get_socket_drop_stats()
+    ebpf_stats = _get_ebpf_stats()
 
     # Calculate uptime
     uptime = time.time() - _start_time
@@ -478,11 +558,26 @@ def get_metrics_summary() -> Dict[str, Any]:
         
         # HA status
         "ha": ha_stats,
-        
+
         # Cache status
         "cache": cache_stats,
+
+        # Pipeline timing percentiles — cached from the last unified export
+        # cycle (see _export_pipeline_timing). Empty dict before the first
+        # export has run.
+        "pipeline_timing": _last_pipeline_timing,
+
+        # Resource telemetry (RSS, FD count, GC stats) — sampled fresh
+        "resource": resource_stats,
+
+        # Kernel-level socket drop visibility (Linux /proc/net/udp,
+        # socket capture mode only)
+        "socket_drops": socket_drop_stats,
+
+        # eBPF perf-buffer lost samples (eBPF capture mode only)
+        "ebpf": ebpf_stats,
     }
-    
+
     return summary
 
 
@@ -543,6 +638,7 @@ def cleanup_metrics():
         from .exporter import export_metrics
         export_metrics()
         _export_granular_stats()
+        _export_pipeline_timing()
         logger.info("Final metrics export completed")
     except Exception as e:
         logger.error(f"Error during final metrics export: {e}")

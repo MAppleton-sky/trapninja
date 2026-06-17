@@ -3,7 +3,8 @@
 TrapNinja Diagnostics Module
 
 Provides detailed packet inspection and diagnostic capabilities for
-troubleshooting parsing failures.
+troubleshooting parsing failures, and basic process resource telemetry
+for load-test observability.
 """
 
 import logging
@@ -238,6 +239,47 @@ def validate_snmp_basic_structure(payload: bytes) -> tuple[bool, Optional[str]]:
             return False, f"Payload too short for declared community length: {community_length}"
     
     return True, None
+
+
+def get_resource_telemetry() -> Dict[str, Any]:
+    """
+    Sample basic process resource usage for load-test diagnostics.
+
+    All reads are stdlib-only (resource, os, gc) and assume the RHEL 8/9
+    target platform this project runs on. Designed to be called from the
+    background metrics path only — never from the hot path. Never raises;
+    returns partial or empty data on any platform/permission limitation.
+    """
+    result: Dict[str, Any] = {}
+
+    try:
+        import resource
+        usage = resource.getrusage(resource.RUSAGE_SELF)
+        # ru_maxrss is in KB on Linux (this project's only target platform).
+        result['rss_bytes'] = usage.ru_maxrss * 1024
+    except Exception as e:
+        logger.debug(f"Could not read RSS via resource module: {e}")
+
+    try:
+        import os
+        pid = os.getpid()
+        result['open_fds'] = len(os.listdir(f"/proc/{pid}/fd"))
+    except Exception as e:
+        logger.debug(f"Could not read FD count: {e}")
+
+    try:
+        import gc
+        stats = gc.get_stats()
+        result['gc_collections'] = {
+            str(i): gen.get('collections', 0) for i, gen in enumerate(stats)
+        }
+        result['gc_collected'] = {
+            str(i): gen.get('collected', 0) for i, gen in enumerate(stats)
+        }
+    except Exception as e:
+        logger.debug(f"Could not read GC stats: {e}")
+
+    return result
 
 
 def suggest_parser_improvements(payload: bytes) -> list[str]:
