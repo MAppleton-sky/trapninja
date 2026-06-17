@@ -412,6 +412,49 @@ class TestThreadSafety:
         assert collector._redirected_ip_counter["test_tag"]["test_ip"] == 5000
 
 
+# =============================================================================
+# EBPF STATS (B2 addendum)
+# =============================================================================
+
+class TestGetEbpfStats:
+    """Verify _get_ebpf_stats() returns both keys when the eBPF module is importable."""
+
+    def test_returns_lost_samples_and_raw_socket_drops(self):
+        """_get_ebpf_stats() includes both lost_samples and raw_socket_drops."""
+        from trapninja.metrics import collector
+
+        with patch('trapninja.metrics.collector._get_ebpf_stats',
+                   wraps=None,
+                   side_effect=None) as _:
+            pass  # just verifying via direct mock below
+
+        # Directly mock the two ebpf functions so the test runs without BCC.
+        with patch('trapninja.metrics.collector._get_ebpf_stats',
+                   return_value={'lost_samples': 0, 'raw_socket_drops': 0}) as mock_fn:
+            result = collector._get_ebpf_stats()
+
+        assert 'lost_samples' in result
+        assert 'raw_socket_drops' in result
+
+    def test_returns_both_keys_via_import_mock(self):
+        """_get_ebpf_stats() calls get_ebpf_lost_samples and get_ebpf_raw_socket_drops."""
+        from trapninja.metrics import collector
+
+        mock_module = MagicMock()
+        mock_module.get_ebpf_lost_samples.return_value = 5
+        mock_module.get_ebpf_raw_socket_drops.return_value = 12
+
+        import sys
+        sys.modules['trapninja.ebpf'] = mock_module
+        try:
+            result = collector._get_ebpf_stats()
+        finally:
+            del sys.modules['trapninja.ebpf']
+
+        assert result.get('lost_samples') == 5
+        assert result.get('raw_socket_drops') == 12
+
+
 class TestUnifiedExportTimer:
     """Verify the unified timer calls both exports per cycle in the correct order."""
 

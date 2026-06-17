@@ -563,7 +563,7 @@ def export_metrics(metrics_summary: Dict[str, Any] = None) -> bool:
                 lines.append(f"trapninja_socket_drops_total{{{label_str}}} {drops}")
 
         # =================================================================
-        # EBPF METRICS (perf-buffer lost samples, eBPF mode only)
+        # EBPF METRICS (eBPF/raw-capture mode only)
         # =================================================================
 
         ebpf_info = metrics_summary.get("ebpf", {})
@@ -572,7 +572,16 @@ def export_metrics(metrics_summary: Dict[str, Any] = None) -> bool:
                 "trapninja_ebpf_lost_samples_total",
                 ebpf_info["lost_samples"],
                 global_labels=global_labels,
-                help_text="Cumulative kernel-reported perf-buffer lost samples in eBPF capture mode",
+                help_text="Lost perf-buffer notifications on the eBPF filtering/counting side channel — NOT a direct trap-loss count, see trapninja_ebpf_raw_socket_drops_total for that",
+                metric_type="counter"
+            ))
+
+        if "raw_socket_drops" in ebpf_info:
+            lines.append(format_prometheus(
+                "trapninja_ebpf_raw_socket_drops_total",
+                ebpf_info["raw_socket_drops"],
+                global_labels=global_labels,
+                help_text="Cumulative AF_PACKET-level drops on the raw capture socket — the actual data-path drop count for eBPF/raw-capture mode",
                 metric_type="counter"
             ))
 

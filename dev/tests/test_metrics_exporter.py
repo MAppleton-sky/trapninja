@@ -852,3 +852,79 @@ class TestPipelineTimingExport:
 
         content = (tmp_path / config.prometheus_file).read_text()
         assert 'trapninja_process_rss_bytes' in content
+
+
+# =============================================================================
+# EBPF METRICS EXPORT (B2 addendum)
+# =============================================================================
+
+class TestEbpfMetricsExport:
+    """Tests for eBPF raw-socket-drop metric export."""
+
+    def test_both_ebpf_metrics_emitted_when_populated(self, tmp_path):
+        """Both trapninja_ebpf_lost_samples_total and trapninja_ebpf_raw_socket_drops_total
+        appear in the .prom output when ebpf_info contains both keys."""
+        from trapninja.metrics.exporter import export_metrics
+        from trapninja.metrics.config import MetricsConfig
+
+        config = MetricsConfig(directory=str(tmp_path))
+        summary = _base_summary()
+        summary['ebpf'] = {'lost_samples': 3, 'raw_socket_drops': 7}
+
+        with patch('trapninja.metrics.collector.get_current_config', return_value=config):
+            with patch('trapninja.metrics.collector.get_metrics_summary', return_value=summary):
+                export_metrics(summary)
+
+        content = (tmp_path / config.prometheus_file).read_text()
+        assert 'trapninja_ebpf_lost_samples_total' in content
+        assert 'trapninja_ebpf_raw_socket_drops_total' in content
+
+    def test_no_ebpf_lines_when_ebpf_dict_empty(self, tmp_path):
+        """Empty ebpf dict emits neither metric line and does not raise."""
+        from trapninja.metrics.exporter import export_metrics
+        from trapninja.metrics.config import MetricsConfig
+
+        config = MetricsConfig(directory=str(tmp_path))
+        summary = _base_summary()
+        summary['ebpf'] = {}
+
+        with patch('trapninja.metrics.collector.get_current_config', return_value=config):
+            with patch('trapninja.metrics.collector.get_metrics_summary', return_value=summary):
+                result = export_metrics(summary)
+
+        assert result is True
+        content = (tmp_path / config.prometheus_file).read_text()
+        assert 'trapninja_ebpf_lost_samples_total' not in content
+        assert 'trapninja_ebpf_raw_socket_drops_total' not in content
+
+    def test_ebpf_lost_samples_no_created_line(self, tmp_path):
+        """trapninja_ebpf_lost_samples_total must not include a _created line."""
+        from trapninja.metrics.exporter import export_metrics
+        from trapninja.metrics.config import MetricsConfig
+
+        config = MetricsConfig(directory=str(tmp_path))
+        summary = _base_summary()
+        summary['ebpf'] = {'lost_samples': 3, 'raw_socket_drops': 7}
+
+        with patch('trapninja.metrics.collector.get_current_config', return_value=config):
+            with patch('trapninja.metrics.collector.get_metrics_summary', return_value=summary):
+                export_metrics(summary)
+
+        content = (tmp_path / config.prometheus_file).read_text()
+        assert 'trapninja_ebpf_lost_samples_total_created' not in content
+
+    def test_ebpf_raw_socket_drops_no_created_line(self, tmp_path):
+        """trapninja_ebpf_raw_socket_drops_total must not include a _created line."""
+        from trapninja.metrics.exporter import export_metrics
+        from trapninja.metrics.config import MetricsConfig
+
+        config = MetricsConfig(directory=str(tmp_path))
+        summary = _base_summary()
+        summary['ebpf'] = {'lost_samples': 3, 'raw_socket_drops': 7}
+
+        with patch('trapninja.metrics.collector.get_current_config', return_value=config):
+            with patch('trapninja.metrics.collector.get_metrics_summary', return_value=summary):
+                export_metrics(summary)
+
+        content = (tmp_path / config.prometheus_file).read_text()
+        assert 'trapninja_ebpf_raw_socket_drops_total_created' not in content

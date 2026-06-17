@@ -18,8 +18,16 @@ import struct
 import select
 import traceback
 import platform
+from typing import Optional
 
 from .core.constants import FORWARD_SOURCE_PORT
+
+# PACKET_STATISTICS (SOL_PACKET level, value 6 in <linux/if_packet.h>) is
+# not exposed as a named constant in Python's socket module. Defined here
+# rather than assumed, with a getattr fallback for SOL_PACKET itself in
+# case a given Python/platform build doesn't expose it either.
+SOL_PACKET = getattr(socket, 'SOL_PACKET', 263)
+PACKET_STATISTICS = 6
 
 # Get logger instance
 logger = logging.getLogger("trapninja")
@@ -276,9 +284,13 @@ def _ebpf_lost_cb(lost_count: int) -> None:
     BCC perf-buffer lost-sample callback.
 
     Called by BCC when the kernel reports that `lost_count` samples were
-    dropped from the perf buffer before userspace could consume them.  Each
-    lost sample represents a packet that will never reach packet_queue —
-    invisible to QueueStats and to this process entirely.
+    dropped from the perf buffer before userspace could consume them. This
+    counts lost notifications on the perf-buffer side channel used for
+    filtering/counting (see _process_event()) — it does NOT mean the
+    corresponding packet was lost from packet_queue, since the raw
+    AF_PACKET socket in _raw_capture_loop() captures independently of this
+    channel. For the actual data-path drop counter, see
+    get_ebpf_raw_socket_drops().
     """
     global _ebpf_lost_samples
     _ebpf_lost_samples += lost_count
@@ -291,6 +303,57 @@ def _ebpf_lost_cb(lost_count: int) -> None:
 def get_ebpf_lost_samples() -> int:
     """Return the cumulative number of kernel-reported lost perf-buffer samples."""
     return _ebpf_lost_samples
+
+
+# Reference to the currently active AF_PACKET raw capture socket, set by
+# _init_raw_capture() and cleared by stop(). get_ebpf_raw_socket_drops()
+# polls this socket for kernel-level drop statistics.
+#
+# Only one MinimalTrapCapture instance is expected to be active per
+# process (dynamic reconfiguration is not implemented — see
+# update_ebpf_config()), so a single module-level reference is sufficient;
+# this mirrors the simplicity of _ebpf_lost_samples rather than building a
+# registry for a case that doesn't occur in this codebase.
+_active_raw_socket: Optional[socket.socket] = None
+
+# getsockopt(SOL_PACKET, PACKET_STATISTICS) resets the kernel's internal
+# counters on every read (see `man 7 packet`), so this process must keep
+# its own running total rather than reporting the raw read each time.
+_raw_socket_drops_lock = threading.Lock()
+_raw_socket_drops_cumulative = 0
+
+
+def get_ebpf_raw_socket_drops() -> int:
+    """
+    Return cumulative AF_PACKET-level drops on the raw capture socket.
+
+    This is the actual data-path drop counter for eBPF/raw-capture mode —
+    distinct from get_ebpf_lost_samples(), which counts lost perf-buffer
+    *notifications* on a parallel channel that does not itself queue
+    packets (see _process_event()). A drop reported here means the kernel
+    discarded a packet before _raw_capture_loop() ever saw it; a lost
+    sample from get_ebpf_lost_samples() means the eBPF perf-buffer
+    notification for some packet was dropped, which does not necessarily
+    mean that packet was also lost by the raw socket.
+
+    Call this only from the background metrics path, never per-packet —
+    it makes a getsockopt syscall and the kernel resets its own counters
+    on every call. Never raises; returns the last known cumulative total
+    (0 if none yet) on any failure or if no capture is currently active.
+    """
+    global _raw_socket_drops_cumulative
+    sock = _active_raw_socket
+    if sock is None:
+        return _raw_socket_drops_cumulative
+    try:
+        raw = sock.getsockopt(SOL_PACKET, PACKET_STATISTICS, struct.calcsize('=II'))
+        _tp_packets, tp_drops = struct.unpack('=II', raw)
+        with _raw_socket_drops_lock:
+            _raw_socket_drops_cumulative += tp_drops
+            return _raw_socket_drops_cumulative
+    except (OSError, AttributeError, struct.error) as e:
+        logger.debug(f"Could not read AF_PACKET statistics: {e}")
+        return _raw_socket_drops_cumulative
 
 
 class MinimalTrapCapture:
@@ -363,6 +426,10 @@ class MinimalTrapCapture:
             # Bind to interface if specified
             if self.interface != "any" and self.interface != "all":
                 self.raw_socket.bind((self.interface, 0))
+
+            # Make this socket pollable by get_ebpf_raw_socket_drops()
+            global _active_raw_socket
+            _active_raw_socket = self.raw_socket
 
             logger.info(f"Raw packet capture initialized on interface {self.interface}")
 
@@ -877,6 +944,10 @@ class MinimalTrapCapture:
                 logger.info("Raw socket closed")
             except Exception as e:
                 logger.error(f"Error closing raw socket: {e}")
+            finally:
+                global _active_raw_socket
+                if _active_raw_socket is self.raw_socket:
+                    _active_raw_socket = None
 
         # Clean up BPF resources
         if self.bpf:

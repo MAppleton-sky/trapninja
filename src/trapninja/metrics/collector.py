@@ -410,13 +410,22 @@ def _get_socket_drop_stats() -> Dict[str, Any]:
 
 def _get_ebpf_stats() -> Dict[str, Any]:
     """
-    Get eBPF perf-buffer lost-sample count.
+    Get eBPF capture-mode visibility metrics.
 
-    Returns {} when eBPF module is unavailable.
+    lost_samples: lost perf-buffer *notifications* (filtering/counting
+        side channel — see ebpf.py's _ebpf_lost_cb docstring).
+    raw_socket_drops: actual data-path drops on the AF_PACKET raw socket
+        that _raw_capture_loop() reads from — the metric that matters for
+        "were traps actually lost" in eBPF/raw-capture mode.
+
+    Returns {} when the eBPF module is unavailable.
     """
     try:
-        from ..ebpf import get_ebpf_lost_samples
-        return {'lost_samples': get_ebpf_lost_samples()}
+        from ..ebpf import get_ebpf_lost_samples, get_ebpf_raw_socket_drops
+        return {
+            'lost_samples': get_ebpf_lost_samples(),
+            'raw_socket_drops': get_ebpf_raw_socket_drops(),
+        }
     except ImportError:
         return {}
 
