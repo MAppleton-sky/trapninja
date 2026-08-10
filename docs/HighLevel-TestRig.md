@@ -1,9 +1,23 @@
 # TrapDojo — High Level Design: TrapNinja Load Test Rig
 
-**Status:** Draft for review
-**Version:** 0.1
-**Last Updated:** July 2026
+**Status:** Draft for review (post design-review v0.2)
+**Version:** 0.2
+**Last Updated:** August 2026
 **Working name:** TrapDojo (placeholder — where a ninja trains; rename freely)
+**Companion:** [LowLevel-TestRig.md](LowLevel-TestRig.md)
+**Supersedes:** HLD v0.1
+
+> **Design-review status.** This HLD reflects the v0.2 design after the loss-accounting, sequence-semantics, sink-safety, clock-model, and phase-gate corrections. The full change summary, decision log, and traceability table live in the [LLD](LowLevel-TestRig.md#change-summary-v01--v02).
+
+**Key structural changes from v0.1:**
+
+- Single loss equation replaced by **two related models**: *input accounting* (per generated input) and *delivery-obligation accounting* (per unique `(run_token, generator_id, stream_id, epoch_id, seq, destination)` obligation).
+- Every attributed loss carries an explicit **confidence level** (`proven | aggregate_accounted | temporally_correlated | unexplained`). Aggregate SUT counters can never be presented as per-sequence attribution.
+- Wire identity redesigned around a **128-bit random run token** plus an **`epoch_id`** so warm-up cannot pollute measurement and settlement is well-defined.
+- Generator maintains a **successful-sequence ledger**; partial `sendmmsg()` retries with the same sequence numbers; abandoned ranges are recorded, not silently skipped.
+- Sink extraction is **length-safe**; identity is validated against magic **and** run token **and** known generator/stream ids **and** OID and bounds.
+- Verdict model is **`PASS | FAIL | INVALID | ABORTED`**. Rig failures, sink drops, generator underachievement, and clock uncertainty produce `INVALID` — never a TrapNinja `FAIL`.
+- **R0 accounting-proof phase added** before R1 implementation. R1 is narrowed to v2c generator + single-process sink + selfcheck. v3 is blocked until R5.
 
 ---
 
@@ -19,7 +33,7 @@
 - [Component 3: Orchestrator & Reporter](#component-3-orchestrator--reporter)
 - [Sequence-Tagged Trap Format](#sequence-tagged-trap-format)
 - [Loss Accounting & Reconciliation Model](#loss-accounting--reconciliation-model)
-- [Failure Criteria (Defining "the Breaking Point")](#failure-criteria-defining-the-breaking-point)
+- [Failure Criteria (Defining "the Breaking Point")](#verdict-model--failure-criteria)
 - [Test Scenarios](#test-scenarios)
 - [TrapNinja-Side Requirements](#trapninja-side-requirements)
 - [Technology Constraints & Generator Performance Strategy](#technology-constraints--generator-performance-strategy)
@@ -56,7 +70,7 @@ The key addition beyond the original phase plan is the **Trap Sink** (Component 
 ## Scope & Non-Goals
 
 **In scope:**
-- SNMPv1/v2c/v3 trap generation at line rate, from many simulated source IPs
+- SNMPv2c trap generation at line rate, from many simulated source IPs (SNMPv1 R3; **SNMPv3 blocked until R5 contract**)
 - End-to-end delivery verification with per-trap sequence accounting
 - Scenario orchestration, failure detection, and reporting
 - Driving TrapNinja HA failover and dependency-failure scenarios
@@ -99,38 +113,67 @@ The key addition beyond the original phase plan is the **Trap Sink** (Component 
 
 ## Core Design Principle: Closed-Loop Loss Accounting
 
-Every generated trap carries a **(run_id, stream_id, sequence_number)** identity. The Generator knows exactly what it sent; the Sink knows exactly what arrived; TrapNinja's Phase 1 instrumentation explains what happened in between. A run is only trusted when the books balance:
+Every generated trap carries a wire identity of `(wire_version, run_token, generator_id, stream_id, epoch_id, seq)` at a fixed offset. The generator knows exactly which sequences the kernel accepted (its **successful-sequence ledger**); the sink knows exactly which arrived (validated against the ledger); TrapNinja's Phase 1 instrumentation explains what happened in between.
+
+A run's books balance only when both of two related models balance:
+
+### Model A — Input accounting (per stream, per epoch)
 
 ```
-sent = kernel_drops + queue_drops + blocked + forward_failures + received_at_sink + unexplained
+G_offered  =  I_kernel_lost  +  I_queue_lost  +  I_parse_rejected
+           +  I_blocked      +  I_accepted_for_forwarding
+           +  I_unexplained
 ```
 
-`unexplained` is itself a first-class result. A breaking point where `unexplained > 0` is a **worse** finding than one where all loss is attributed — it means an invisible drop path exists, which violates the "no silent trap loss" pillar and must be chased down before production sign-off.
+Accounts for what happened to every input that TrapNinja could observe. Uses generator ledger (`G_offered`) and TrapNinja aggregate counters. `I_unexplained` is a first-class result.
+
+### Model B — Delivery-obligation accounting (per obligation)
+
+For every unique tuple `(run_token, generator_id, stream_id, epoch_id, seq, destination)`, derived from the **frozen** TrapNinja forwarding/filter/redirection config:
+
+```
+obligations = delivered_exactly_once     +  delivered_multiple_times
+            + missing                    +  not_expected_filtered
+            + not_expected_redirected_away
+            + destination_forward_failure  (aggregate, temporally correlated)
+            + unexplained
+```
+
+Accounts for what actually reached each destination that was supposed to receive it.
+
+### Rules
+
+- Global SUT counters can support **aggregate** attribution across an epoch. They cannot bind a specific sequence to a specific stage.
+- A duplicate never compensates for a missing sequence. Six precise duplicate/missing counters replace the ambiguous "duplicates" of v0.1 (defined in the [LLD](LowLevel-TestRig.md#duplicate-semantics)).
+- Every attributed loss row carries a **confidence** level: `proven`, `aggregate_accounted`, `temporally_correlated`, or `unexplained`. Temporal correlation is never rendered as per-sequence attribution.
+- Both models are evaluated **per epoch, after settlement** — a dwell is never declared lossy merely because packets remain queued at wall-clock end of dwell.
+
+An `unexplained` value in either model is worse than an attributed value at the same threshold — it means an invisible drop path exists, which violates the "no silent trap loss" pillar and must be chased down before production sign-off.
 
 ## Component 1: Trap Generator
 
-**Role:** Sustain an exact, controllable offered load of well-formed SNMP traps toward the SUT.
+**Role:** Sustain an exact, controllable offered load of well-formed SNMP traps toward the SUT, with a byte-exact record of which sequences the kernel actually accepted.
 
 **Key capabilities:**
 
 | Capability | Design approach |
 |---|---|
-| Rate control | Token-bucket per worker process; target rate divided across processes. Accuracy target: ±2% of requested rate at steady state |
-| Rate profiles | `constant`, `ramp` (start/end/step/dwell), `burst` (baseline + spike amplitude/duration/repeat), `replay` (rate series from file) |
-| Packet efficiency | Traps are **pre-encoded byte templates** built once at startup (SNMPv2c fast, SNMPv3 encrypted templates pre-computed per credential). The hot loop only patches the sequence-number bytes at a fixed offset and calls send — zero per-packet ASN.1 encoding |
-| Batched send | `sendmmsg(2)` via `ctypes` (RHEL 8/9, Python 3.9 stdlib has no binding) to send 64–512 packets per syscall. Fallback: plain `sendto` loop |
-| Multi-source simulation | Raw socket with `IP_HDRINCL` and spoofed source IPs (mirrors TrapNinja's own forwarding technique), cycling through a configurable pool (e.g. 5,000 addresses) so per-IP stats, LRU bounds, and filtering behave as they would with a real estate. Fallback: secondary IP aliases on the generator NIC when spoofing is blocked by network policy |
-| Trap realism | Configurable OID pools (weighted mix, e.g. linkDown-heavy to simulate a fibre cut), varbind payload size distribution, SNMPv1/v2c/v3 mix ratios, and deliberately malformed packets at a configurable percentage (parser slow-path and robustness exercise) |
-| Multi-process scaling | One Python process realistically sustains ~30–60k small-packet sends/sec even with `sendmmsg`; the generator is therefore a coordinator that forks N send workers, each owning a stream_id and its own sequence space |
-| Accounting | Each worker records `sent` per second (post-syscall success), flushed to a run manifest the Orchestrator collects. Send-side `ENOBUFS`/`EAGAIN` are counted separately — traps never offered to the wire must not be blamed on TrapNinja |
+| Rate control | Absolute-monotonic-deadline pacer per worker (no cumulative sleep drift). Records requested vs achieved offered rate; breaking-point analysis uses **achieved offered rate**, not the configured target |
+| Rate profiles | `constant`, `ramp`, `burst`, `replay`, all carrying an explicit `epoch_id` on the wire at every phase boundary |
+| Packet efficiency | Traps are **pre-encoded byte templates** built once at startup (v2c only in R1). The hot loop patches only the mutable identity fields (`epoch_id`, `seq`, optional `send_ts`) at a fixed offset. Zero-allocation on the hot path is a measured optimisation target, not a guarantee |
+| Batched send | `sendmmsg(2)` via `ctypes`; fallback to `sendto` loop is recorded in the manifest, not silent |
+| Partial-send correctness | On partial `sendmmsg()` acceptance, the worker **retains the unsent tail with the same sequence numbers** and retries. Only kernel-accepted sequences enter the ledger. Ranges abandoned after `abandon_after_retries` are recorded as rig-side send failures, not blamed on TrapNinja |
+| Successful-sequence ledger | Per-worker, per-stream, per-epoch record of exactly which sequences the kernel accepted and which were abandoned. This ledger — not `[1, max_seq]` — is the source of truth for what the sink should have received |
+| Multi-source simulation | Raw socket with `IP_HDRINCL` and spoofed source IPs from a scenario-declared pool. **Fallback is opt-in only:** if the probe fails and `allow_source_mode_fallback: false`, the run aborts with `ABORTED` and no silent switch. When fallback is allowed, effective mode and source count are recorded prominently |
+| Trap realism | Configurable OID pools (weighted mix, e.g. linkDown-heavy to simulate a fibre cut), varbind payload size distribution, SNMP version mix (v2c in R1; v1 R3; v3 blocked until R5), and malformed traffic with declared classes and expected TrapNinja counter reactions |
+| Multi-process scaling | Coordinator forks N send workers, each owning one `stream_id` under a per-host `generator_id`. Sequence spaces never overlap between workers, epochs, or hosts |
+| Accounting | Each worker records ledger updates and achieved-rate statistics (requested vs achieved, pacing lateness p99, batch-size histogram, CPU utilisation, socket errors) per second and per epoch |
 
 **CLI sketch:**
 
 ```
-trapdojo generate --target 10.234.83.133 --port 162 \
-    --profile ramp --start-rate 5000 --end-rate 80000 --step 5000 --dwell 60 \
-    --sources 5000 --oid-mix fibre-cut.json --version-mix v2c=90,v3=10 \
-    --run-id 2026-07-21-ramp-01
+trapdojo generate --scenario scenarios/ramp-to-failure-ebpf.json \
+    --run-id 2026-08-10-ramp-01 --generator-id 1
 ```
 
 ## Component 2: Trap Sink / Verifier
@@ -141,19 +184,20 @@ trapdojo generate --target 10.234.83.133 --port 162 \
 
 | Capability | Design approach |
 |---|---|
-| Listeners | One UDP listener per configured TrapNinja destination (IP:port), each registered in the SUT's `destinations.json`. Supports multiple destinations to test fan-out and redirection routing |
-| Faster than the SUT | The sink must never be the bottleneck. It does **no SNMP parsing** on the hot path: it extracts `(run_id, stream_id, seq)` from a fixed byte offset (guaranteed by the template format), increments counters, and optionally records arrival time into a ring buffer. Large `SO_RCVBUF`, multiple listener processes with `SO_REUSEPORT` |
-| Own drop visibility | The sink monitors its own `/proc/net/udp` drop counters (same technique as TrapNinja Phase 1 B1). Sink-side kernel drops invalidate a run and are reported as such — never silently folded into "TrapNinja lost it" |
-| Sequence verification | Per (stream_id, destination): received count, duplicate count, gap list (missing sequence ranges). Gap ranges are the primary loss evidence and also localise loss in time when correlated with the rate profile |
-| Duplicate detection | Duplicates matter for failover-replay scenarios (replay may legitimately re-send; the report must distinguish "lost", "delivered once", "delivered ≥ twice") |
-| Latency (coarse) | Optional: generator embeds a send timestamp; sink computes one-way delay. Only meaningful when generator and sink share a host or are NTP/PTP-disciplined — reported with an explicit accuracy caveat (see Risks) |
-| Memory bounds | Gap tracking uses interval sets (ranges), not per-sequence bitmaps, so a 100M-trap soak run stays bounded |
+| Listeners | R1 uses a **single listener process** per bind, with a documented and validated `qualified_ceiling_tps` written into every manifest. Scenarios whose required receive rate exceeds ceiling are refused at scenario-load. Multi-listener scaling options (offline union → per-port partition → BPF dispatch) are evaluated in that order at R3; MPMC ring is not the default |
+| Length safety | `recvmmsg` returns per-message length, source, and flags. The sink processes only `memoryview(buf)[:msg_len]`. Messages with `MSG_TRUNC`, short lengths, or malformed BER are rejected into dedicated counters — never into the delivery accounting |
+| Identity validation | Extractor validates magic **and** exact 128-bit run token **and** known `(generator_id, stream_id)` **and** identity-field length **and** `epoch_id` **and** sequence bounds **and** the identity OID via a minimal BER walker. Magic alone is never sufficient; the 128-bit run token is what makes cross-run false accepts vanishingly unlikely |
+| Own drop visibility | 1 Hz `/proc/net/udp` monitor. **Any non-zero delta invalidates the run** (verdict `INVALID`, scope `rig`) — the sink cannot claim what did or did not arrive when its own buffer overflowed. Sink-side loss is never rendered as a TrapNinja failure |
+| Sequence verification | Per `(stream_id, epoch_id, destination)`: received count, distinct-sequences count, six precise duplicate/missing counters, and gap ranges computed **against the generator ledger** — never against `[1, max_seq]` |
+| Duplicate detection | `datagrams_received`, `duplicate_datagrams`, `sequences_delivered_exactly_once`, `sequences_delivered_multiple_times`, `missing_sequences`, and `unique_delivery_obligations_satisfied` are all reported separately. HA replay uses an independent `expected_duplicate_max_fraction` acceptance criterion |
+| Latency | Cross-host one-way latency uses `CLOCK_TAI` (or disciplined `CLOCK_REALTIME`). Sync-source and offset are recorded at run start and after settlement on every host. If clock uncertainty exceeds threshold, latency is marked `INVALID` — not merely caveated. Same-clock pipeline latency (TrapNinja internal) is always available |
+| Memory bounds | Gap tracking uses interval sets, bounded by the number of loss events (not trap volume) |
 
 **CLI sketch:**
 
 ```
-trapdojo sink --listen 10.234.83.140:162 --listen 10.234.83.140:1162 \
-    --run-id 2026-07-21-ramp-01 --report-dir /var/lib/trapdojo/runs
+trapdojo sink --scenario scenarios/ramp-to-failure-ebpf.json \
+    --run-id 2026-08-10-ramp-01
 ```
 
 ## Component 3: Orchestrator & Reporter
@@ -179,63 +223,87 @@ trapdojo report --run-id 2026-07-21-ramp-01 [--compare 2026-06-30-ramp-04]
 
 ## Sequence-Tagged Trap Format
 
-Generated traps are fully valid SNMP traps that any receiver would accept, with the test identity carried in a dedicated varbind:
+Generated traps are fully valid SNMP traps that any receiver would accept, with the test identity carried in a dedicated varbind. **Byte-exact layout lives in the [LLD](LowLevel-TestRig.md#wire-format-byte-exact-v2)**; the essentials:
 
-- A reserved OID under a private enterprise arc (e.g. `.1.3.6.1.4.1.99999.1.1`) whose value is a fixed-length OCTET STRING: `run_id (8 bytes) | stream_id (4 bytes) | seq (8 bytes) | send_ts (8 bytes, optional)`.
-- Because templates are pre-encoded with fixed-length fields, this varbind sits at a **known byte offset per template**, letting both the generator (patch) and sink (extract) touch it without ASN.1 work. The sink receives the offset table in the run manifest.
-- The remaining varbinds are realistic (sysUpTime, snmpTrapOID, vendor-style payload varbinds) so TrapNinja's parser, filters, per-OID stats, and redirection rules exercise their production code paths.
-- For SNMPv3 scenarios the identity varbind is inside the encrypted scopedPDU; the sink extracts it from TrapNinja's **decrypted v2c output**, which simultaneously verifies the decryption path end-to-end.
+- Reserved OID under a lab-use enterprise arc (placeholder `.1.3.6.1.4.1.99999.1.1`; final value TBD at R0 code freeze) whose value is a **fixed 48-byte OCTET STRING** with layout: `wire_version (2) | flags (2) | run_token (16, random 128-bit) | generator_id (2) | stream_id (2) | epoch_id (4) | seq (8) | send_ts_tai_ns (8) | integrity_marker "TDJ2" (4)`.
+- Templates are pre-encoded once at startup with `wire_version`, `flags`, `run_token`, `generator_id`, `stream_id`, and `integrity_marker` baked in. Only `epoch_id`, `seq`, and `send_ts_tai_ns` are patched per packet.
+- The 128-bit `run_token` prevents cross-run false-accepts; the 4-byte integrity marker is a fast sanity check but is never sufficient on its own.
+- The remaining varbinds are realistic (sysUpTime, snmpTrapOID, vendor-shaped payload varbinds) so TrapNinja's parser, filters, per-OID stats, and redirection rules exercise their production code paths.
+- `epoch_id` distinguishes probe, warmup, dwell steps, burst, recovery, and cooldown — warm-up traffic cannot pollute measurement.
+- SNMPv3 is not supported until R5 (patching an encrypted identity per packet is not valid; the R5 contract must specify per-packet USM encryption, engine boots/time behaviour, and how the identity survives TrapNinja's v3→v2c conversion).
 
 ## Loss Accounting & Reconciliation Model
 
-Loss can occur at seven places. Each has an owner and a counter:
+Loss can occur at eight places. Each has an owner, a counter, and an **attribution confidence ceiling** — SUT counters can only ever bind *aggregate* attribution to a stage, never per-sequence. The [LLD](LowLevel-TestRig.md#accounting-model) contains the canonical model; the summary:
 
-| # | Stage | Evidence source | Owner |
-|---|---|---|---|
-| 1 | Generator send failure | Generator `ENOBUFS`/`EAGAIN` counters | Rig (excluded from offered load) |
-| 2 | Network / NIC | Switch counters (manual), inferred as `unexplained` otherwise | Environment |
-| 3 | SUT kernel socket buffer | `trapninja_socket_drops_total` (Phase 1 B1) / eBPF lost samples (Phase 1 B2) | TrapNinja visibility |
-| 4 | packet_queue full | Queue drop counters (`QueueStats`) | TrapNinja |
-| 5 | Filtering (deliberate) | `blocked` counters — scenario-dependent expected value | TrapNinja (by design) |
-| 6 | Forwarder send failure | `trapninja_dest_failures_total{reason=...}` (forward-failure metrics fix) | TrapNinja |
-| 7 | Sink kernel buffer | Sink's own `/proc/net/udp` monitor | Rig (invalidates the run) |
+| # | Stage | Evidence source | Model | Confidence ceiling | Owner |
+|---|---|---|---|---|---|
+| 1 | Generator send failure (abandoned or ENOBUFS) | Generator ledger `abandoned_ranges` | Excluded from `G_offered` | `proven` | Rig |
+| 2 | Network / NIC | Switch counters (manual), otherwise `unexplained` | A + B | `temporally_correlated` at best | Environment |
+| 3 | SUT kernel socket buffer | `trapninja_socket_drops_total` / eBPF lost samples | A: `I_kernel_lost` | `aggregate_accounted` | TrapNinja |
+| 4 | packet_queue full | Queue drop counters | A: `I_queue_lost` | `aggregate_accounted` | TrapNinja |
+| 5 | Parse rejection | `trapninja_parse_rejected_total{reason=...}` | A: `I_parse_rejected` | `aggregate_accounted` | TrapNinja |
+| 6 | Filtering (deliberate) | `trapninja_blocked_total` and B classification | A: `I_blocked`; B: `not_expected_filtered` | `aggregate_accounted` (A), `proven` (B) | TrapNinja (by design) |
+| 7 | Forwarder send failure per destination | `trapninja_dest_failures_total{destination=...}` | B: `destination_forward_failure` | `temporally_correlated` | TrapNinja |
+| 8 | Sink kernel buffer | Sink's own `/proc/net/udp` monitor | Invalidates run | — | Rig |
 
-The report attributes every missing sequence to a stage where possible. Time-correlation (gap ranges vs metric deltas per collection interval) localises loss even when counters are aggregate.
+The reporter classifies every obligation exactly once in Model B and every input in Model A. Each row carries its `confidence`. Time-correlation is never rendered as per-sequence attribution.
 
-## Failure Criteria (Defining "the Breaking Point")
+## Verdict Model & Failure Criteria
 
-A dwell step **fails** — and the ramp stops — when any of the following holds for the whole measurement window at that step:
+Every epoch and every run has one of four verdicts:
+
+| Verdict | Meaning | Scope |
+|---|---|---|
+| `PASS` | Evidence complete, thresholds met | `sut` |
+| `FAIL` | Evidence complete and valid, TrapNinja breached a threshold | `sut` |
+| `INVALID` | Evidence incomplete or unreliable — sink drops, generator underachievement, missing SUT metrics, clock uncertainty, ambiguous counter deltas | `rig` / `environment` / `evidence` |
+| `ABORTED` | Run terminated before evidence collection could complete — crash, SIGINT, SUT unreachable | any |
+
+**Rig or environment failure is never rendered as `FAIL`.** `INVALID` and `ABORTED` never carry `scope = "sut"`.
+
+### Threshold criteria (dwell step FAIL — only after settlement)
 
 | Criterion | Default threshold | Rationale |
 |---|---|---|
-| End-to-end loss | > 0 traps unaccounted-for, or > 0.1% total loss | "Every alarm matters"; 0.1% matches the stated drop-rate target |
-| Queue saturation | Queue depth monotonically increasing across the window | Depth that never drains means the worker pool is beyond capacity even if the 200k buffer hasn't overflowed *yet* |
-| Latency | `queue_wait p99` > 1s sustained | An alarm delayed multiple seconds under sustained (non-burst) load is operationally degraded |
-| Resource runaway | RSS growth > configurable %/min, or FD count climbing | Predicts failure beyond the window; also catches leaks under load |
+| Input `I_unexplained` | 0 count | Any invisible input drop violates "every alarm matters" |
+| Delivery `missing_max_fraction` | 0.001 (0.1%) | Matches TrapNinja's stated drop target |
+| Delivery `unexplained_max_fraction` | 0.0 | No obligation may fail without attribution |
+| Delivery `multi_delivery_max_fraction` | 0.0 (unless HA replay allows) | Independent of missing threshold |
+| Latency | `queue_wait_p99_ms_max: 1000` | An alarm delayed multiple seconds under sustained (non-burst) load is operationally degraded |
+| Resource runaway | `rss_growth_fraction_per_min_max: 0.05` | Predicts failure beyond the window; also catches leaks under load |
 | Process health | Worker/service crash, HA state flap | Immediate fail |
 
-Burst scenarios use different criteria: transient queue growth and elevated latency are *expected*; the pass conditions are zero loss, full queue drain within a recovery-time budget, and return of p99 to baseline.
+### Ramp-control (may stop ramp; does not decide loss for current epoch)
 
-All thresholds live in the scenario file, not in code (configuration over code changes).
+| Signal | Effect |
+|---|---|
+| Queue depth monotonically increasing AND > 0.5 × queue size at end of dwell | Stop ramp after settlement of the current epoch |
+
+Burst scenarios use different criteria: transient queue growth and elevated latency are *expected*; the pass conditions are zero loss after settlement, full queue drain within a recovery-time budget, and return of `queue_wait_p99_ms` to baseline.
+
+All thresholds live in the scenario file, expressed as fractions (never percentages) with unit-bearing field names.
 
 ## Test Scenarios
 
-| Scenario | Shape | Proves |
-|---|---|---|
-| `baseline` | 1k tps constant, 10 min | Rig sanity: zero loss, books balance, accounting works |
-| `ramp-to-failure` | Ramp per capture mode (eBPF / socket / sniff) | Per-mode maximum sustained zero-loss rate; first failing stage |
-| `sustained-soak` | 80% of found max, 8–24 h | Leak detection, counter stability, `.prom` export stability |
-| `fibre-cut-burst` | 5k baseline + 100k spike for 30–60 s, repeated | Burst absorption, queue drain, recovery time (the headline production claim) |
-| `ha-failover-under-load` | Sustained load + forced failover / PRIMARY kill | <3s failover, gap detection, failover replay correctness (lost vs duplicated accounting) |
-| `redis-outage` | Sustained load + Redis stop/start | Graceful degradation: forwarding unaffected, cache recovers |
-| `snmpv3-load` | Ramp with high v3 ratio | Decryption throughput cost; correct decrypt-and-convert at rate |
-| `filter-heavy` | Ramp with large blocked/redirect config loaded | Config-scale impact on the hot path |
-| `malformed-mix` | Sustained load + 1–5% malformed packets | Slow-path resilience; no worker stalls; malformed counted, not silently eaten |
-| `many-sources` | Ramp with 50k+ distinct source IPs | GranularStats LRU behaviour and memory bounds at estate scale |
+All scenarios express thresholds as fractions (`loss_fraction_max: 0.001`), all rates in `tps`, all durations in `_s`, all sizes in `_bytes` (see the [LLD Units Policy](LowLevel-TestRig.md#units-policy)).
+
+| Scenario | Phase | Shape | Proves |
+|---|---|---|---|
+| `baseline` | R1 | 1k tps constant, 10 min | Rig sanity: `I_unexplained = 0`, `missing = 0`, books balance in both models |
+| `ramp-to-failure` | R2 | Ramp per capture mode (eBPF / socket / sniff) | Per-mode maximum sustained zero-loss achieved rate; first failing stage with confidence label |
+| `sustained-soak` | R3 | 80% of found max, 8–24 h | Leak detection, counter stability, `.prom` export stability |
+| `fibre-cut-burst` | R3 | 5k baseline + 100k spike for 30–60 s, repeated | Burst absorption, queue drain, recovery time (the headline production claim) |
+| `filter-heavy` | R3 | Ramp with large blocked/redirect config loaded | Config-scale impact on the hot path; delivery-obligation accounting under filtering/redirection |
+| `many-sources` | R3 | Ramp with 50k+ distinct source IPs (`allow_source_mode_fallback: false`) | GranularStats LRU behaviour and memory bounds at estate scale |
+| `malformed-mix` | R3 | Sustained load + declared malformed classes | Per-class TrapNinja counter reactions match expectations; malformed excluded from delivery obligations |
+| `ha-failover-under-load` | R4 | Sustained load + forced failover / PRIMARY kill | <3s failover, correct delivery-obligation classification across the transition, `expected_duplicate_max_fraction` respected |
+| `redis-outage` | R4 | Sustained load + Redis stop/start | Graceful degradation: forwarding unaffected, cache recovers |
+| `snmpv3-load` | R5 | Ramp with v3 mix | Only after R5 v3 contract is signed and implemented |
 
 ## TrapNinja-Side Requirements
 
-The design deliberately requires **no test-specific code in TrapNinja** — the SUT is a production build. What it does require is complete observability, most of which exists:
+The design deliberately requires **no test-specific code in TrapNinja** — the SUT is a production build. What it does require is complete observability and a few small additions surfaced by the v0.2 review:
 
 | Requirement | Status |
 |---|---|
@@ -244,25 +312,44 @@ The design deliberately requires **no test-specific code in TrapNinja** — the 
 | eBPF perf-buffer lost-sample counter | ✅ Phase 1 Part B2 — implemented |
 | Resource telemetry (RSS, FDs, GC) | ✅ Phase 1 Part C — implemented |
 | `trapninja metrics show` (JSON) for orchestrator polling | ✅ Implemented |
-| **Forward-failure metrics** (`trapninja_dest_failures_total` with `reason` label; forwarded counter honouring `forward_packet()` return) | ⚠️ **Prerequisite.** Prompt exists (`.github/prompts/trapninja-forward-failure-metrics.prompt.md`) but must be implemented and released before any rig run is trusted — otherwise stage 6 loss is invisible and every failed forward pollutes `unexplained` |
+| **Forward-failure metrics** (`trapninja_dest_failures_total` with `destination` and `reason` labels; forwarded counter honouring `forward_packet()` return) | ⚠️ **Prerequisite.** Must be implemented before R2 orchestrator work — otherwise stage 7 loss is invisible and every failed forward pollutes `unexplained` in delivery accounting |
 | Queue drop counters exposed in metrics export | Verify: `QueueStats` drops must appear in the `.prom` export, not only in `daemon queue-stats` |
-| Counter reset or run-delta capability | Preferred approach: orchestrator computes **deltas** between snapshots rather than requiring resets — no TrapNinja change needed, and it works against a long-running production-like process. `stats reset` remains available but is not relied upon |
+| **`trapninja_process_start_tai_ns` gauge** | ⚠️ **New prerequisite (v0.2).** Enables the orchestrator to detect process restarts and reset delta baselines atomically. Without it, restart-across-poll produces silently wrong deltas |
+| **`trapninja_metrics_snapshot_id` counter** | ⚠️ **New prerequisite (v0.2).** Increments on every export; lets the collector detect torn reads and avoid non-atomic snapshots |
+| **`trapninja config show --json --canonical`** | ⚠️ **New prerequisite (v0.2).** Deterministic canonical form of forwarding/filter/redirection/destinations config, so TrapDojo can freeze it (`fwd_config_sha256` in manifest) and derive the expected obligation set |
+| Counter reset or run-delta capability | Orchestrator computes **deltas** between snapshots. Counter-uncertainty rules (reset, restart, wraparound, label change, missing sample, delayed `.prom`, non-atomic snapshot, HA role change) each have a defined response in the LLD — ambiguous intervals are invalidated, not silently trusted |
 
-One candidate enhancement (optional, decide at detailed design): a `trapninja metrics snapshot --json` that atomically dumps all counters in one call, if it turns out the unified export interval (and split-snapshot risk between `.prom` files and CLI reads) makes delta computation noisy at short dwell windows. The unified-timer work may already make this unnecessary — verify before building anything.
+All three new prerequisites are small changes to existing TrapNinja metrics/CLI surface. They must land before R2 collector work begins.
 
 ## Technology Constraints & Generator Performance Strategy
 
 - **Python 3.9, RHEL 8/9, air-gapped** — same constraints as TrapNinja. Dependencies bundled via the existing `download-packages.sh` / `install-packages.sh` pattern.
-- **Stdlib-first.** The hot paths (generator send loop, sink receive loop) are stdlib + `ctypes` (`sendmmsg`/`recvmmsg`). Scapy/pysnmp are used only **offline at startup** for template construction and are lazy-imported (import-cost awareness), never in the send/receive loop.
-- **Throughput budget.** Per-process targets to validate in rig Phase 1: ≥30k tps send per worker with `sendmmsg`, linear scaling to 4–8 workers → 100k+ tps aggregate from one generator host. If a single host cannot reach the target against the SUT, the orchestrator supports multiple generator hosts, each owning disjoint stream_ids (the accounting model is already per-stream, so this is additive, not a redesign).
-- **Escape hatch.** If Python cannot reach the required rate on available hardware, the template-based design degrades gracefully to pcap generation + `tcpreplay` for raw-rate scenarios, with the sink and accounting unchanged (sequence numbers pre-baked into the pcap). This is a documented fallback, not the primary path — it sacrifices dynamic rate profiles.
+- **Stdlib-first.** The hot paths (generator send loop, sink receive loop) are stdlib + `ctypes` (`sendmmsg`/`recvmmsg`). Hand-rolled BER encoder for v2c templates avoids the pysnmp import cost and gives byte-exact control. Templates are constructed offline at startup, never on the hot path.
+- **Throughput budget.** Per-process targets to validate in R0/R1 selfcheck: ≥30k tps send per worker with `sendmmsg`, linear scaling to 4–8 workers → 100k+ tps aggregate from one generator host. Single sink-listener qualified ceiling ≥ 120k tps. Multi-generator-host coordination is additive (already partitioned by `generator_id` and `stream_id`).
+- **Raw network qualification.** MTU, fragmentation policy, IP/UDP checksum, IP ID, port selection, and NIC offload interactions are documented and validated via generator-egress pcap in selfcheck. See the [LLD Raw-Network Qualification section](LowLevel-TestRig.md#raw-network-qualification).
+- **Escape hatch.** If Python cannot reach the required rate on lab hardware, the template-based design degrades gracefully to pcap generation + `tcpreplay` for raw-rate scenarios; sequence numbers are pre-baked into the pcap and the ledger is derived from the same template stream. This is a documented fallback, not the primary path — it sacrifices dynamic rate profiles.
 
 ## Deployment Model
 
 - **Separate git repository** (standalone product), mirroring TrapNinja conventions: `src/` layout, `dev/`, `docs/`, `ansible/`, `config.example/`.
-- **Ansible role** deploys `trapdojo` to designated generator/sink hosts (never to SUT hosts) and templates host-role config (generator vs sink vs orchestrator).
-- **Privileges:** generator needs `CAP_NET_RAW` (spoofed sources); sink needs to bind its ports and read its own `/proc/net/udp`; orchestrator needs SSH access to SUT hosts for metric collection and action injection. Least privilege per role — the orchestrator's SSH account should be limited (command-restricted key or sudo whitelist) since it can stop services.
-- **Safety interlock:** the orchestrator refuses to run destructive scenarios (service stop, nft injection) unless the scenario file carries an explicit `"destructive": true` flag *and* the target hosts match a configured lab allowlist. Pointing a ramp-to-failure at a production HA pair by typo must be structurally impossible.
+- **Ansible role** deploys `trapdojo` to designated generator/sink hosts (never to SUT hosts) and templates host-role config.
+- **Privileges:** generator needs `CAP_NET_RAW` (spoofed sources); sink needs to bind its ports and read its own `/proc/net/udp`; orchestrator needs SSH access to SUT hosts for metric collection and action injection. Least privilege per role — the orchestrator's SSH account uses command-restricted keys and a sudoers entry whitelisted to the exact action commands.
+
+### Safety interlocks (extended in v0.2 to cover traffic targets)
+
+High-rate or malformed UDP generation is potentially disruptive; safety controls cover traffic targets as well as SSH actions.
+
+- **Inventory-derived targets.** `generator.target_ip:target_port`, `sources.pool_cidr`, and every `sink.listeners[i].bind_ip` must resolve to inventory entries whose tags intersect the scenario's `safety.lab_allowlist`. Freeform IPs that do not resolve to inventory are refused.
+- **Per-capability acknowledgements.** Scenario must explicitly acknowledge every disruptive capability it uses. Missing acknowledgement → refuse to start:
+  - `ramp_to_failure` (may cause SUT saturation)
+  - `malformed_traffic` (may trigger slow paths)
+  - `spoofing_enabled` (may interact with lab uRPF/anti-spoofing)
+  - `rate_above_safe_ceiling_tps` (any epoch above `safety.safe_rate_ceiling_tps`)
+  - `disruptive_actions` (SSH-injected service stops, HA failover, `nft`)
+- **No silent source-mode fallback.** A failed spoof probe requires `allow_source_mode_fallback: true` to switch to alias mode. Otherwise the run aborts as `ABORTED`.
+- **Dry-run mandatory before destructive scenarios.** `trapdojo orchestrate --dry-run` prints every SSH invocation, every action, every target validation, without executing anything.
+
+Pointing a ramp-to-failure at a production HA pair by typo must be structurally impossible.
 
 ## Proposed Repository Structure
 
@@ -287,25 +374,32 @@ trapdojo/
 
 ## Build Phasing
 
+R0 is a new gate added in v0.2. R1 implementation does not begin until R0 exits, so the accounting contract is proven on synthetic evidence before it is exercised against a real SUT.
+
 | Rig Phase | Deliverable | Exit criteria |
 |---|---|---|
-| R1 | Generator (v2c only, constant + ramp profiles) + Sink + manual runs | `baseline` scenario passes: books balance at 5k tps for 10 min, rig-side loss = 0 |
-| R2 | Orchestrator (scenario runner, SUT metric collection, reconciliation report) | `ramp-to-failure` produces a breaking point + attributed loss table automatically |
-| R3 | Burst profiles, multi-source spoofing at scale, malformed mix | `fibre-cut-burst` and `many-sources` runnable |
-| R4 | Action injection (failover, Redis outage) + destructive-scenario interlock | `ha-failover-under-load` and `redis-outage` produce PASS/FAIL verdicts |
-| R5 | SNMPv3 templates, soak tooling, report comparison (`--compare`) | Full scenario matrix runnable; version-to-version regression report |
+| **R0** | Final wire format v2, `core/` (ledger, obligation, wire, template v2c), reconciliation modules, synthetic reconciliation tests, partial-send tests, epoch-boundary tests | Every synthetic edge case produces an unambiguous correct verdict (PASS/FAIL/INVALID/ABORTED with correct scope). Duplicate-plus-missing test produces FAIL. Fan-out, redirection, filter obligation classifications correct. |
+| **R1** | v2c generator (constant + ramp) + single-process sink + selfcheck with pcap validation | Rig sustains its qualified ceiling on lab hardware with zero unexplained input loss and zero rig-side drops, verified by egress pcap. Loopback baseline books balance in both models. |
+| **R2** | Orchestrator (scenario runner, SUT metric collection with counter-uncertainty rules, settlement barriers, verdict classification) + reporter | `ramp-to-failure` produces a defensible, reproducible breaking point with confidence-labelled attribution and correct PASS/FAIL/INVALID classification. |
+| **R3** | Scale: multi-source spoofing at estate scale, malformed classes, burst profiles, multi-destination routing (fan-out + redirection), SNMPv1 implementation, sink multi-listener (offline-union) | `fibre-cut-burst`, `many-sources`, `filter-heavy`, `malformed-mix` runnable. |
+| **R4** | Action injector for destructive scenarios (with R2 safety controls proven) | `ha-failover-under-load`, `redis-outage` produce correct PASS/FAIL/INVALID verdicts. |
+| **R5** | SNMPv3 (contract signed off before code) + comparison reporting (`--compare` with incompatible-environment refusal) | Full scenario matrix runnable; version-to-version regression report. |
 
-TrapNinja prerequisite before R2 results are trusted: the forward-failure metrics fix, plus verification that queue drops are in the `.prom` export.
+TrapNinja prerequisites (must land before the phase named):
+- Before **R2**: forward-failure metrics, `trapninja_process_start_tai_ns`, `trapninja_metrics_snapshot_id`, `trapninja config show --json --canonical`, queue drops in `.prom` export.
 
 ## Risks & Open Questions
 
-1. **Python send-rate ceiling.** The 100k tps aggregate target from one host is plausible with `sendmmsg` + multi-process but unproven on the actual lab hardware. R1 includes a generator self-benchmark (send to a null sink) before any SUT conclusions are drawn. Mitigations: multi-host generation, tcpreplay fallback.
-2. **Source-IP spoofing may be blocked** by lab network uRPF/anti-spoofing. Fallback (NIC IP aliases) caps the distinct-source count lower; confirm lab network policy early.
-3. **One-way latency accuracy.** Without PTP, cross-host generator→sink timestamps are only NTP-accurate (ms-level). The design treats cross-host latency as indicative and relies on TrapNinja's internal (same-clock) pipeline percentiles for precise stage timing. Decide whether PTP in the lab is worth it.
-4. **Metrics polling granularity.** The unified export interval bounds how finely loss can be time-localised. Short dwell steps may need the optional `metrics snapshot` command — defer until R2 shows whether it's needed.
-5. **SNMPv3 template pre-encryption** assumes per-credential deterministic-enough construction to patch sequence bytes post-encryption — it is not (CBC/CFB diffusion). v3 traps will therefore need per-packet encryption in the send loop, which will be slower; the v3 scenario's rate targets must be set accordingly, or v3 identity moves to an unencrypted correlation method. **This is the largest open design question for detailed design.**
-6. **Sink as hidden bottleneck.** Mitigated by design (no parsing, `SO_REUSEPORT`, own drop monitor), but R1 must include a sink self-benchmark proving it sustains > the maximum rate any scenario will offer.
+Items resolved in v0.2 are dropped. Remaining genuine risks and open questions:
+
+1. **Python send-rate ceiling.** The 100k tps aggregate target from one host is plausible but unproven on the actual lab hardware. R1 selfcheck measures this before any SUT conclusion. Mitigations: multi-host generation (additive; already supported by `generator_id`), tcpreplay fallback (documented in Technology Constraints).
+2. **Sink qualified ceiling is a hard scenario gate.** R1 uses a single listener; scenarios above ceiling are refused, not silently degraded. If the measured ceiling is inadequate for headline claims (100k tps burst), R3 introduces multi-listener via offline-union — implementation cost that is only paid if needed.
+3. **`CLOCK_TAI` availability and discipline in the lab.** Confirm chrony is configured to drive `CLOCK_TAI` on RHEL 8.10 / 9. If not, `require_tai: false` mode limits cross-host latency reporting to `INVALID`; TrapNinja same-clock pipeline latency is unaffected.
+4. **TrapNinja prerequisites.** Three new small metrics/CLI additions (`trapninja_process_start_tai_ns`, `trapninja_metrics_snapshot_id`, `trapninja config show --json --canonical`) must land before R2. All three are small and well-scoped; confirm timing with the TrapNinja team.
+5. **v3 contract (R5).** Per-packet USM encryption cost, engine boots/time behaviour, salt/IV policy, credential lifecycle, and how the identity survives TrapNinja's v3→v2c conversion are all unresolved. Deferred until R5; no v3 code before contract sign-off.
+6. **Enterprise OID arc for the identity varbind.** Placeholder `.1.3.6.1.4.1.99999.1.1`. Register or select a lab-reserved arc before R0 code freeze.
+7. **`hypothesis` in the offline dependency bundle.** Property-based tests are strongly desired for interval math and reconciliation. Decide inclusion in `download-packages.sh` before R0 test bring-up.
 
 ---
 
-*Next step: review this HLD, resolve open questions 2 and 5, then produce the R1 detailed design / implementation prompt for the Generator and Sink.*
+*Next step: review this HLD, resolve open questions 4, 6, 7, then produce the R0 detailed design / implementation prompt for `core/` + reconciliation + the synthetic-test harness.*

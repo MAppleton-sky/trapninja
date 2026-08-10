@@ -1,70 +1,193 @@
 # TrapDojo — Low Level Design: TrapNinja Load Test Rig
 
-**Status:** Draft for review
-**Version:** 0.1
+**Status:** Draft for review (post design-review v0.2)
+**Version:** 0.2
 **Last Updated:** August 2026
 **Companion to:** [HighLevel-TestRig.md](HighLevel-TestRig.md)
+**Supersedes:** LLD v0.1
 
 ---
 
 ## Table of Contents
 
+- [Change Summary (v0.1 → v0.2)](#change-summary-v01--v02)
+- [Design-Review Decision Log](#design-review-decision-log)
+- [Traceability: Review Item → Section](#traceability-review-item--section)
 - [Purpose of This Document](#purpose-of-this-document)
 - [Scope of This LLD](#scope-of-this-lld)
+- [Units Policy](#units-policy)
 - [Repository Layout](#repository-layout)
 - [Package & Module Map](#package--module-map)
 - [Runtime Process Model](#runtime-process-model)
-- [Wire Format (Byte-Exact)](#wire-format-byte-exact)
+- [Wire Format (Byte-Exact, v2)](#wire-format-byte-exact-v2)
+- [Clock Model](#clock-model)
+- [Measurement Epochs & Settlement Protocol](#measurement-epochs--settlement-protocol)
+- [Accounting Model](#accounting-model)
+- [Attribution Confidence Levels](#attribution-confidence-levels)
+- [Duplicate Semantics](#duplicate-semantics)
 - [Run Manifest](#run-manifest)
 - [Generator — Detailed Design](#generator--detailed-design)
 - [Sink — Detailed Design](#sink--detailed-design)
 - [Orchestrator — Detailed Design](#orchestrator--detailed-design)
 - [Reporter — Detailed Design](#reporter--detailed-design)
+- [Verdict Model: PASS / FAIL / INVALID / ABORTED](#verdict-model-pass--fail--invalid--aborted)
 - [Scenario File Schema](#scenario-file-schema)
 - [Report Schema](#report-schema)
 - [CLI Specification](#cli-specification)
 - [Configuration Files](#configuration-files)
-- [Error Handling & Failure Modes](#error-handling--failure-modes)
-- [Security & Safety Interlocks](#security--safety-interlocks)
+- [SNMP Version Handling](#snmp-version-handling)
+- [Malformed Traffic Accounting](#malformed-traffic-accounting)
+- [Raw-Network Qualification](#raw-network-qualification)
+- [Source Simulation Mode Discipline](#source-simulation-mode-discipline)
+- [Traffic-Target Safety Validation](#traffic-target-safety-validation)
+- [SUT Counter Uncertainty Handling](#sut-counter-uncertainty-handling)
+- [Reproducibility Evidence](#reproducibility-evidence)
 - [Observability of the Rig Itself](#observability-of-the-rig-itself)
 - [Testing Strategy](#testing-strategy)
 - [Performance Budgets & Validation](#performance-budgets--validation)
-- [Deferred to R2+](#deferred-to-r2)
+- [Build Phases & Gates](#build-phases--gates)
 - [Open Design Questions](#open-design-questions)
+
+---
+
+## Change Summary (v0.1 → v0.2)
+
+The design review is accepted in full. Structural changes below apply consistently across HLD and LLD.
+
+1. **Loss-accounting model split.** The single-equation model is replaced with two related models: *input accounting* (per generated input) and *delivery-obligation accounting* (per unique `(run_token, generator_id, stream_id, sequence, destination)` obligation, derived from a frozen forwarding configuration). Global SUT counters are used for aggregate attribution only, never per-sequence attribution.
+2. **Attribution confidence levels.** Every loss row now carries one of `proven | aggregate_accounted | temporally_correlated | unexplained`. Temporal correlation is never described as per-sequence attribution.
+3. **Sequence semantics fixed.** Generator maintains an explicit **successful-sequence ledger** per stream/epoch. Partial `sendmmsg()` completion causes retry of the exact unsent tail with the same sequence numbers; abandoned ranges are recorded, not silently skipped. Sink computes missing sequences against the ledger, not against `[1, max_seq]`.
+4. **Length-safe sink.** `recvmmsg()` returns per-message length, source, and flags; the sink processes only `memoryview(buf)[:msg_len]`. `MSG_TRUNC` messages are counted and rejected. Identity extraction validates magic **and** exact 128-bit run token **and** known `generator_id`/`stream_id` **and** identity-field length **and** sequence bounds **and** expected identity OID.
+5. **Clock model corrected.** Monotonic clocks are only used for local scheduling and local deltas. Cross-host timestamps use `CLOCK_TAI` (or disciplined `CLOCK_REALTIME`) with sync-source and offset recorded pre/post run. If clock uncertainty exceeds threshold, one-way latency is marked `INVALID` — not merely caveated.
+6. **Epoch + settlement protocol.** Wire identity now carries an `epoch_id`. Every phase (probe/warmup/dwell/burst/recovery/cooldown) has explicit boundaries. Delivery loss for an epoch is only evaluated after settlement (last-offered watermark received or timeout).
+7. **Duplicate semantics precise.** Six distinct counters replace the ambiguous "duplicates" field. A duplicate never compensates for a missing sequence. HA replay has a configurable duplicate acceptance criterion independent of loss criteria.
+8. **Sink scaling simplified.** R1 uses a **single listener process** with a documented qualified ceiling; scenarios above ceiling are refused. Multi-listener options (offline union, per-port partition, BPF dispatch) are ordered for later evaluation; MPMC ring is no longer the default.
+9. **Source-mode discipline.** Failed spoof probe never silently falls back. Fallback requires `allow_source_mode_fallback: true` in the scenario. Every run records requested vs effective source mode, source count, and probe evidence.
+10. **Traffic-target safety.** All targets (generator destination IP:port, spoofed source CIDR, sink listen addresses) are validated against inventory allowlist. Ramp-to-failure, malformed traffic, spoofing, rates > safe ceiling, and disruptive HA actions each require an independent scenario acknowledgement flag.
+11. **Verdict states expanded.** `PASS | FAIL | INVALID | ABORTED` with structured reasons. Sink drops, generator underachievement, missing metrics, and clock invalidity produce `INVALID` — not a TrapNinja `FAIL`.
+12. **Units policy.** Every schema field name or description declares its unit. `loss_pct_max: 0.1` → `loss_fraction_max: 0.001`. Rates, sizes, durations, latency, slopes, RSS growth all follow the naming rule.
+13. **Rate control claims revised.** "Zero heap allocation" is a measured optimisation target, not a guarantee. Absolute monotonic deadlines replace additive sleeps. Reports include requested vs achieved offered rate; breaking-point uses achieved offered rate.
+14. **SUT counter uncertainty handled.** Counter reset, restart, wraparound, label-set change, HA role change, missing samples, delayed `.prom` update, non-atomic snapshots, and export-interval skew all have defined behaviour. Negative or ambiguous deltas invalidate the affected interval.
+15. **SNMP version behaviour accurate.** v1 gets its own template design (v1 Trap-PDU differs from v2c). v3 is **not supported until R5** and its design work is gated on a separate contract.
+16. **Malformed accounting separated.** Malformed traffic has explicit classes and expected TrapNinja counter responses; it is excluded from normal delivery obligations.
+17. **Raw-network qualification.** MTU, fragmentation, IP/UDP checksum, IP ID, source/dest port selection, and NIC offload interactions are explicitly documented and validated via egress pcap in selfcheck.
+18. **Reproducibility evidence expanded.** Manifest and report carry TrapDojo/TrapNinja versions, scenario/config hashes, OS/kernel, CPU/NIC details, offload state, IRQ pinning, socket buffer config, link counters pre/post, and effective source mode/count. Comparison reports flag incompatible environments.
+19. **Identity redesigned.** Random 128-bit run token replaces the 8-byte ASCII truncation. Identity varbind now carries protocol version, run token, generator_id, stream_id, epoch_id, sequence, optional send timestamp, and an integrity marker at a fixed length.
+20. **Phases regated.** New **R0 (accounting and protocol proof)** must complete before R1 implementation. R1 scope narrowed to v2c generation + single-process sink + loopback + two-host selfcheck + pcap validation.
+
+---
+
+## Design-Review Decision Log
+
+| # | Review item | Decision |
+|---|---|---|
+| 1 | Redesign loss accounting | **Adopted in full.** Input accounting + delivery-obligation accounting are separate models with distinct pass conditions. See [Accounting Model](#accounting-model). |
+| 2 | Correct generator sequence semantics | **Adopted — preferred approach.** Successful-sequence ledger; retry unsent tail with same seq; record abandoned ranges. See [Generator — Detailed Design](#generator--detailed-design). |
+| 3 | Length-safe sink extraction | **Adopted.** `recvmmsg` msg_len used exclusively; strict identity validation (magic + run_token + gen_id + stream_id + oid + bounds). See [Sink — Detailed Design](#sink--detailed-design). |
+| 4 | Correct clock model | **Adopted.** No cross-host monotonic comparisons. `CLOCK_TAI` preferred; sync health recorded; latency marked `INVALID` above threshold. See [Clock Model](#clock-model). |
+| 5 | Measurement epochs & settlement | **Adopted.** `epoch_id` in wire identity; explicit settlement barrier at epoch end. See [Measurement Epochs](#measurement-epochs--settlement-protocol). |
+| 6 | Duplicate semantics | **Adopted.** Six counters; duplicate never offsets missing; HA replay uses independent duplicate criterion. See [Duplicate Semantics](#duplicate-semantics). |
+| 7 | Simplify multi-listener sink | **Adopted.** R1 single listener; MPMC ring dropped from default; ordered options for later. See [Sink — Detailed Design](#sink--detailed-design) §Scaling. |
+| 8 | No silent source-mode change | **Adopted.** Requires `allow_source_mode_fallback: true`. See [Source Simulation Mode Discipline](#source-simulation-mode-discipline). |
+| 9 | Extend safety to traffic targets | **Adopted.** Target/source/sink validated against inventory; per-capability acknowledgements. See [Traffic-Target Safety Validation](#traffic-target-safety-validation). |
+| 10 | Failure/validity states | **Adopted.** `PASS/FAIL/INVALID/ABORTED` with structured reasons and scope. See [Verdict Model](#verdict-model-pass--fail--invalid--aborted). |
+| 11 | Resolve percentage units | **Adopted.** Fractions with unit-bearing names. See [Units Policy](#units-policy). |
+| 12 | Revise rate-control claims | **Adopted.** Absolute deadlines; measured allocation; achieved rate reported and used for verdicts. See [Generator — Detailed Design](#generator--detailed-design) §Rate. |
+| 13 | Handle SUT counter uncertainty | **Adopted.** Explicit rules per event; ambiguous intervals invalidated. See [SUT Counter Uncertainty Handling](#sut-counter-uncertainty-handling). |
+| 14 | SNMP version behaviour | **Adopted.** Separate v1 template; v3 blocked until R5 contract. See [SNMP Version Handling](#snmp-version-handling). |
+| 15 | Malformed accounting | **Adopted.** Classes + counters; excluded from delivery obligations. See [Malformed Traffic Accounting](#malformed-traffic-accounting). |
+| 16 | Raw-network qualification | **Adopted.** Documented and validated via pcap. See [Raw-Network Qualification](#raw-network-qualification). |
+| 17 | Reproducibility evidence | **Adopted.** Expanded manifest and report. See [Reproducibility Evidence](#reproducibility-evidence). |
+| 18 | Expand test strategy | **Adopted.** Enumerated cases + property-based tests for interval math and reconciliation. See [Testing Strategy](#testing-strategy). |
+| 19 | Resolve identity design | **Adopted.** 128-bit random run token; layout redesigned. See [Wire Format](#wire-format-byte-exact-v2). |
+| 20 | Update phase gates | **Adopted.** New R0 gate; R1 narrowed. See [Build Phases & Gates](#build-phases--gates). |
+
+---
+
+## Traceability: Review Item → Section
+
+| Review item | HLD section | LLD section |
+|---|---|---|
+| 1 Loss accounting | Core Design Principle; Loss Accounting & Reconciliation Model | [Accounting Model](#accounting-model), [Reporter](#reporter--detailed-design) |
+| 2 Sequence semantics | Component 1 (updated) | [Generator](#generator--detailed-design) §Ledger, [Wire Format](#wire-format-byte-exact-v2) |
+| 3 Sink length-safe | Component 2 (updated) | [Sink](#sink--detailed-design) §Extractor |
+| 4 Clock model | Risks (updated), Component 2 | [Clock Model](#clock-model) |
+| 5 Epochs | Test Scenarios (updated) | [Measurement Epochs](#measurement-epochs--settlement-protocol) |
+| 6 Duplicates | Loss Accounting (updated) | [Duplicate Semantics](#duplicate-semantics) |
+| 7 Multi-listener | Component 2 (updated) | [Sink](#sink--detailed-design) §Scaling |
+| 8 Source-mode | Component 1 (updated) | [Source Simulation Mode Discipline](#source-simulation-mode-discipline) |
+| 9 Traffic-target safety | Deployment Model (updated) | [Traffic-Target Safety Validation](#traffic-target-safety-validation) |
+| 10 Verdict states | Failure Criteria (updated) | [Verdict Model](#verdict-model-pass--fail--invalid--aborted) |
+| 11 Units | Failure Criteria; Scenarios | [Units Policy](#units-policy) |
+| 12 Rate control | Component 1; Failure Criteria | [Generator](#generator--detailed-design) §Rate |
+| 13 SUT counters | TrapNinja-Side Requirements (updated) | [SUT Counter Uncertainty Handling](#sut-counter-uncertainty-handling) |
+| 14 SNMP versions | Scope; Test Scenarios | [SNMP Version Handling](#snmp-version-handling) |
+| 15 Malformed | Test Scenarios (updated) | [Malformed Traffic Accounting](#malformed-traffic-accounting) |
+| 16 Raw network | Technology Constraints (updated) | [Raw-Network Qualification](#raw-network-qualification) |
+| 17 Reproducibility | (new) Reproducibility Evidence | [Reproducibility Evidence](#reproducibility-evidence), [Run Manifest](#run-manifest) |
+| 18 Tests | Build Phasing (updated) | [Testing Strategy](#testing-strategy) |
+| 19 Identity | Sequence-Tagged Trap Format | [Wire Format](#wire-format-byte-exact-v2) |
+| 20 Phases | Build Phasing (updated) | [Build Phases & Gates](#build-phases--gates) |
 
 ---
 
 ## Purpose of This Document
 
-The HLD defines *what* TrapDojo does and *why*. This LLD defines *how* it is implemented, at the level a developer can begin coding against:
+The HLD defines *what* TrapDojo does and *why*. This LLD defines *how* it is implemented, at the level a developer can begin coding against, and how it is prevented from producing a misleading PASS/FAIL:
 
-- Concrete module boundaries with responsibilities, dependencies, and line-count guidance.
-- Byte-exact wire format for sequence-tagged traps.
-- Class/function signatures for the hot paths.
-- File schemas for scenarios, run manifests, and reports.
-- Concurrency model (processes, threads, sockets, shared state) and where the boundaries lie.
-- Failure semantics per component.
+- Byte-exact wire format with 128-bit run token and epoch.
+- Two-part accounting model with attribution confidence levels.
+- Length-safe hot paths for both generator and sink.
+- Explicit settlement protocol so end-of-dwell queue residue is not miscounted as loss.
+- Structured validity states so rig or environment failures never masquerade as SUT failures.
 
-TrapDojo lives in its own repository. This LLD is written to be portable there; where it references TrapNinja modules, it does so only via TrapNinja's public surface (CLI + `.prom` files + SSH-invoked actions).
+Where this LLD references TrapNinja modules, it does so only via TrapNinja's public surface (CLI + `.prom` files + SSH-invoked actions on an allowlisted host).
 
 ---
 
 ## Scope of This LLD
 
-This document is deep on **R1 (Generator + Sink)** and **R2 (Orchestrator + Reporter)** — the pieces that must exist for any credible loss-accounting result. R3–R5 (bursts, action injection, SNMPv3, comparison) are outlined at interface level only; their detailed design happens after R2 has shipped and the reconciliation model is proven against real TrapNinja runs.
+Deep on **R0 (accounting and protocol proof)** and **R1 (v2c generator + single-process sink + selfcheck)**. **R2 (orchestrator + reporter)** is specified at contract level. R3+ is deferred.
 
-**In scope for this document:**
-- Generator: template builder, rate control, send workers, per-worker accounting, IPC.
-- Sink: multi-process listener, sequence/gap tracker, own-drop monitor, per-destination reports.
-- Orchestrator: scenario runner, SUT metric collector, timeline recorder.
-- Reporter: reconciliation math, `report.json`, `report.md`.
-- File formats, CLI surface, config layout.
+**In scope:**
+- Wire identity v2, accounting model, epoch/settlement, verdict model, units policy — all normative for every phase.
+- Generator: v2c template builder, rate control with absolute deadlines, send workers, successful-sequence ledger, partial-send handling, per-worker accounting.
+- Sink: single listener, length-safe extraction with full identity validation, gap tracker against the ledger, own-drop monitor.
+- Orchestrator: scenario runner lifecycle, SUT metric collection with counter-uncertainty rules, timeline recorder, verdict classification.
+- Reporter: input accounting + delivery-obligation accounting, attribution confidence, `report.json`, `report.md`.
+- Scenario schema, run manifest, safety interlocks, reproducibility evidence.
 
-**Out of scope (deferred):**
-- SNMPv3 template generation and its rate ceiling (open question 5 in the HLD).
-- Multi-generator-host coordination protocol (additive to run manifest; specified at R3).
-- `--compare` regression report format (R5).
-- Ansible role structure beyond a stub.
+**Out of scope (deferred to R3+):**
+- SNMPv1 template implementation (design specified, implementation gated).
+- SNMPv3 template design and implementation (contract gated).
+- Multi-generator-host coordination protocol.
+- Multi-listener sink scaling.
+- Redirection/fan-out with more than one destination *implementation* (the accounting model already handles it; qualifying it with real traffic is R3).
+- HA failover and Redis outage action injection.
+- Comparison reports (`--compare`).
+
+---
+
+## Units Policy
+
+Every schema field name declares its unit; every field description restates it. This applies to scenarios, manifest, and report.
+
+**Naming conventions (normative):**
+
+| Quantity | Suffix | Example |
+|---|---|---|
+| Duration in seconds | `_s` | `dwell_s: 60` |
+| Duration in milliseconds | `_ms` | `queue_wait_p99_ms_max: 1000` |
+| Duration in nanoseconds | `_ns` | `send_ts_ns` |
+| Rate in traps per second | `_tps` | `start_rate_tps: 5000` |
+| Size in bytes | `_bytes` | `rcvbuf_bytes: 33554432` |
+| Fraction (0.0–1.0) | `_fraction` | `loss_fraction_max: 0.001` (0.1%) |
+| Percentage (0–100) — banned in schemas | — | Not used; convert to `_fraction` |
+| Slope of a fraction per minute | `_fraction_per_min` | `rss_growth_fraction_per_min_max: 0.05` |
+| Count | `_count` | `pool_ip_count: 5000` |
+| CPU count | `_cpus` | `worker_cpus: 8` |
+
+Human-facing rendered reports (`report.md`) may present percentages for readability; the machine-readable JSON never uses percentages.
 
 ---
 
@@ -80,65 +203,65 @@ trapdojo/
 │       ├── __version__.py
 │       ├── main.py                       # argparse dispatch → cli.registry
 │       ├── core/
-│       │   ├── constants.py              # OIDs, defaults, magic bytes
+│       │   ├── constants.py              # OIDs, defaults, integrity marker
 │       │   ├── exceptions.py             # TrapDojoError hierarchy
 │       │   ├── manifest.py               # RunManifest read/write
-│       │   ├── template.py               # SNMP trap byte templates
-│       │   └── wire.py                   # (run_id, stream_id, seq) codec
+│       │   ├── ledger.py                 # SuccessfulSequenceLedger + interval math
+│       │   ├── obligation.py             # ObligationSet builder (frozen fwd config)
+│       │   ├── template.py               # SNMP trap byte templates (v2c in R1)
+│       │   ├── template_v1.py            # SNMPv1 Trap-PDU (design; impl R3)
+│       │   ├── wire.py                   # v2 identity codec
+│       │   └── clocks.py                 # clock model helpers (TAI, monotonic)
 │       ├── generator/
-│       │   ├── __init__.py
-│       │   ├── coordinator.py            # Forks workers, aggregates counters
-│       │   ├── worker.py                 # Send loop (one process per worker)
-│       │   ├── rate.py                   # Token bucket, profile drivers
-│       │   ├── sendmmsg.py               # ctypes binding + fallback
-│       │   ├── sources.py                # Spoofed-source IP pool / NIC alias fallback
-│       │   ├── profiles.py               # constant/ramp/burst/replay profile classes
-│       │   └── accounting.py             # WorkerCounters, flush to manifest
+│       │   ├── coordinator.py
+│       │   ├── worker.py                 # send loop with ledger + retry
+│       │   ├── rate.py                   # deadline-based pacing
+│       │   ├── mmsg.py                   # sendmmsg + recvmmsg ctypes bindings
+│       │   ├── sources.py                # spoof / alias with strict mode
+│       │   ├── profiles.py               # constant/ramp/burst/replay
+│       │   ├── epoch.py                  # epoch transitions on wire
+│       │   └── accounting.py             # ledger flushes + achieved-rate stats
 │       ├── sink/
-│       │   ├── __init__.py
-│       │   ├── listener.py               # SO_REUSEPORT UDP listener process
-│       │   ├── extractor.py              # Fixed-offset (run,stream,seq) extraction
-│       │   ├── gap_tracker.py            # Interval-set gap tracker per (stream,dest)
-│       │   ├── drop_monitor.py           # /proc/net/udp poller
-│       │   ├── ring.py                   # Optional latency ring buffer
-│       │   └── aggregator.py             # Merges per-listener counters → report
+│       │   ├── listener.py               # single-process recvmmsg loop
+│       │   ├── extractor.py              # length-safe strict identity validator
+│       │   ├── gap_tracker.py            # interval-set tracker against ledger
+│       │   ├── drop_monitor.py           # /proc/net/udp monitor
+│       │   └── aggregator.py             # partial + final report writers
 │       ├── orchestrator/
-│       │   ├── __init__.py
-│       │   ├── scenario.py               # Scenario loader + validator
-│       │   ├── runner.py                 # Lifecycle: warmup/measure/drain/teardown
-│       │   ├── collector.py              # SUT metric polling (prom + JSON)
-│       │   ├── injector.py               # SSH action executor
-│       │   ├── failure.py                # Per-dwell-step failure evaluator
-│       │   └── timeline.py               # Event log with monotonic timestamps
+│       │   ├── scenario.py               # loader + schema + safety validators
+│       │   ├── runner.py                 # lifecycle state machine
+│       │   ├── collector.py              # SUT metric polling with uncertainty rules
+│       │   ├── injector.py               # SSH action whitelist executor
+│       │   ├── failure.py                # per-epoch verdict evaluator
+│       │   └── timeline.py               # append-only jsonl event log
 │       ├── reporting/
-│       │   ├── __init__.py
-│       │   ├── reconcile.py              # Loss-accounting equation
-│       │   ├── report_json.py            # Machine-readable output
-│       │   └── report_md.py              # Human-readable output
+│       │   ├── reconcile_input.py        # input-accounting equation
+│       │   ├── reconcile_delivery.py     # obligation-set reconciliation
+│       │   ├── confidence.py             # attribution confidence assignment
+│       │   ├── report_json.py
+│       │   └── report_md.py
 │       ├── cli/
-│       │   ├── __init__.py
-│       │   ├── registry.py               # Command registry pattern (TrapNinja-style)
-│       │   ├── generate.py               # `trapdojo generate`
-│       │   ├── sink.py                   # `trapdojo sink`
-│       │   ├── orchestrate.py            # `trapdojo orchestrate`
-│       │   ├── report.py                 # `trapdojo report`
-│       │   └── selfcheck.py              # `trapdojo selfcheck` (rig self-benchmark)
+│       │   ├── registry.py
+│       │   ├── generate.py
+│       │   ├── sink.py
+│       │   ├── orchestrate.py
+│       │   ├── report.py
+│       │   └── selfcheck.py
 │       └── util/
-│           ├── logging.py                # Structured logs, stderr-only in hot paths
-│           ├── clock.py                  # monotonic_ns wrappers
-│           └── ipc.py                    # Coordinator↔worker pipe helpers
-├── scenarios/                            # Ships example scenarios
+│           ├── logging.py
+│           ├── ipc.py
+│           └── platform_probe.py         # CPU/NIC/kernel/offload facts
+├── scenarios/
 ├── config.example/
-├── ansible/                              # Stub in R1; fleshed out at R4
+├── ansible/                              # role stubs; fleshed out at R3+
 ├── dev/tests/
 └── docs/
     ├── ARCHITECTURE.md
-    ├── SCENARIOS.md
+    ├── ACCOUNTING.md                     # the accounting-model spec (canonical)
     ├── WIRE_FORMAT.md
+    ├── SCENARIOS.md
     └── OPERATIONS.md
 ```
-
-Module size guidance mirrors TrapNinja: 300–500 lines per file, split at genuine seams.
 
 ---
 
@@ -146,178 +269,402 @@ Module size guidance mirrors TrapNinja: 300–500 lines per file, split at genui
 
 | Package | Responsibility | Depends on | Target size |
 |---|---|---|---|
-| `core` | Immutable primitives: wire codec, templates, run manifest, constants, exceptions | stdlib only | 4 modules × ~200 LOC |
-| `generator` | Turn a rate profile into UDP packets on the wire | `core`, `util`, ctypes | 7 modules × ~250 LOC |
-| `sink` | Turn arriving UDP packets into per-stream counters and gap sets | `core`, `util` | 6 modules × ~250 LOC |
-| `orchestrator` | Drive a scenario end-to-end, poll SUT, inject actions | `core`, `util`, `paramiko` (SSH) | 6 modules × ~300 LOC |
-| `reporting` | Reconcile counters into a verdict | `core` | 3 modules × ~300 LOC |
-| `cli` | Argparse subcommands → package APIs | all above | thin — < 150 LOC each |
-| `util` | Structured logging, clocks, pipe IPC | stdlib | 3 modules × ~150 LOC |
+| `core` | Wire codec, templates, ledger/interval math, obligation set, manifest, clocks, constants, exceptions | stdlib only | 9 modules × ~250 LOC |
+| `generator` | Rate profile → UDP packets on the wire with an accurate ledger | `core`, `util`, ctypes | 8 modules × ~250 LOC |
+| `sink` | UDP packets → validated identities → per-stream counters/gaps | `core`, `util` | 5 modules × ~250 LOC |
+| `orchestrator` | Drive scenario, poll SUT, inject actions, classify verdict | `core`, `util`, `paramiko` | 6 modules × ~300 LOC |
+| `reporting` | Two-part reconciliation, confidence assignment, report emission | `core` | 5 modules × ~250 LOC |
+| `cli` | Thin argparse dispatchers | all above | < 150 LOC each |
+| `util` | Structured logging, IPC, platform probe | stdlib | 3 modules × ~200 LOC |
 
-**Dependency rule:** `core` and `util` are leaves. `generator`, `sink`, `orchestrator`, `reporting` may depend on `core`/`util` and **not on each other** — the orchestrator talks to the other two over the wire (SSH/exec + files), never by import. This keeps the process boundary honest and lets the sink run on a host that has never installed the generator.
+Dependency rule: `core`/`util` are leaves. `generator`, `sink`, `orchestrator`, `reporting` do not import each other; they communicate over files and SSH.
 
 ---
 
 ## Runtime Process Model
 
-Each TrapDojo command is a distinct OS process tree.
+**`trapdojo generate`** (per generator host): coordinator + N worker processes; per-worker pipes for command (rate/epoch) and counter flushes. Fork-based; each worker owns one `stream_id` under one `generator_id`.
 
-**`trapdojo generate` (one per generator host):**
+**`trapdojo sink`** (R1): single supervisor process + one listener process + one drop_monitor thread + one aggregator thread.
 
-```
-coordinator (main proc)
- ├── worker-0 (stream_id=0)   ── raw UDP socket, sendmmsg loop
- ├── worker-1 (stream_id=1)   ── raw UDP socket, sendmmsg loop
- ├── ...
- └── worker-N-1               ── raw UDP socket, sendmmsg loop
+- Rationale: `SO_REUSEPORT` does not partition by `stream_id`, and per-stream cross-listener locking has real cost and correctness risk. R1 declares and validates a **single-listener qualified ceiling**. Scenarios whose required receive rate exceeds the ceiling are refused at scenario-load time.
 
-IPC:
- - coordinator → worker:   os.pipe() write end, one per worker; commands = start/pause/rate/stop
- - worker → coordinator:   os.pipe() read end, one per worker; counter snapshots every 1s
-```
-
-- Workers are `multiprocessing.Process` children with `start_method='fork'` (Linux only; RHEL 8/9 target).
-- Each worker owns a distinct `stream_id`; sequence spaces never overlap.
-- No worker↔worker communication.
-
-**`trapdojo sink` (one per sink host):**
-
-```
-supervisor (main proc)
- ├── listener-0 (SO_REUSEPORT on :162)   ── recvmmsg loop → shared_counters (mmap)
- ├── listener-1 (SO_REUSEPORT on :162)
- ├── ...
- ├── listener-K-1
- ├── drop_monitor (thread in supervisor) ── /proc/net/udp every 1s
- └── aggregator (thread in supervisor)   ── merges shared_counters, writes partial report every N s
-```
-
-- Listeners share a POSIX shm segment (via `multiprocessing.shared_memory`) sized for per-stream counter tables + gap-interval arenas. Locking is per-stream (fine-grained) using a small pool of `multiprocessing.Lock` — contended only during segment allocation, not on every packet.
-- The gap tracker is thread-safe within a listener; cross-listener merging happens in the aggregator, not on the packet path.
-
-**`trapdojo orchestrate` (single process):**
-
-- Single asyncio event loop.
-- Subprocess wrappers for `ssh` (no long-lived shells; each poll is a discrete SSH invocation with a connection-multiplex socket controlled by ssh's `ControlMaster`).
-- Timeline events written append-only to `timeline.jsonl` under the run directory.
+**`trapdojo orchestrate`** (single process): asyncio loop; SSH invocations reuse a single `ControlMaster` socket per SUT host for the whole run.
 
 ---
 
-## Wire Format (Byte-Exact)
+## Wire Format (Byte-Exact, v2)
 
-Every generated trap carries an **identity varbind** at a **known offset** from the start of the UDP payload. Both generator (patch) and sink (extract) reach the identity bytes without ASN.1 parsing.
+Every generated trap carries an **identity varbind** in a fixed location. Generator patches it in place; sink extracts and fully validates it.
 
 ### Identity varbind
 
-- OID: `.1.3.6.1.4.1.99999.1.1` (final enterprise arc TBD before code freeze; placeholder in HLD).
-- Type: `OCTET STRING`, fixed length 32 bytes.
+- **OID:** an enterprise arc reserved for lab use (final value TBD in R0; placeholder `.1.3.6.1.4.1.99999.1.1`).
+- **Type:** `OCTET STRING`, fixed length **48 bytes**.
 
 Payload layout (network byte order, big-endian):
 
-| Offset (in varbind value) | Size | Field | Notes |
+| Offset | Size (bytes) | Field | Notes |
 |---|---|---|---|
-| 0 | 8 | `run_id` | ASCII lowercase, right-padded with `0x00` if shorter than 8 chars. Truncated form of scenario run id (e.g. `2607rmp1`) |
-| 8 | 4 | `stream_id` | uint32, per generator worker |
-| 12 | 8 | `seq` | uint64, monotonic per stream, starts at 1 |
-| 20 | 8 | `send_ts_ns` | uint64 monotonic-ns at send (0 if disabled) |
-| 28 | 4 | `magic` | `0x54 0x44 0x4A 0x30` (`"TDJ0"`) — sink sanity check |
+| 0 | 2 | `wire_version` | uint16; `0x0002` for v2 |
+| 2 | 2 | `flags` | uint16 bitfield; bit 0 = send_ts present, bits 1–15 reserved (must be zero) |
+| 4 | 16 | `run_token` | 128-bit random, generated once per run |
+| 20 | 2 | `generator_id` | uint16; unique per generator host in the run |
+| 22 | 2 | `stream_id` | uint16; unique per worker under a `generator_id` |
+| 24 | 4 | `epoch_id` | uint32; monotonic per stream, advances at each phase boundary |
+| 28 | 8 | `seq` | uint64; monotonic per `(stream_id, epoch_id)`, starts at 1 |
+| 36 | 8 | `send_ts_tai_ns` | int64 `CLOCK_TAI` nanoseconds; `INT64_MIN` if `flags.bit0 == 0` |
+| 44 | 4 | `integrity_marker` | `0x54 0x44 0x4A 0x32` (`"TDJ2"`) |
 
-Total: 32 bytes.
+Total: 48 bytes.
 
-### Template shape
+**Design notes:**
 
-Templates are constructed once at generator startup with fully-serialized ASN.1 BER for:
+- The integrity marker is necessary but **not sufficient** for identity acceptance. A packet is accepted only when magic **and** run_token **and** known `(generator_id, stream_id)` **and** the identity OID/length are all correct. A 4-byte marker can appear coincidentally in unrelated payloads; the 128-bit run_token is what makes the sink reject other-run traffic with vanishing false-accept probability.
+- `run_token` is generated with `secrets.token_bytes(16)` at manifest build time.
+- `epoch_id = 0` is reserved for `probe`; measurement epochs start at `1`.
+- The layout is stable for the life of wire version 2. Additive changes bump `wire_version`; sinks reject unknown wire versions and count them separately.
 
-- SNMPv2c trap-PDU with:
-  - `sysUpTime.0` = static (0)
-  - `snmpTrapOID.0` = one of the OIDs from the OID pool
-  - `trapdojoIdentity` (the identity varbind above)
-  - 3–8 vendor-shaped payload varbinds (OCTET STRING, INTEGER, IpAddress, TimeTicks) with random-but-fixed values chosen at template build time to yield the target average trap size (default: ~200 bytes)
+### Template shape (SNMPv2c, R1)
 
-The identity varbind is placed **last** in the varbind list so its value bytes land at a template-specific but pre-computed offset. Each template exports its offset table:
+Templates are constructed once at generator startup with fully-serialised ASN.1 BER for a well-formed SNMPv2c `snmpV2-Trap` PDU containing:
+
+- `sysUpTime.0` = static
+- `snmpTrapOID.0` = one of the OIDs from the OID pool
+- `trapdojoIdentity` (identity varbind above) — placed at a fixed index so its 48 value bytes land at a per-template precomputed offset
+- 3–8 vendor-shaped payload varbinds so parser/filter code paths are realistic
+
+Each template exports:
 
 ```python
 @dataclass(frozen=True)
 class Template:
-    payload: bytes                  # complete SNMP message ready for sendto
-    identity_offset: int            # start of identity value bytes within payload
-    template_id: int                # index into per-worker template array
-    version: int                    # 1=v1, 2=v2c, 3=v3
-    approx_size: int                # for accounting
+    payload: bytes                  # complete SNMP message
+    identity_offset: int            # start of identity value within payload
+    identity_length: int            # 48
+    template_id: int
+    snmp_version: int               # 2 for v2c in R1
+    approx_bytes: int
 ```
 
-### Patch operation (hot path)
+### Patch operation
 
-For each send, the worker:
+For each accepted send slot the worker:
 
-1. Picks the next template (round-robin or weighted, decided at manifest build).
-2. `payload = bytearray(template.payload)` — one allocation.
-3. Writes `stream_id`, `seq`, and (optional) `send_ts_ns` into `payload[template.identity_offset + 8 : template.identity_offset + 28]` via `struct.pack_into`.
-4. Emits via `sendmmsg`.
+1. Selects the next template (round-robin or weighted per manifest).
+2. Copies the template payload into a preallocated per-slot bytearray.
+3. `struct.pack_into(">IQq", slot, off+24, epoch_id, seq, send_ts_tai_ns_or_min)` — three writes cover epoch/seq/timestamp. `wire_version`, `flags`, `run_token`, `generator_id`, `stream_id`, and `integrity_marker` are baked into the template at build time (they never change during a run).
+4. `sendmmsg` submits the batch.
 
-`run_id` and `magic` are baked into the template — never patched.
+### Extract operation
 
-### Extract operation (hot path)
+Sink extracts identity by:
 
-Sink extracts identity by scanning for the 4-byte `magic` in the last 64 bytes of the UDP payload (bounded scan, O(1) amortised — templates are stable per run), then reads the 32 bytes ending at magic. This survives small template changes without renegotiating offsets per template. Fallback: if the run manifest carries a per-template offset table (present when the sink is co-launched with the generator), the offset is exact.
+1. Reading only `memoryview(buf)[:msg_len]` returned by `recvmmsg`.
+2. Locating the identity varbind by known OID via a minimal BER walker; identity_offset varies per SNMP version and per template, so the sink walks the outermost sequence, snmpTrapOID and following varbinds until the identity OID is matched. The walker enforces length safety at every level and rejects malformed BER.
+3. Verifying the OCTET STRING length is exactly 48.
+4. Verifying `wire_version == 2`, `integrity_marker == "TDJ2"`, `run_token == manifest.run_token`, and `(generator_id, stream_id)` is in the manifest's declared set.
+5. Verifying `seq` and `epoch_id` are within declared bounds (per manifest and per stream's ledger high-water mark ± safety margin).
+
+Any check failing routes the packet to a specific counter (see [Sink — Detailed Design](#sink--detailed-design) §Rejection classes) — none of which affect delivery accounting.
+
+---
+
+## Clock Model
+
+**Rule:** monotonic clocks are host-local and are never compared across hosts.
+
+### Local uses (monotonic)
+
+- Rate-control deadlines in a generator worker.
+- Elapsed-time measurements inside a single host.
+- Log timestamps for local ordering.
+
+Uses `time.monotonic_ns()`.
+
+### Cross-host uses (TAI-preferred)
+
+For `send_ts_tai_ns` (embedded in the wire identity) and for any cross-host event correlation (orchestrator timeline of generator/sink events), TrapDojo uses:
+
+- `CLOCK_TAI` via `time.clock_gettime(time.CLOCK_TAI)` when available and disciplined.
+- Otherwise disciplined `CLOCK_REALTIME`, with an explicit degradation flag in the manifest.
+
+### Sync-health capture
+
+At run start and again after settlement, on every host (generator, sink, orchestrator, and SUT via SSH), TrapDojo captures:
+
+- `time.clock_gettime` for `CLOCK_REALTIME`, `CLOCK_TAI`, `CLOCK_MONOTONIC`.
+- `chronyc tracking` (or `ntpq -c rv 0`) output: source, stratum, offset, estimated maximum error, last update, leap status.
+- Any step events since the previous capture (via `chronyc measurements` or `journalctl -u chronyd` since last epoch).
+
+Persisted to `<run-dir>/clocks/<host>.json`.
+
+### Latency validity threshold
+
+Scenario declares:
+
+```jsonc
+"clock": {
+  "latency_max_offset_ns": 500000,     // 0.5 ms
+  "require_tai": true
+}
+```
+
+- If any host's estimated maximum error exceeds `latency_max_offset_ns` **at run start or after settlement**, one-way latency for that run is marked `INVALID` and the `report.md` shows `latency: INVALID` with the reason (which host, what offset).
+- Same-clock pipeline latency from TrapNinja's own metrics (queue_wait, processing p99) is always reported and is unaffected by clock validity — it never leaves a single host.
+- If TrapDojo cannot obtain sync health from any host (e.g. `chrony` not installed), `require_tai: true` refuses to start; `require_tai: false` marks latency `INVALID` and continues with delivery accounting only.
+
+---
+
+## Measurement Epochs & Settlement Protocol
+
+Every phase of a run is an epoch with a distinct `epoch_id` on the wire. This eliminates the ambiguity of "warm-up traffic counted alongside measurement traffic in one sequence space", and makes end-of-dwell settlement well-defined.
+
+### Phases
+
+| Phase | `epoch_id` policy | Purpose |
+|---|---|---|
+| `probe` | 0 | Rig-vs-sink handshake; source-mode probe |
+| `warmup` | 1 | Reach steady-state generator behaviour; discarded from measurement |
+| `dwell_k` | 2, 3, 4, … | Sustained measurement step (constant or ramp step) |
+| `burst_k` | separate range | Burst spike epoch |
+| `recovery_k` | separate range | Drain and stabilisation after burst |
+| `cooldown` | last | Final drain to allow all offered traps to settle |
+
+Each phase carries its `epoch_id` in the wire identity of every packet it emits, so the sink accounts for each epoch independently and warm-up cannot pollute measurement.
+
+### Settlement barrier
+
+At the end of every measurement epoch:
+
+1. Generator records the **last successfully offered sequence per stream** for that epoch (its ledger high-water mark).
+2. Generator transitions to the next epoch (either the next dwell step or `recovery`/`cooldown`).
+3. Orchestrator waits for either:
+   - The sink to report received `seq == high_water` (or higher) for every stream, for that epoch — **watermark met**.
+   - `settlement_timeout_s` to elapse — **settlement expired**.
+4. Orchestrator collects final SUT counter snapshots for the epoch window.
+5. `reporter` evaluates delivery-obligation loss for that epoch.
+
+Queue-depth saturation and RSS runaway may **stop the ramp immediately**, but final delivery loss for the epoch is only decided after settlement. A dwell is never declared lossy merely because packets remain in-flight at wall-clock end of dwell.
+
+---
+
+## Accounting Model
+
+Two related but distinct models. Both are computed by the reporter after settlement of every epoch.
+
+### Model A: Input Accounting
+
+Per stream, per epoch, accounts for what happened to every offered input:
+
+```
+G_offered            = ledger.successfully_offered_seq_count
+G_send_defer         = ledger.abandoned_seq_count + ledger.send_failed_seq_count
+                      (rig-side; excluded from any TrapNinja judgment)
+
+I_kernel_lost        = Δ trapninja_socket_drops_total (or eBPF lost samples)
+I_queue_lost         = Δ trapninja_queue_drops_total
+I_parse_rejected     = Δ trapninja_parse_rejected_total
+I_blocked            = Δ trapninja_blocked_total       (deliberate filtering)
+I_accepted_for_fwd   = Δ trapninja_accepted_forward_total
+
+I_accounted          = I_kernel_lost + I_queue_lost + I_parse_rejected
+                     + I_blocked + I_accepted_for_fwd
+
+I_unexplained        = G_offered - I_accounted
+```
+
+**Interpretation:** `I_unexplained ≠ 0` indicates an invisible drop path inside TrapNinja's input stages, or a counter uncertainty (see [SUT Counter Uncertainty Handling](#sut-counter-uncertainty-handling)). It is reported prominently and blocks PASS unless the scenario explicitly permits `input_unexplained_max_count > 0`.
+
+**Confidence:** all input-accounting terms except `G_offered` are `aggregate_accounted` at best — SUT counters cannot bind a specific `seq` to a specific stage. The `report.json` records this explicitly.
+
+### Model B: Delivery-Obligation Accounting
+
+For every unique **delivery obligation** — the tuple
+
+```
+(run_token, generator_id, stream_id, epoch_id, seq, destination)
+```
+
+— the reporter classifies:
+
+| Classification | Meaning |
+|---|---|
+| `delivery_expected` | Obligation exists per the frozen forwarding config |
+| `not_expected_filtered` | Filter suppresses this `(src_ip, oid)` pair for this destination |
+| `not_expected_redirected_away` | Redirection sends this obligation to a different destination |
+| `delivered_exactly_once` | Sink observed exactly one arrival at this destination |
+| `delivered_multiple_times` | Sink observed ≥ 2 arrivals at this destination |
+| `destination_forward_failure` | TrapNinja recorded a per-destination forward failure covering this window (aggregate — assigned by temporal correlation only) |
+| `missing` | Expected but no arrival and no attributable failure |
+
+**Deriving the expected obligation set.** At scenario freeze time (before `warmup`), the orchestrator captures TrapNinja's forwarding, filter, redirection, and destinations configuration via `trapninja config show --json --canonical` and hashes it (`fwd_config_sha256` in the manifest). The obligation set is computed from:
+
+- The generator's OID pool and source-IP pool (declared in the manifest).
+- The captured TrapNinja config (frozen — the orchestrator refuses to run if any config-changing action is scheduled inside a measurement epoch).
+
+For each `(src_ip, oid)` combination that will actually be emitted, and each destination in `destinations.json`, the model evaluates filters/redirections deterministically to yield `delivery_expected` or a `not_expected_*` classification.
+
+### Verdict inputs
+
+The scenario declares its acceptance criteria for both models independently:
+
+```jsonc
+"acceptance": {
+  "input": {
+    "unexplained_max_count": 0,
+    "kernel_lost_max_fraction": 0.0,
+    "queue_lost_max_fraction": 0.0,
+    "parse_rejected_max_fraction": 0.0
+  },
+  "delivery": {
+    "missing_max_fraction": 0.0,
+    "multi_delivery_max_fraction": 0.0,
+    "unexplained_max_fraction": 0.0
+  },
+  "ha_replay": {
+    "expected_duplicate_max_fraction": 0.02
+  }
+}
+```
+
+Loss values that would cross either input or delivery threshold produce `FAIL`.
+
+---
+
+## Attribution Confidence Levels
+
+Every counted loss (or duplicate) row in `report.json` carries a `confidence` field:
+
+| Level | Meaning | Typical source |
+|---|---|---|
+| `proven` | Bound to a specific `(stream_id, epoch_id, seq)` by direct evidence | Sink observed it (`delivered_multiple_times`, `delivered_exactly_once`); ledger recorded an abandoned range |
+| `aggregate_accounted` | The stage is known to have lost N inputs in the epoch, but individual sequences cannot be identified | SUT counter deltas within one epoch |
+| `temporally_correlated` | The stage's counter increment occurred inside the epoch, but neither per-sequence identity nor exclusivity to this stream is established | `trapninja_dest_failures_total` label match by destination when multiple streams share the destination |
+| `unexplained` | Difference remains after all attribution rules have been applied | Reported directly; never hidden |
+
+The reporter must **never** render aggregate SUT counter values as if they were per-sequence attribution. `report.md` presents attribution tables with the `confidence` column always visible.
+
+---
+
+## Duplicate Semantics
+
+Six counters replace the ambiguous v0.1 `duplicates` field. All are computed per `(stream_id, epoch_id, destination)` and then aggregated:
+
+| Counter | Definition |
+|---|---|
+| `datagrams_received` | Every UDP datagram that passed identity validation |
+| `unique_delivery_obligations_satisfied` | Distinct `(seq, destination)` pairs for which at least one arrival was observed |
+| `duplicate_datagrams` | `datagrams_received - unique_delivery_obligations_satisfied` |
+| `sequences_delivered_exactly_once` | `seq` values with an arrival count of exactly 1 at the destination |
+| `sequences_delivered_multiple_times` | `seq` values with an arrival count of ≥ 2 |
+| `missing_sequences` | Expected obligations for which no arrival was observed |
+
+**Invariant:** a duplicate never compensates for a missing sequence. The reconciliation code MUST NOT compute anything like `net_loss = missing - duplicates`. Tests enforce this (see [Testing Strategy](#testing-strategy)).
+
+**HA replay:** when TrapNinja's failover replay is expected to re-send a subset of traps, the scenario declares `acceptance.ha_replay.expected_duplicate_max_fraction`. This threshold is checked **only against `delivered_multiple_times`** and is independent of the delivery-obligation `missing_max_fraction`.
 
 ---
 
 ## Run Manifest
 
-Written by the orchestrator (or by `trapdojo generate` when run standalone) at run start. Read by generator (to build templates), by sink (to know what stream_ids/dests to expect), and by the reporter (as the source of truth about what the run *intended*).
+Written by the orchestrator (or by `trapdojo generate` when standalone) at run start. Read by generator (templates + epochs), sink (identity validation + declared streams), and reporter (source of truth).
 
 **File:** `<report-dir>/<run-id>/manifest.json`
 
 ```jsonc
 {
+  "manifest_schema_version": 1,
   "run_id": "2026-08-10-ramp-01",
-  "run_id_wire": "260810r1",              // 8-byte truncation used on the wire
+  "run_token_hex": "9c8a...ffee",          // 128-bit, hex-encoded
   "created_utc": "2026-08-10T12:00:00Z",
-  "trapdojo_version": "0.1.0",
+  "trapdojo": { "version": "0.2.0", "git_commit": "…" },
   "scenario_ref": "scenarios/ramp-to-failure-ebpf.json",
   "scenario_sha256": "…",
 
   "wire": {
+    "wire_version": 2,
     "identity_oid": "1.3.6.1.4.1.99999.1.1",
-    "identity_len": 32,
-    "magic": "TDJ0"
+    "identity_length_bytes": 48,
+    "integrity_marker_hex": "54444a32"     // "TDJ2"
   },
+
+  "epochs": [
+    { "epoch_id": 0, "name": "probe",   "target_rate_tps": 100,   "duration_s": 5 },
+    { "epoch_id": 1, "name": "warmup",  "target_rate_tps": 5000,  "duration_s": 30 },
+    { "epoch_id": 2, "name": "dwell_1", "target_rate_tps": 5000,  "duration_s": 60 },
+    { "epoch_id": 3, "name": "dwell_2", "target_rate_tps": 10000, "duration_s": 60 }
+    // ...
+  ],
 
   "generator": {
     "host": "gen-01",
-    "workers": 8,
-    "streams": [0,1,2,3,4,5,6,7],
+    "generator_id": 1,
+    "worker_count": 8,
+    "streams": [
+      { "stream_id": 0, "worker_pid_hint": null, "template_ids": [0,1,2] }
+    ],
     "templates": [
-      { "template_id": 0, "version": 2, "approx_size": 210, "identity_offset": 162 },
-      // ...
+      { "template_id": 0, "snmp_version": 2, "approx_bytes": 210, "identity_offset": 162 }
     ],
     "sources": {
-      "mode": "spoof",                    // or "alias"
-      "pool_size": 5000,
-      "pool_cidr": "10.234.100.0/20"
-    },
-    "profile": { /* copied from scenario */ }
+      "requested_mode": "spoof",
+      "effective_mode": "spoof",           // filled at probe end
+      "pool_ip_count_requested": 5000,
+      "pool_ip_count_effective": 5000,
+      "pool_cidr": "10.234.100.0/20",
+      "allow_source_mode_fallback": false,
+      "probe": { "packets_sent": 100, "packets_observed_at_sink": 100 }
+    }
   },
 
   "sink": {
     "host": "sink-01",
+    "listener_count": 1,
+    "qualified_ceiling_tps": 120000,
     "listeners": [
-      { "bind": "10.234.83.140:162",  "reuseport_workers": 4, "destination_label": "primary-noc" },
-      { "bind": "10.234.83.140:1162", "reuseport_workers": 2, "destination_label": "voice-noc" }
+      { "bind": "10.234.83.140:162", "destination_label": "primary-noc", "rcvbuf_bytes": 33554432 }
     ]
   },
 
   "sut": {
     "primary_host": "trapninja-p",
     "secondary_host": "trapninja-s",
+    "trapninja_version": "0.8.1",
+    "trapninja_git_commit": "…",
     "capture_mode_expected": "ebpf",
-    "trapninja_version": "0.8.1"
+    "capture_mode_observed": "ebpf",
+    "fwd_config_sha256": "…",
+    "filter_config_sha256": "…",
+    "destinations_config_sha256": "…"
+  },
+
+  "environment": {
+    "generator": { /* see Reproducibility Evidence */ },
+    "sink":      { /* … */ },
+    "sut_primary":   { /* … */ },
+    "sut_secondary": { /* … */ }
+  },
+
+  "clock": {
+    "policy": { "require_tai": true, "latency_max_offset_ns": 500000 },
+    "samples": [
+      { "host": "gen-01",  "phase": "run_start", "source": "chrony", "offset_ns_est_max": 120000, "tai_available": true },
+      { "host": "sink-01", "phase": "run_start", "source": "chrony", "offset_ns_est_max": 110000, "tai_available": true }
+    ]
+  },
+
+  "acknowledgements": {
+    "ramp_to_failure": true,
+    "malformed_traffic": false,
+    "spoofing_enabled": true,
+    "rate_above_safe_ceiling_tps": null,
+    "disruptive_actions": false
   }
 }
 ```
 
-`scenario_sha256` binds every counter file, timeline, and report to the exact scenario that produced them — the reporter refuses to reconcile mismatched files.
+`manifest_schema_version` gates report comparison. `run_token_hex`, `wire_version`, and `epoch_id` bind every downstream file to this manifest.
 
 ---
 
@@ -325,125 +672,178 @@ Written by the orchestrator (or by `trapdojo generate` when run standalone) at r
 
 ### 1. Template builder (`core/template.py`)
 
-- Runs **once** at coordinator startup, before workers fork.
-- Uses `pysnmp.hlapi` **or** a hand-rolled BER encoder (decision at implementation start; hand-rolled avoids the pysnmp import cost and gives precise byte control — likely choice).
-- Produces `List[Template]` for the version mix and OID pool declared in the manifest.
-- The list is passed to workers via inherited memory (fork COW) — no serialisation needed.
+- Runs once at coordinator startup, before workers fork.
+- Hand-rolled BER encoder for v2c (avoids pysnmp import cost and gives precise byte control). The encoder is small (~200 LOC) and covers exactly the subset needed for SNMPv2c notifications.
+- Emits `List[Template]` whose payloads bake in `wire_version`, `flags`, `run_token`, `generator_id`, `stream_id` (per worker), and `integrity_marker`. Only `epoch_id`, `seq`, and `send_ts_tai_ns` are patched per packet.
+- SNMPv1 template code lives in `template_v1.py` and is a separate class hierarchy — the v1 Trap-PDU has a different top-level shape from v2c and shares no encoder state. R1 does not build v1 templates.
+- Passed to workers via inherited memory (fork COW).
 
 ### 2. Rate profiles (`generator/profiles.py`)
 
-Abstract interface:
+Interface (unchanged from v0.1):
 
 ```python
 class RateProfile(Protocol):
-    def target_rate(self, t_elapsed_s: float) -> float: ...
+    def target_rate_tps(self, t_elapsed_s: float) -> float: ...
     def is_finished(self, t_elapsed_s: float) -> bool: ...
+    def current_epoch_id(self, t_elapsed_s: float) -> int: ...
 ```
 
-Implementations:
+Implementations: `ConstantProfile`, `RampProfile`, `BurstProfile`, `ReplayProfile`. Every profile is responsible for advancing `epoch_id` at phase boundaries; the coordinator broadcasts the new `(target_rate_tps, epoch_id)` tuple to workers.
 
-- `ConstantProfile(rate, duration_s)`
-- `RampProfile(start_rate, end_rate, step, dwell_s)` — step-wise, holds each step for `dwell_s`.
-- `BurstProfile(baseline_rate, spike_rate, spike_duration_s, spike_period_s, count)`
-- `ReplayProfile(csv_path)` — `(t_s, rate_tps)` rows, linearly interpolated.
+### 3. Deadline-based pacing (`generator/rate.py`)
 
-The coordinator polls `target_rate()` every 100 ms and broadcasts the new per-worker rate over the command pipe as a single 8-byte double.
-
-### 3. Token bucket (`generator/rate.py`)
-
-Per-worker, in-process, single-threaded.
+Absolute monotonic deadlines instead of additive sleeps to avoid cumulative drift:
 
 ```python
-class TokenBucket:
-    def __init__(self, rate: float, burst: int) -> None: ...
-    def set_rate(self, rate: float) -> None: ...     # called on pipe message
-    def acquire(self, n: int) -> int:                # returns count granted (≤ n)
-        """Non-blocking. Returns 0 if empty; caller sleeps for the deficit."""
+class DeadlinePacer:
+    def __init__(self, rate_tps: float) -> None:
+        self._interval_ns = int(1e9 / rate_tps)
+        self._next_deadline_ns = time.monotonic_ns()
+
+    def set_rate_tps(self, rate_tps: float) -> None:
+        self._interval_ns = int(1e9 / rate_tps)
+
+    def budget_now(self, batch_size: int) -> int:
+        now_ns = time.monotonic_ns()
+        if now_ns < self._next_deadline_ns:
+            return 0
+        elapsed = now_ns - self._next_deadline_ns
+        # returns integer count granted; deadline advances by exactly the granted amount
+        granted = 1 + min(batch_size - 1, elapsed // self._interval_ns)
+        self._next_deadline_ns += granted * self._interval_ns
+        return granted
 ```
 
-The worker send loop asks for a batch (`SENDMMSG_BATCH`, default 128), sends what was granted, and sleeps the remainder using `time.sleep(max(0, 1/rate * deficit))`. Sleep is only allowed *between* batches — never inside a batch send.
+- No cumulative drift: deadline is advanced by *exactly* what was granted, regardless of scheduling lateness.
+- The worker records `pacing_lateness_ns = now_ns - self._next_deadline_ns` per second so late scheduling is visible in reports (not a silent inaccuracy).
 
-### 4. sendmmsg binding (`generator/sendmmsg.py`)
+**Claim discipline.** "Zero heap allocation on the hot path" is a **measured target**, not a guarantee. R0 selfcheck includes a `tracemalloc`-based allocation-rate measurement over 30 seconds of steady-state generation; the report includes the value. Batch slicing (`batch_buf[:granted]`) and other apparent allocations must be verified as no-op views or eliminated.
+
+### 4. sendmmsg binding (`generator/mmsg.py`)
 
 - `ctypes.CDLL("libc.so.6", use_errno=True)`.
-- Declares `struct iovec`, `struct msghdr`, `struct mmsghdr`.
-- Exposes `send_batch(fd: int, payloads: Sequence[bytes], dest: Tuple[str,int]) -> int` returning number of messages the kernel accepted.
-- On `EINTR` retries; on `ENOBUFS`/`EAGAIN` returns partial count without raising — the caller increments `send_defer` counters and re-queues the remainder.
-- Detected once at import: if the symbol resolves and a smoke test on a `SOCK_DGRAM` succeeds, `USE_SENDMMSG=True`; otherwise the fallback `sendto` loop is used and a warning is logged **once**.
+- Reused for `recvmmsg` in the sink.
+- `send_batch(fd: int, iov_array, msghdr_array, count: int) -> int` returns the number of messages the kernel accepted.
+- On `EINTR`: retry. On `ENOBUFS`/`EAGAIN`: return partial accepted count without raising. On any other errno: raise a specific `SendmmsgError` that carries the errno.
+- Import-time smoke test: `sendmmsg` symbol resolves and a smoke send on a `SOCK_DGRAM` succeeds. Failure → the coordinator uses a `sendto` loop and records this in the manifest (`generator.sendmmsg_available: false`), not silently.
 
-Never allocates in the hot loop: iovec/mmsghdr arrays are sized to `SENDMMSG_BATCH` and reused (memoryview into a preallocated `ctypes` array).
+### 5. Successful-sequence ledger (`core/ledger.py`)
 
-### 5. Spoofed sources (`generator/sources.py`)
+**Every worker maintains a per-stream, per-epoch ledger of exactly which sequences the kernel accepted.**
 
-Two modes, selected at manifest build:
+```python
+class SuccessfulSequenceLedger:
+    def __init__(self, stream_id: int, epoch_id: int) -> None: ...
+    def record_accepted(self, seq_low: int, seq_high: int) -> None: ...   # inclusive
+    def record_abandoned(self, seq_low: int, seq_high: int, reason: str) -> None: ...
+    def high_water(self) -> int: ...                                       # last accepted seq
+    def flush(self, out: TextIO) -> None: ...                              # append to jsonl
+```
 
-**`spoof`** (preferred): raw socket with `IP_HDRINCL`, generator builds the IP header itself.
-
-- Worker owns `AF_INET` `SOCK_RAW` with `IPPROTO_UDP`.
-- Source IP is chosen per packet from the pool via a fast linear index (not RNG — deterministic per stream_id makes replay easier).
-- IP header checksum computed once per source IP and cached in the source-pool table.
-- UDP checksum computed per packet (pseudo-header depends on source IP).
-
-**`alias`** (fallback when uRPF blocks spoof):
-
-- The rig-installer configures N `ip addr add … dev …` aliases at deploy time.
-- Worker binds N sockets, one per alias, and round-robins.
-- Capped pool size, documented in the scenario report.
-
-Selection: coordinator probes at startup by sending one spoofed packet to the sink and checking the sink's per-stream counters within 2 s. If not observed, degrades to `alias` and logs a manifest annotation.
+Backed by two sorted interval-of-integers lists (`accepted`, `abandoned`) with amortised O(log n) inserts. Adjacent ranges are merged. Memory is bounded by the number of gap events, not the trap volume.
 
 ### 6. Worker send loop (`generator/worker.py`)
 
+Corrected to handle partial `sendmmsg` completion without falsifying the ledger:
+
 ```python
 def run(cfg: WorkerCfg, cmd_pipe, ctr_pipe) -> None:
-    templates = cfg.templates                        # inherited via fork
-    bucket    = TokenBucket(cfg.initial_rate, burst=cfg.batch_size * 4)
-    seq       = 1
-    batch_buf = [bytearray(t.payload) for t in _prepare_batch_slots(cfg.batch_size)]
+    templates = cfg.templates
+    pacer     = DeadlinePacer(cfg.initial_rate_tps)
+    seq_next  = 1
+    epoch_id  = 0
+    ledger    = SuccessfulSequenceLedger(cfg.stream_id, epoch_id)
+    slots     = _preallocate_slots(cfg.batch_size)             # bytearrays + iov/mmsghdr
+    pending: Optional[PendingBatch] = None                     # unsent tail from prior call
     counters  = WorkerCounters()
-    next_tick = monotonic_ns() + 1_000_000_000       # 1s counter flush
 
     while True:
-        _drain_cmd_pipe(cmd_pipe, bucket)            # non-blocking rate updates
-        grant = bucket.acquire(cfg.batch_size)
-        if grant == 0:
-            _sleep_until_bucket_refill(bucket)
+        rate_tps, new_epoch = _drain_cmd_pipe(cmd_pipe)
+        if rate_tps is not None:
+            pacer.set_rate_tps(rate_tps)
+        if new_epoch is not None and new_epoch != epoch_id:
+            ledger.flush(cfg.ledger_path)
+            epoch_id = new_epoch
+            seq_next = 1
+            ledger = SuccessfulSequenceLedger(cfg.stream_id, epoch_id)
+
+        if pending is not None:
+            sent = _send_pending(pending, cfg.raw_fd)
+            _account_partial(pending, sent, ledger, counters)
+            pending = _remainder_or_none(pending, sent, cfg.abandon_after_retries)
+            continue                                            # do not allocate new seqs while tail remains
+
+        granted = pacer.budget_now(cfg.batch_size)
+        if granted == 0:
+            _sleep_until_deadline(pacer)                        # bounded, absolute
             continue
 
-        for i in range(grant):
+        first_seq = seq_next
+        for i in range(granted):
             tmpl = _next_template(templates, i)
-            _patch_identity(batch_buf[i], tmpl, cfg.stream_id, seq)
-            seq += 1
+            _patch_identity(slots[i], tmpl, epoch_id, seq_next, _send_ts_or_min(cfg))
+            seq_next += 1
 
-        sent = send_batch(cfg.raw_fd, batch_buf[:grant], cfg.dest)
-        counters.sent   += sent
-        counters.defer  += grant - sent
+        sent = send_batch(cfg.raw_fd, slots, granted)
+        if sent == granted:
+            ledger.record_accepted(first_seq, first_seq + granted - 1)
+            counters.sent_count += sent
+        else:
+            # Preferred approach: retain tail with same sequence numbers
+            if sent > 0:
+                ledger.record_accepted(first_seq, first_seq + sent - 1)
+                counters.sent_count += sent
+            pending = PendingBatch(
+                slots       = slots,
+                first_seq   = first_seq + sent,
+                remaining   = granted - sent,
+                retry_count = 0,
+                errno       = _last_errno(),
+            )
+            counters.send_defer_count += pending.remaining
 
-        if monotonic_ns() >= next_tick:
-            _flush(counters, ctr_pipe)
-            counters.reset_delta()
-            next_tick += 1_000_000_000
+        _maybe_flush(counters, ledger, ctr_pipe)
 
         if cfg.profile_finished():
             break
+
+    ledger.flush(cfg.ledger_path)
+    _final_flush(counters, ctr_pipe)
 ```
 
-Guarantees:
-- Zero heap allocation inside the loop after warm-up (buffers, iovecs, counters all preallocated).
-- No `logger.debug()` calls on the hot path — logs are counter names + values, batched to stderr from the coordinator.
-- `seq` is worker-local — no cross-worker synchronisation.
+**Guarantees:**
 
-### 7. Accounting (`generator/accounting.py`)
+- Sequence numbers `first_seq + sent` … `first_seq + granted - 1` are held on the retry tail and are only accepted (recorded in the ledger) when the kernel actually accepts them. They are never marked "sent" prematurely, so the sink cannot see a false gap.
+- Abandonment after `cfg.abandon_after_retries` records the exact `(low, high, reason=ENOBUFS)` range in the ledger's abandoned interval set. These are counted as **rig-side send failures**, isolated from any TrapNinja judgment.
+- Epoch changes flush the ledger and restart `seq_next = 1`. Sequences within one `(stream_id, epoch_id)` are always monotonic and start at 1.
 
-Per-worker counters flushed once per second to the coordinator, coordinator writes `sent_by_second.jsonl` under the run dir. Fields per row:
+### 7. Accounting outputs (`generator/accounting.py`)
 
+Per worker, per epoch, flushed at 1 Hz and at epoch boundary:
+
+`<run-dir>/generator/<generator_id>/<stream_id>_ledger.jsonl`:
+
+```jsonc
+{
+  "epoch_id": 2, "t_epoch_s": 15,
+  "accepted_ranges": [[1, 30000], [30015, 45000]],
+  "abandoned_ranges": [[30001, 30014, "ENOBUFS"]],
+  "first_accepted_seq": 1, "last_accepted_seq": 45000,
+  "attempted_seq_count": 45014,
+  "accepted_seq_count": 44986,
+  "abandoned_seq_count": 14,
+  "bytes_accepted": 9447060,
+  "requested_rate_tps": 45000,
+  "achieved_offered_rate_tps": 44986,
+  "pacing_lateness_ns_p99": 220000,
+  "batch_size_hist": { "1": 12, "128": 340, "…": "…" },
+  "sendmmsg_partials_count": 3,
+  "worker_cpu_pct": 62.4
+}
 ```
-{ "t_s": 42, "worker": 3, "stream_id": 3,
-  "sent": 30125, "defer_enobufs": 12, "defer_eagain": 0,
-  "target_rate": 30000 }
-```
 
-`sent` here is **post-syscall success** (kernel accepted the packet). Anything the kernel refused is `defer_*` and is excluded from offered load in the reconciliation equation.
+The reporter uses `achieved_offered_rate_tps` (not `requested_rate_tps`) for breaking-point determination.
 
 ---
 
@@ -451,222 +851,265 @@ Per-worker counters flushed once per second to the coordinator, coordinator writ
 
 ### 1. Listener process (`sink/listener.py`)
 
-- Bound with `SO_REUSEPORT` so the kernel distributes incoming packets across K listener processes.
-- `SO_RCVBUF` set to `RCVBUF_TARGET` (default 32 MiB); if kernel refuses (system max), retries in halving steps and logs the final value in the manifest.
-- Uses `recvmmsg` via the same ctypes binding shape as generator's sendmmsg (shared `util/mmsg.py`).
-- Hot loop:
+R1: **single listener process** per bind. Multi-listener scaling is deferred (see [§Scaling](#5-scaling-r2)).
+
+- `SO_RCVBUF` set to `scenario.sink.listeners[i].rcvbuf_bytes`; kernel-clamped value recorded in the manifest.
+- `recvmmsg` batch size = `RECVMMSG_BATCH` (default 128).
+
+Hot loop, length-safe:
 
 ```python
-def run(cfg: ListenerCfg, shm_view) -> None:
+def run(cfg: ListenerCfg, shm) -> None:
     bufs = [bytearray(2048) for _ in range(RECVMMSG_BATCH)]
     while not _stop.is_set():
-        got, srcs = recv_batch(cfg.fd, bufs)
+        got, msg_lens, srcs, flags = recv_batch(cfg.fd, bufs)
         for i in range(got):
-            ident = extract_identity(bufs[i])       # bounded scan for magic
-            if ident is None:
-                shm_view.foreign += 1                # not from this run — counted, dropped
+            if flags[i] & MSG_TRUNC:
+                shm.rej_truncated_count += 1
                 continue
-            _record(shm_view, ident.stream_id, ident.seq,
-                    dest=cfg.destination_label,
-                    src_ip=srcs[i], size=len(bufs[i]))
+            if msg_lens[i] < MIN_IDENTITY_ENCLOSING_BYTES:
+                shm.rej_short_count += 1
+                continue
+            view = memoryview(bufs[i])[:msg_lens[i]]
+            ident = extract_and_validate_identity(view, cfg.expected)
+            if ident is None:
+                # rejection already counted by extractor into shm
+                continue
+            _record(shm, ident, dest=cfg.destination_label,
+                    datagram_bytes=msg_lens[i], src_ip=srcs[i])
 ```
 
-- `extract_identity` returns `None` when the magic isn't in the last 64 bytes; those packets are counted as `foreign` (traps from other sources, useful for lab hygiene).
+The receive buffer is never scanned past `msg_lens[i]`. Stale buffer contents cannot influence identity extraction.
 
-### 2. Gap tracker (`sink/gap_tracker.py`)
+### 2. Extractor (`sink/extractor.py`)
 
-Data structure: **sorted list of `(lo, hi)` inclusive integer intervals of *received* sequences per stream** (not per gap). Chosen so a 100M-trap soak stays bounded at O(number of gaps), not O(number of traps).
+`extract_and_validate_identity(view, expected)` performs, in order:
 
-Operations:
+1. Minimal BER walk to locate the OCTET STRING varbind with the identity OID. Each length is bounded by the enclosing length; malformed BER → `rej_ber_malformed_count`.
+2. Verify OCTET STRING length == 48. Else → `rej_identity_length_count`.
+3. Read `wire_version`. If ≠ 2 → `rej_wire_version_count` (labelled with the version).
+4. Read `integrity_marker`. If ≠ `"TDJ2"` → `rej_integrity_marker_count`.
+5. Read `run_token`. If ≠ `expected.run_token` → `rej_wrong_run_count`.
+6. Read `generator_id`, `stream_id`. If not in `expected.declared_streams` → `rej_unknown_stream_count`.
+7. Read `epoch_id`. If not in `expected.declared_epochs` → `rej_unknown_epoch_count`.
+8. Read `seq`. If `seq == 0` or `seq > expected.max_seq_hint(stream_id, epoch_id) + SAFETY_MARGIN` → `rej_seq_out_of_range_count`.
+9. Read `send_ts_tai_ns` when `flags.bit0 == 1`.
 
-- `record(seq)`:
-  - Binary-search insertion point.
-  - If `seq` extends an existing interval (`seq == hi + 1` or `seq == lo - 1`), extend and merge with the neighbour if adjacent.
-  - Else insert `(seq, seq)`.
-  - Duplicate (`seq` within an existing interval): increment `duplicate_count`, do not modify.
-- `finalize(expected_max_seq) -> GapReport`:
-  - Computes the complement of the received-intervals set within `[1, expected_max_seq]`.
-  - Returns `(received_count, duplicate_count, gap_ranges: List[Tuple[int,int]])`.
+Any check failure returns `None` and counts into a dedicated bucket (visible in the report as a separate table so they are not confused with delivery loss).
 
-Memory bound: the gap list length is bounded by the number of loss events, not the trap volume. A run with 50 gaps holds 50 tuples per stream.
+### 3. Gap tracker against the ledger (`sink/gap_tracker.py`)
 
-Concurrency: **not** thread-safe; each stream is owned by exactly one listener process (partitioning of `stream_id % K`). Cross-listener merge happens once at end-of-run in `aggregator.py`.
+Data structure per `(stream_id, epoch_id, destination)`: sorted list of `(lo, hi)` inclusive intervals of **received** sequences.
 
-Wait — `SO_REUSEPORT` distributes by kernel hash, not by `stream_id`. To keep gap tracking per-listener without cross-process locking, the sink pins each `stream_id` to a listener by having listeners publish a "not mine" fast-path skip; the packet is re-queued to the correct listener via a lock-free MPMC ring in shared memory. **Deferred to R2 implementation** — R1 uses a single listener process (simpler, adequate for < 100k tps in initial validation), and multi-listener is enabled once we have baseline numbers.
+- `record(seq)`: binary-search insert; extend + merge on adjacency; increment `duplicate_datagrams` on already-covered `seq`; increment `sequences_delivered_multiple_times` only on transition from 1 to ≥ 2 arrivals for that `seq` (tracked in a compact set of "seen ≥ 2" seqs, or a bloom filter with exact fallback).
+- `finalize(ledger)`: computes:
+  - `unique_delivery_obligations_satisfied` = size of received-interval union intersected with the ledger's `accepted_ranges`.
+  - `missing_sequences` = `accepted_ranges` minus received-interval union, subject to obligation-expectation classification by the reporter.
+  - Duplicates and multi-delivery counters as above.
 
-### 3. Own-drop monitor (`sink/drop_monitor.py`)
+**The ledger, not `[1, max_seq]`, defines what "should have arrived".** Sequences the ledger records as `abandoned` are never "missing" — they were never sent.
 
-- Thread in the supervisor process.
-- Every 1 s reads `/proc/net/udp` and `/proc/net/udp6`, parses the `drops` column for the sink's bound sockets (matched by local port hex + inode).
-- Delta-based: first read is baseline; every subsequent read adds the delta to `sink_kernel_drops` in shared memory.
-- **Any non-zero delta invalidates the run for the affected destination.** The reconciliation report flags `sink_bottleneck=true` and refuses PASS.
+### 4. Own-drop monitor (`sink/drop_monitor.py`)
 
-### 4. Aggregator (`sink/aggregator.py`)
+- Thread in the supervisor.
+- 1 Hz `/proc/net/udp` + `/proc/net/udp6` read; per-bound-socket drop delta recorded to `<run-dir>/sink/drops.jsonl`.
+- **Any non-zero delta invalidates the run** for that destination — verdict becomes `INVALID`, not `FAIL`, because the sink cannot claim what did or did not arrive when its own buffer overflowed.
 
-- Runs in the supervisor process.
-- Every `AGGREGATOR_INTERVAL_S` (default 10 s) reads shared counters, writes a partial JSON snapshot to `<report-dir>/<run-id>/sink_partial.jsonl` (one line per snapshot).
-- At end-of-run, invokes `gap_tracker.finalize(expected_max_seq_per_stream)` using per-stream max sequences read from the generator's `sent_by_second.jsonl` (the orchestrator supplies this file; when the sink runs standalone, `finalize` is deferred to `trapdojo report`).
+### 5. Scaling (R2+, not R1)
 
-Output at end of run: `<report-dir>/<run-id>/sink_final.json`.
+R1 declares a **qualified single-listener ceiling** measured by `trapdojo selfcheck` on the actual lab hardware (see [Performance Budgets](#performance-budgets--validation)). Scenarios whose required sustained receive rate exceeds this ceiling by any margin are refused at scenario-load time with an explicit message.
+
+For R3 the ordered options, in increasing complexity, are:
+
+1. **Multi-listener, independent interval sets, offline union.** Each listener owns its own gap tracker; the aggregator unions them at end-of-run. Correctness is straightforward; the ledger-based reconciliation absorbs duplicate observations correctly (a `seq` observed by two listeners is `duplicate_datagrams += 1`, not `missing -= 1`).
+2. **Deterministic partition by destination port.** Traffic to different destinations goes to different listeners bound to different ports. Requires TrapNinja config to fan out by destination-port already, so mostly relevant to multi-destination scenarios.
+3. **Reuse-port BPF dispatch.** `SO_ATTACH_REUSEPORT_CBPF` (or eBPF) to hash `(generator_id, stream_id)` bytes at a fixed packet offset to a listener index. Requires proven kernel compatibility and template-stable offsets. Highest performance, highest implementation cost.
+
+**Not adopted as default:** userspace MPMC ring between one dispatcher and multiple worker listeners. It is only reconsidered if options 1–3 are inadequate, and any such design must specify capacity, overflow accounting, memory ordering, shutdown behaviour, added latency, and how ring overflow marks the run `INVALID`.
+
+### 6. Aggregator (`sink/aggregator.py`)
+
+- Supervisor thread.
+- Writes `<run-dir>/sink/partial.jsonl` every `AGGREGATOR_INTERVAL_S` (default 5 s).
+- At end of run (or on receipt of `EPOCH_SETTLE` from orchestrator), invokes `gap_tracker.finalize(...)` per `(stream, epoch, destination)`, writes `<run-dir>/sink/final.json`.
 
 ---
 
 ## Orchestrator — Detailed Design
 
-### 1. Scenario runner (`orchestrator/runner.py`)
-
-Lifecycle state machine:
+### 1. Lifecycle state machine
 
 ```
-LOAD → VALIDATE → PROBE_SUT → START_SINK → START_GENERATOR
-     → WARMUP → MEASURE (per dwell step) → DRAIN → TEARDOWN → REPORT
+LOAD_SCENARIO → VALIDATE_SCHEMA → VALIDATE_SAFETY → PROBE_HOSTS
+  → CAPTURE_SUT_CONFIG → CAPTURE_ENV_START → CAPTURE_CLOCKS_START
+  → START_SINK → START_GENERATOR
+  → EPOCH_PROBE → EPOCH_WARMUP
+  → for epoch in measurement_epochs:
+        RUN_EPOCH → SETTLEMENT_BARRIER → COLLECT_EPOCH_METRICS → EVALUATE_STEP
+  → EPOCH_COOLDOWN → SETTLEMENT_BARRIER_FINAL
+  → CAPTURE_ENV_END → CAPTURE_CLOCKS_END → TEARDOWN → REPORT
 ```
 
-Each state transition emits a `TimelineEvent`. Any exception in `START_*` triggers `TEARDOWN` cleanly (sink and generator receive SIGTERM, orchestrator waits for their `report.json` sentinels).
+Every transition emits a timeline event to `<run-dir>/timeline.jsonl`.
 
-State details:
-
-- **VALIDATE**: schema-check the scenario, expand hostnames, resolve `destructive` interlock (see [Security & Safety Interlocks](#security--safety-interlocks)).
-- **PROBE_SUT**: SSH to primary and secondary, capture `trapninja --version`, HA state, capture mode. Written into the manifest.
-- **START_SINK**: SSH to sink host, `trapdojo sink … --run-id …`, wait for its ready-line on stdout (or fail after `READY_TIMEOUT_S`).
-- **START_GENERATOR**: SSH to generator host(s), spawn with the scenario's profile.
-- **WARMUP**: hold at scenario's warmup rate for `warmup_s`; discard counters from the measurement window.
-- **MEASURE**: for each dwell step, poll SUT metrics every `POLL_INTERVAL_S` (default 5 s), evaluate failure criteria at end of step. Stop ramp on first sustained breach.
-- **DRAIN**: drop generator rate to 0; poll SUT queue depth until it returns to baseline or `DRAIN_TIMEOUT_S` elapses.
-- **TEARDOWN**: signal sink and generator to stop, collect their final files via SFTP.
-- **REPORT**: invoke `reporting.reconcile.run(manifest_path, run_dir)`.
+- `SETTLEMENT_BARRIER`: waits for sink's per-stream watermark to match generator's per-stream `high_water` for the just-ended epoch, or `settlement_timeout_s`.
+- On any hard failure in `START_*`, `PROBE_HOSTS`, or `CAPTURE_*`, the run enters `TEARDOWN` and reports `ABORTED` — not `FAIL`.
 
 ### 2. Collector (`orchestrator/collector.py`)
 
-Two collection paths, tried in order per SUT host:
+Two paths per SUT host, tried in order per poll:
 
-1. **`.prom` file over SSH** — `ssh sut "cat /var/lib/prometheus/node-exporter/trapninja.prom"` piped into a text parser (`prometheus_client.parser` is optional; a small hand parser avoids the dep).
-2. **`trapninja metrics show --json`** — invoked on SUT via SSH.
+1. `.prom` file over SSH.
+2. `trapninja metrics show --json` over SSH.
 
-For each metric family: `{ counter_name → { labels_key → (value, ts_monotonic) } }`. The collector computes **deltas** between consecutive polls (no reset needed on the SUT — see HLD prerequisite). Deltas are written to `<run-dir>/sut_<host>.jsonl`, one row per poll.
+Both include a `trapninja_process_start_tai_ns` gauge (added by the TrapNinja prerequisite, see [SUT Counter Uncertainty Handling](#sut-counter-uncertainty-handling)) so the collector can detect process restarts and reset its delta baseline atomically.
 
-**SSH efficiency:** all SSH invocations use `-o ControlMaster=auto -o ControlPath=<sock> -o ControlPersist=60s` — a single TCP+auth handshake per SUT host for the entire run. Falls back to per-invocation SSH if `ControlMaster` fails.
+Records per-poll: raw counter values, `process_start_tai_ns`, `poll_tai_ns_start`, `poll_tai_ns_end` (poll straddles wall time — recorded so the reporter knows the sample width and can invalidate an epoch whose bounding polls are too far apart).
 
 ### 3. Injector (`orchestrator/injector.py`)
 
-An `Action` is a small dataclass:
-
-```python
-@dataclass(frozen=True)
-class Action:
-    at_s: float                  # seconds from start of MEASURE
-    host: str                    # scenario-declared alias, resolved to hostname
-    command: str                 # from a whitelist keyed by action_type
-    action_type: str             # "ha_failover" | "stop_primary" | "stop_redis" | ...
-    expect_recovery_within_s: float
-```
-
-- Commands are **not** freeform strings from the scenario — the scenario names `action_type`; the injector maps to a whitelisted command string. This prevents scenario files from becoming remote-code-execution vectors.
-- Actions are dispatched at their `at_s` mark and their exit status is recorded in the timeline.
-
-Action whitelist for R2:
-
-| `action_type` | Resolved command | Notes |
-|---|---|---|
-| `ha_failover` | `sudo trapninja ha force-failover --yes` | Requires sudoers entry on SUT |
-| `stop_primary` | `sudo systemctl stop trapninja` | Only if `destructive=true` in scenario |
-| `start_primary` | `sudo systemctl start trapninja` | |
-| `stop_redis` | `sudo systemctl stop redis` | |
-| `start_redis` | `sudo systemctl start redis` | |
-
-`stop_primary`, `stop_redis`, `nft`-based split-brain are deferred to R4 with the destructive interlock in place.
+Whitelist-only actions (unchanged from v0.1). Each action requires two independent flags: the top-level `destructive: true` and `acknowledgements.disruptive_actions: true`. R1 does not exercise the injector (safety scenarios move to R3).
 
 ### 4. Failure evaluator (`orchestrator/failure.py`)
 
-At end of each dwell step, computes:
+At each epoch boundary (post-settlement), computes:
 
-- End-to-end loss ratio = `1 - (received / offered)` where `offered = sent_by_second - defer_*`.
-- Queue-depth trend = linear regression slope over the step's poll samples. Fails if slope > 0 and depth > 0.5 × `queue_size` at step end.
-- `queue_wait p99` = maximum p99 sample in the step.
-- RSS growth = `(rss_end - rss_start) / duration_min`.
-- Health = presence of any WORKER_CRASH or HA_FLAP event in the timeline during the step.
+- Input accounting acceptance (per §Accounting Model).
+- Delivery acceptance (once obligations are reconciled by the reporter).
+- Queue-depth trend inside the epoch (linear regression over dwell samples only).
+- `queue_wait_p99_ms` from the epoch window.
+- `rss_growth_fraction_per_min` from delta across the epoch.
+- Health signals (crashes, HA flaps) from timeline.
 
-Returns `StepVerdict(status: {"pass","fail"}, breaches: List[str], metrics: Dict[str,float])`. Persisted to `<run-dir>/step_verdicts.jsonl`.
+Ramp control: monotonically increasing queue depth AND depth > 0.5 × declared queue size at end-of-dwell stops the ramp **for further steps** but does not decide delivery loss for the ended step — that still awaits settlement.
 
 ---
 
 ## Reporter — Detailed Design
 
-### `reporting/reconcile.py`
+### `reporting/reconcile_input.py`
 
-Reads: `manifest.json`, `sent_by_second.jsonl`, `sut_*.jsonl`, `step_verdicts.jsonl`, `sink_final.json`, `timeline.jsonl`.
+Consumes: `manifest.json`, `generator/**/ledger.jsonl`, `sut_<host>.jsonl`, `timeline.jsonl`. Emits per stream per epoch:
 
-Computes per stream and per destination:
+- `G_offered = Σ accepted_seq_count`
+- Per input stage: `Σ Δ counter` restricted to the epoch's tai time window, with counter-uncertainty rules applied (see [SUT Counter Uncertainty Handling](#sut-counter-uncertainty-handling)). Any invalidated interval propagates `epoch_verdict = INVALID`.
+- `I_accounted`, `I_unexplained`.
 
-```
-offered      = Σ sent
-sut_kernel   = Σ Δ trapninja_socket_drops_total          (or ebpf lost samples)
-sut_queue    = Σ Δ trapninja_queue_drops_total
-sut_blocked  = Σ Δ trapninja_blocked_total
-sut_fwderr   = Σ Δ trapninja_dest_failures_total
-received     = sink_final.received_count
-duplicates   = sink_final.duplicate_count
-unexplained  = offered - (sut_kernel + sut_queue + sut_blocked + sut_fwderr + received)
-```
+### `reporting/reconcile_delivery.py`
 
-`unexplained ≠ 0` is a first-class finding. The reporter renders it prominently and refuses PASS if the scenario does not explicitly permit it.
+Consumes: `manifest.json`, `generator/**/ledger.jsonl`, `sink/final.json`, and the frozen forwarding config hashes.
+
+Builds the **expected obligation set** per epoch by evaluating filters/redirection over `(src_ip, oid)` for every accepted sequence.
+
+Assigns each obligation exactly one classification (see [Model B](#accounting-model)). Records confidence per row.
+
+### `reporting/confidence.py`
+
+Central mapping table:
+
+| Evidence | Confidence |
+|---|---|
+| Sink observed the arrival | `proven` |
+| Ledger recorded abandonment | `proven` |
+| SUT counter delta matches epoch, only one stream/destination present | `aggregate_accounted` |
+| SUT counter delta matches epoch, multiple streams/destinations share the counter | `temporally_correlated` |
+| No evidence bounds this sequence | `unexplained` |
 
 ### `reporting/report_json.py`
 
-Emits `<run-dir>/report.json` with:
-
 ```jsonc
 {
+  "report_schema_version": 1,
   "run_id": "…",
+  "run_token_hex": "…",
   "scenario_ref": "…",
-  "verdict": "pass" | "fail",
-  "breaking_point_rate_tps": 42500,           // null if not a ramp
-  "first_failing_stage": "queue",             // null if PASS
-  "loss_attribution": {
-    "offered": 12345678,
-    "sut_kernel_drops": 0,
-    "sut_queue_drops": 234,
-    "sut_blocked": 12000,           // expected by config
-    "sut_forward_failures": 0,
-    "received_at_sink": 12333444,
-    "duplicates": 0,
-    "unexplained": 0
+  "trapdojo_version": "0.2.0",
+  "trapninja_version": "0.8.1",
+
+  "verdict": "PASS",                        // PASS | FAIL | INVALID | ABORTED
+  "verdict_reasons": [],
+  "verdict_scope": null,                    // "sut" | "rig" | "environment" | "evidence"
+
+  "epochs": [
+    {
+      "epoch_id": 2,
+      "name": "dwell_1",
+      "verdict": "PASS",
+      "input_accounting": {
+        "G_offered": 12000000,
+        "I_kernel_lost":    { "count": 0,    "confidence": "aggregate_accounted" },
+        "I_queue_lost":     { "count": 234,  "confidence": "aggregate_accounted" },
+        "I_parse_rejected": { "count": 0,    "confidence": "aggregate_accounted" },
+        "I_blocked":        { "count": 12000,"confidence": "aggregate_accounted" },
+        "I_accepted_for_fwd":{"count": 11987766,"confidence": "aggregate_accounted" },
+        "I_unexplained":    { "count": 0 }
+      },
+      "delivery_accounting": {
+        "obligations_total_count": 11987766,
+        "delivered_exactly_once_count": 11987766,
+        "delivered_multiple_times_count": 0,
+        "missing_count": 0,
+        "not_expected_filtered_count": 12000,
+        "not_expected_redirected_away_count": 0,
+        "destination_forward_failure_count": 0,
+        "unexplained_count": 0
+      },
+      "duplicates": {
+        "datagrams_received": 11987766,
+        "duplicate_datagrams": 0,
+        "sequences_delivered_multiple_times": 0
+      },
+      "rate": {
+        "requested_target_tps": 5000,
+        "achieved_offered_tps": 4999.7,
+        "pacing_lateness_ns_p99": 220000
+      },
+      "clock_validity": "valid",
+      "sink_health": { "kernel_drops_delta_count": 0, "rej_truncated_count": 0 }
+    }
+  ],
+
+  "breaking_point": {
+    "achieved_offered_tps": 42500,
+    "first_failing_stage": "queue",         // per input-accounting classification
+    "confidence": "aggregate_accounted"
   },
-  "streams": [ /* per-stream breakdown, same shape */ ],
-  "destinations": [ /* per-destination */ ],
-  "sut_snapshot": {
-    "trapninja_version": "0.8.1",
-    "capture_mode": "ebpf",
-    "queue_wait_p99_ms_max": 340,
-    "rss_growth_pct_per_min": 0.03
-  },
-  "timeline_ref": "timeline.jsonl",
-  "sink_bottleneck": false
+
+  "environment_diff": { /* start vs end */ },
+  "clock_summary": { "worst_offset_ns_est_max": 130000, "policy_ok": true }
 }
 ```
 
 ### `reporting/report_md.py`
 
-Same content, rendered as markdown with:
-- Header block (verdict, breaking point, scenario, versions)
-- Loss attribution table
-- Per-step verdicts table (for ramps)
-- Timeline of injected events + failure detections
-- Explicit "sink health" section — if `sink_bottleneck=true`, the report leads with it.
+Human-readable rendering. Leads with `verdict` **and** `verdict_scope` — a big red banner for `INVALID` explicitly states "this does not indicate a TrapNinja failure" and names the responsible component.
+
+---
+
+## Verdict Model: PASS / FAIL / INVALID / ABORTED
+
+| State | Meaning | Example causes |
+|---|---|---|
+| `PASS` | All acceptance thresholds met, all evidence complete, all validity checks green | Ramp completes without breaching input or delivery thresholds |
+| `FAIL` | Evidence is complete and valid, and TrapNinja breached a threshold | Input or delivery loss over threshold; queue saturation stopping a ramp; RSS growth over budget; forward failure > threshold |
+| `INVALID` | Evidence is incomplete or unreliable through no fault of TrapNinja | Sink kernel drops; generator underachievement of requested rate; missing SUT metrics; clock uncertainty above threshold; ambiguous counter deltas |
+| `ABORTED` | Run terminated before evidence collection could complete | Operator SIGINT; sink/generator/orchestrator crash; SUT host unreachable mid-run |
+
+`verdict_scope` names the responsible component: `sut`, `rig`, `environment`, `evidence`. `INVALID` and `ABORTED` never appear with scope `sut`.
+
+`verdict_reasons` is a list of structured objects: `{code, message, evidence_ref}`.
+
+Ramp scenarios can produce a per-epoch verdict without producing a whole-run `FAIL` — the breaking point is the first epoch with `verdict == FAIL`; earlier epochs remain `PASS`.
 
 ---
 
 ## Scenario File Schema
 
-`scenarios/*.json`. Validated by `orchestrator/scenario.py` before any process is started.
-
 ```jsonc
 {
-  "$schema": "trapdojo-scenario-0.1",
+  "$schema": "trapdojo-scenario-0.2",
   "name": "ramp-to-failure-ebpf",
   "description": "Ramp v2c load until first failure with eBPF capture.",
-  "destructive": false,
-  "lab_allowlist": ["trapninja-lab-a", "trapninja-lab-b"],
 
   "hosts": {
     "generator": ["gen-01"],
@@ -675,108 +1118,146 @@ Same content, rendered as markdown with:
     "sut_secondary": "trapninja-s"
   },
 
+  "safety": {
+    "lab_allowlist": ["trapninja-lab-a"],
+    "safe_rate_ceiling_tps": 100000
+  },
+
+  "acknowledgements": {
+    "ramp_to_failure": true,
+    "malformed_traffic": false,
+    "spoofing_enabled": true,
+    "rate_above_safe_ceiling_tps": null,
+    "disruptive_actions": false
+  },
+
   "generator": {
-    "target": "10.234.83.133",
-    "port":   162,
-    "workers": 8,
+    "target_ip": "10.234.83.133",
+    "target_port": 162,
+    "worker_count": 8,
     "profile": {
       "type": "ramp",
-      "start_rate": 5000,
-      "end_rate":   80000,
-      "step":       5000,
-      "dwell_s":    60,
-      "warmup_s":   30,
-      "drain_s":    60
+      "warmup_s": 30,
+      "start_rate_tps": 5000,
+      "end_rate_tps":   80000,
+      "step_tps":       5000,
+      "dwell_s":        60,
+      "settlement_timeout_s": 30,
+      "cooldown_s":     60
     },
-    "sources": { "pool_size": 5000, "pool_cidr": "10.234.100.0/20" },
+    "sources": {
+      "requested_mode": "spoof",
+      "allow_source_mode_fallback": false,
+      "pool_ip_count": 5000,
+      "pool_cidr": "10.234.100.0/20"
+    },
     "oid_mix_ref": "oid-mixes/fibre-cut.json",
     "version_mix": { "v1": 0, "v2c": 100, "v3": 0 },
-    "malformed_pct": 0.0
+    "malformed": {
+      "enabled": false,
+      "classes": []
+    },
+    "abandon_after_retries": 3
   },
 
   "sink": {
     "listeners": [
-      { "bind": "10.234.83.140:162",  "reuseport_workers": 1, "destination_label": "primary-noc" }
+      { "bind_ip": "10.234.83.140", "bind_port": 162, "destination_label": "primary-noc", "rcvbuf_bytes": 33554432 }
     ]
   },
 
   "sut": {
     "expected_capture_mode": "ebpf",
-    "poll_interval_s": 5
+    "poll_interval_s": 5,
+    "freeze_config_check": true
   },
 
-  "failure_criteria": {
-    "loss_pct_max": 0.1,
-    "unexplained_max": 0,
+  "clock": {
+    "require_tai": true,
+    "latency_max_offset_ns": 500000
+  },
+
+  "acceptance": {
+    "input": {
+      "unexplained_max_count": 0,
+      "kernel_lost_max_fraction": 0.0,
+      "queue_lost_max_fraction": 0.0,
+      "parse_rejected_max_fraction": 0.0
+    },
+    "delivery": {
+      "missing_max_fraction": 0.001,
+      "multi_delivery_max_fraction": 0.0,
+      "unexplained_max_fraction": 0.0
+    },
+    "queue_saturation_stop_ramp": true,
     "queue_wait_p99_ms_max": 1000,
-    "rss_growth_pct_per_min_max": 5,
-    "queue_saturation_stop_ramp": true
+    "rss_growth_fraction_per_min_max": 0.05,
+    "ha_replay": {
+      "expected_duplicate_max_fraction": 0.0
+    }
   },
 
-  "actions": []       // R4+
+  "actions": []
 }
 ```
 
-Validation rules (fail-closed):
-- All host aliases must resolve to entries in the deploy inventory.
-- `destructive=true` requires `lab_allowlist` intersection with the deploy inventory's `lab` tag.
-- `oid_mix_ref` and other paths must be relative to the scenario file and inside the scenarios directory (no `..`).
-- No unknown top-level keys (strict).
+**Validation (fail-closed):**
+
+- Ramp-to-failure requires `acknowledgements.ramp_to_failure = true`.
+- Malformed traffic requires `acknowledgements.malformed_traffic = true` **and** `generator.malformed.enabled = true` (both, so a scenario cannot request malformed without acknowledging).
+- Spoofing requires `acknowledgements.spoofing_enabled = true`.
+- Any epoch `target_rate_tps > safety.safe_rate_ceiling_tps` requires `acknowledgements.rate_above_safe_ceiling_tps` set to the exact value.
+- All target/sink/CIDR fields must resolve to inventory entries whose `tags` intersect `safety.lab_allowlist`.
+- `hosts.sut_*` must intersect `safety.lab_allowlist`.
+- Freeform IPs that do not resolve to inventory are rejected.
 
 ---
 
 ## Report Schema
 
-Defined by `report.json` above. Bumped via `report_schema_version` field (starts at `1`). The `--compare` reporter (R5) refuses to compare across major schema bumps.
+Defined by `report.json` above. Bumped via `report_schema_version` (starts at 1). Manifest and report schemas are versioned independently; the reporter refuses to render a report from a mismatched manifest schema.
 
 ---
 
 ## CLI Specification
 
-Command registry pattern, mirroring TrapNinja. Root parser dispatches `trapdojo <verb> [noun] [flags]`.
-
 ```
-trapdojo generate <flags>
-    --target <ip> --port <int> --workers <int>
-    --profile constant|ramp|burst|replay
-    --rate | --start-rate/--end-rate/--step/--dwell
-    --sources <int> --pool-cidr <cidr>
-    --version-mix v1=…,v2c=…,v3=…
-    --oid-mix <path>
-    --run-id <str>
-    --run-dir <path>                (default /var/lib/trapdojo/runs)
-    [--manifest <path>]              (skip auto-manifest, use supplied one — orchestrator mode)
-
-trapdojo sink <flags>
-    --listen <ip:port>               (repeatable)
-    --reuseport <int>                (per --listen)
+trapdojo generate
+    --scenario <path>          # normally driven by orchestrator; standalone allowed
     --run-id <str>
     --run-dir <path>
-    --rcvbuf <bytes>                 (default 32M)
+    --generator-id <int>       # required for multi-host generation
+    [--dry-run]                # build templates, print manifest slice, do not send
 
-trapdojo orchestrate <flags>
+trapdojo sink
     --scenario <path>
-    --run-id <str>                   (default: auto-generated)
-    --run-dir <path>
-    [--dry-run]                      (validate + print action list, do not execute)
-
-trapdojo report <flags>
     --run-id <str>
     --run-dir <path>
-    [--compare <run-id>]             (R5)
-    [--format json|md|both]          (default both)
 
-trapdojo selfcheck <flags>
+trapdojo orchestrate
+    --scenario <path>
+    --run-id <str>              # default: auto-generated
+    --run-dir <path>
+    [--dry-run]                 # validate scenario + print planned SSH invocations
+
+trapdojo report
+    --run-id <str>
+    --run-dir <path>
+    [--format json|md|both]
+    [--compare <run-id>]        # R3+; refuses across incompatible manifests
+
+trapdojo selfcheck
     --loopback | --to <ip:port>
-    --workers <int> --duration <s>
-    (Generator + sink on the same host or generator → sink; proves the rig itself)
+    --duration_s <int>
+    --workers <int>
+    (runs generator + sink on same or two hosts, measures ceilings, validates raw-network correctness)
 ```
 
 ---
 
 ## Configuration Files
 
-R1 keeps configuration minimal. Everything about a *run* lives in the scenario file. Everything about a *host* lives in `~/.config/trapdojo/config.json`:
+Per-host `~/.config/trapdojo/config.json` (unchanged from v0.1 concept, expanded):
 
 ```jsonc
 {
@@ -789,125 +1270,367 @@ R1 keeps configuration minimal. Everything about a *run* lives in the scenario f
   },
   "inventory": {
     "hosts": {
-      "gen-01":       { "address": "10.234.90.11",  "tags": ["lab-a", "generator"] },
-      "sink-01":      { "address": "10.234.90.20",  "tags": ["lab-a", "sink"] },
-      "trapninja-p":  { "address": "10.234.83.133", "tags": ["lab-a", "sut"], "sudo": true },
-      "trapninja-s":  { "address": "10.234.83.134", "tags": ["lab-a", "sut"], "sudo": true }
+      "gen-01":       { "address_ip": "10.234.90.11",  "tags": ["trapninja-lab-a", "generator"] },
+      "sink-01":      { "address_ip": "10.234.90.20",  "tags": ["trapninja-lab-a", "sink"] },
+      "trapninja-p":  { "address_ip": "10.234.83.133", "tags": ["trapninja-lab-a", "sut"], "sudo": true, "trap_port": 162, "trap_vip": "10.234.83.133" },
+      "trapninja-s":  { "address_ip": "10.234.83.134", "tags": ["trapninja-lab-a", "sut"], "sudo": true, "trap_port": 162 }
     }
   }
 }
 ```
 
+`trap_vip` and `trap_port` participate in [Traffic-Target Safety Validation](#traffic-target-safety-validation).
+
 ---
 
-## Error Handling & Failure Modes
+## SNMP Version Handling
 
-Follows TrapNinja's principle: **fail fast, log precisely, never proceed on ambiguous state**.
+**R1: v2c only.** All templates emitted by R1 are SNMPv2c `snmpV2-Trap` PDUs.
 
-| Component | Failure | Response |
+**v1 (design specified; implementation R3).** SNMPv1 uses a distinct top-level Trap-PDU with fields (enterprise, agent-addr, generic-trap, specific-trap, time-stamp, variable-bindings). It is not a superficial variant of v2c. `template_v1.py` will implement it with its own encoder. The identity varbind semantics are unchanged.
+
+**v3 (blocked until R5 contract).** Patching an encrypted identity per packet is not valid due to CBC/CFB diffusion. R1–R4 do not emit v3 traps. The R5 contract must specify, before any v3 code is written:
+
+- USM engine ID selection.
+- Engine boots/time behaviour.
+- Authentication protocol.
+- Privacy protocol.
+- Salt/IV uniqueness policy at generator rates.
+- Per-packet encryption cost budget.
+- Replay behaviour on the wire.
+- How the identity survives TrapNinja's v3→v2c conversion (which is where the sink normally observes it).
+- Credential storage and end-of-run cleanup.
+
+Any TrapDojo scenario with `version_mix.v3 > 0` before R5 is refused at scenario load.
+
+---
+
+## Malformed Traffic Accounting
+
+Malformed traffic is opt-in and is **excluded from delivery obligations**. It exists to exercise TrapNinja's slow-path and robustness.
+
+### Malformed classes (R3 implementation; classes reserved now)
+
+| Class | Definition | TrapNinja expected counter |
 |---|---|---|
-| Generator | `sendmmsg` returns error other than `EINTR`/`ENOBUFS`/`EAGAIN` | Worker exits with structured error; coordinator terminates run and marks manifest `aborted:true` |
-| Generator | Raw socket refused (no `CAP_NET_RAW`) | Startup error; coordinator refuses to fork workers; suggests `alias` mode |
-| Generator | uRPF blocks spoofed sources (no packets at sink within 2 s) | Auto-fallback to alias mode with annotation; warning in report |
-| Sink | `recvmmsg` error | Listener exits; supervisor restarts once; second failure aborts run |
-| Sink | `/proc/net/udp` drops observed | Continues collecting, but final report marks destination as `sink_bottleneck=true`, refuses PASS |
-| Sink | Foreign packets on listener port | Counted separately, does not affect PASS/FAIL |
-| Orchestrator | SSH failure to SUT | Poll interval marked missing; three consecutive failures abort the run |
-| Orchestrator | Scenario schema invalid | Refuses to start; prints exact JSON pointer of first violation |
-| Orchestrator | Destructive action without allowlist | Refuses to start (see Security section) |
-| Reporter | Missing input file | Names the file and expected producer, exits non-zero |
-| Reporter | `unexplained > 0` and scenario disallows it | Verdict = fail, `first_failing_stage = "unexplained"` |
+| `invalid_ber_length` | Length prefix declares more bytes than the datagram carries | `trapninja_parse_rejected_total{reason="ber_length"}` |
+| `truncated_message` | Datagram shorter than declared SNMP message length | `trapninja_parse_rejected_total{reason="truncated"}` |
+| `unsupported_version` | SNMP version byte is not 0/1/3 | `trapninja_parse_rejected_total{reason="version"}` |
+| `bad_community` | Community string not in TrapNinja's allowed set | `trapninja_blocked_total{reason="community"}` |
+| `invalid_v3_auth` | v3 message with bad HMAC | `trapninja_parse_rejected_total{reason="v3_auth"}` |
+| `oversized_datagram` | UDP payload > TrapNinja receive buffer | Kernel drop or `parse_rejected` (documented per case) |
+| `valid_identity_bad_pdu` | Identity varbind valid, surrounding PDU malformed | Sink counts identity in a `foreign_valid_identity` bucket; not a delivery obligation |
 
-No component uses bare `except:` or `except Exception: pass`. All swallowed exceptions are logged at WARNING or above with their type and message.
+For each enabled class the scenario declares:
+
+```jsonc
+"malformed": {
+  "enabled": true,
+  "classes": [
+    { "class": "invalid_ber_length", "fraction_of_traffic": 0.01, "expected_trapninja_reason": "ber_length" },
+    { "class": "unsupported_version","fraction_of_traffic": 0.005, "expected_trapninja_reason": "version" }
+  ]
+}
+```
+
+The reporter cross-checks that each class's expected counter incremented by approximately the offered malformed count in the epoch (within tolerance). No malformed traffic ever enters delivery-obligation accounting.
 
 ---
 
-## Security & Safety Interlocks
+## Raw-Network Qualification
 
-The orchestrator can stop services and (later) inject `nft` rules on SUT hosts. Guardrails:
+### Documented behaviour (generator)
 
-1. **Destructive flag.** Scenarios with any action in `{stop_primary, stop_redis, nft_*}` **must** carry `"destructive": true` at the top level. The scenario schema enforces this.
-2. **Lab allowlist.** Every destructive scenario declares a `lab_allowlist` set. Each SUT host resolved from the scenario must carry at least one matching tag in the host inventory. Mismatch → refuse to start. A missing `lab_allowlist` in a destructive scenario → refuse to start.
-3. **SSH least privilege.** The `trapdojo` SSH user on SUT hosts uses a sudoers entry restricted to the exact command strings in the action whitelist. No shell escape possible from the scenario file.
-4. **No freeform commands.** The scenario names `action_type`; the injector maps to a hard-coded command. Adding an action requires code + review, not just scenario JSON.
-5. **Dry run.** `trapdojo orchestrate --dry-run` prints every SSH invocation the run would perform, including action commands, without executing any of them.
-6. **No credentials in logs.** SNMPv3 credentials never appear in generator output. Templates are constructed from a credentials file readable only by the `trapdojo` user; log lines reference credentials by name, never by material.
+| Aspect | Policy |
+|---|---|
+| MTU | Default 1500. Traps built to ≤ `mtu_bytes - 28` (IPv4 + UDP headers). |
+| Fragmentation | Not permitted for well-formed traffic. IP DF bit set. Oversized traps are only produced by the `oversized_datagram` malformed class. |
+| Maximum supported trap bytes | `mtu_bytes - 28`; validated at template build time; over-budget templates → refuse-to-start. |
+| IP total-length | Computed correctly per packet in raw-socket path. |
+| IP ID | Random-per-packet in raw-socket path (never zero). |
+| IP header checksum | Computed correctly per packet; not offloaded because raw socket bypasses tx offload for the IP header. |
+| UDP checksum | Computed correctly per packet (pseudo-header depends on source IP for spoofed sources). Verified in R0 selfcheck via pcap. |
+| Source port | Random per stream, stable within a stream, to keep RSS/hash behaviour predictable. |
+| Destination port | Scenario `target_port`. |
+| NIC offloads | Selfcheck detects (`ethtool -k`) and records: `tx-checksum-*`, `tso`, `gso`, `gro`, `rx-checksum`. Any offload that could rewrite headers on raw egress produces a manifest warning. |
+| Spoofing egress | Egress interface is recorded; anti-spoofing (uRPF) state on adjacent switch is not observable by TrapDojo but its effect is measured by the probe. |
+
+### Qualification (selfcheck)
+
+`trapdojo selfcheck --to <ip:port> --duration_s 30 --capture /tmp/gen.pcap` produces a pcap at generator egress. The selfcheck reporter validates:
+
+- Every captured packet is a valid IP/UDP frame with correct checksums.
+- SNMP payload parses back to the identity we intended.
+- Observed wire packet rate matches `achieved_offered_rate_tps` from the ledger within tolerance (default 1%).
+
+R2 selfcheck extends this by taking a pcap at SUT ingress and cross-checking arrival count.
+
+---
+
+## Source Simulation Mode Discipline
+
+### Modes
+
+- **`spoof`** — raw socket with `IP_HDRINCL`, generator writes IP header, source IP chosen from `pool_cidr` deterministically per `(stream_id, seq)` for reproducibility.
+- **`alias`** — N `ip addr add` aliases on the generator NIC; worker binds one AF_INET UDP socket per alias and round-robins.
+- **`localhost`** — for selfcheck only; single source.
+
+### Probe
+
+At `EPOCH_PROBE` (epoch_id 0) the generator emits `probe.packets_sent` packets and the sink reports observed count. Manifest records both.
+
+### Fallback discipline
+
+If `requested_mode == spoof` and the probe observes < 95% of sent probe packets **and** `allow_source_mode_fallback == false`, the orchestrator aborts with `ABORTED` and a structured reason. It does not silently switch.
+
+If `allow_source_mode_fallback == true`, the orchestrator retries in `alias` mode. Effective mode, effective source count, and fallback reason are recorded in the manifest and displayed prominently in `report.md`.
+
+### Comparison discipline
+
+Comparison reports (`--compare`) refuse to compare two runs whose `effective_mode` differ or whose `pool_ip_count_effective` differ by more than a scenario-declared tolerance. Silent "apples-to-oranges" comparison is impossible.
+
+---
+
+## Traffic-Target Safety Validation
+
+Before `START_GENERATOR`, the orchestrator validates:
+
+1. `generator.target_ip:generator.target_port` matches `trap_vip:trap_port` (or `address_ip:trap_port`) of a host in inventory whose `tags` intersect `safety.lab_allowlist`.
+2. `generator.sources.pool_cidr` is entirely contained in a CIDR block declared for the lab in inventory (`inventory.labs.<name>.source_cidrs`). Freeform CIDRs outside any declared lab block are refused.
+3. Every `sink.listeners[i].bind_ip` resolves to `sink-01`'s address (as declared in inventory).
+4. `scenario.acknowledgements` covers every capability the scenario intends to use (ramp-to-failure, malformed, spoofing, rate above ceiling, disruptive actions). Missing acknowledgement → refuse.
+5. `scenario.safety.safe_rate_ceiling_tps` is present. Any epoch above ceiling requires `acknowledgements.rate_above_safe_ceiling_tps` set to the exact ceiling override.
+
+`trapdojo orchestrate --dry-run` prints the validation table (each check with `ok/fail` + reason) and every SSH invocation that would run.
+
+---
+
+## SUT Counter Uncertainty Handling
+
+The orchestrator's collector handles the following events **explicitly** — no interval is treated as merely "somewhat trustworthy":
+
+| Event | Detection | Response |
+|---|---|---|
+| Counter reset (delta < 0) | Delta computation | Invalidate the interval; mark epoch `INVALID` if any critical counter is affected |
+| Process restart | `trapninja_process_start_tai_ns` changed | Reset baseline; invalidate the interval that straddles the restart |
+| Counter wraparound | Wrap detected via type width (`uint64` never wraps in practice; treat any observed wrap as reset) | Same as reset |
+| Label-set change | New label key or missing expected label | Invalidate the interval; require operator ack in `report.md` |
+| HA role change | HA state metric changed | Do not merge counters across the role change; classify the transition as its own timeline event |
+| Missing sample | SSH failure or poll timeout | Two consecutive misses → invalidate the interval; three misses → abort the run as `ABORTED` |
+| Delayed `.prom` update | `.prom` file mtime older than poll interval × 2 | Invalidate the affected samples |
+| Non-atomic snapshot | Two counters obviously inconsistent (e.g. `accepted > offered`) | Invalidate the interval |
+| Export-interval skew between HA nodes | Different `.prom` write intervals | Recorded; per-node analysis, no attempt to sum across |
+
+**TrapNinja prerequisite (added by review):**
+
+- Expose `trapninja_process_start_tai_ns` gauge (or an equivalent unique boot/process epoch identifier) in `.prom` and `metrics show --json`.
+- Guarantee `.prom` writes are atomic (`.tmp` + rename) — already required by TrapNinja's own metrics rules.
+- Emit `trapninja_metrics_snapshot_id` that increments on every export, so the collector can identify torn reads.
+
+Pre-run and post-drain snapshots of every SUT counter are always taken and included verbatim in the manifest.
+
+---
+
+## Reproducibility Evidence
+
+Manifest `environment.<host>` block for every host:
+
+```jsonc
+{
+  "os": { "distro": "rhel", "version": "8.10", "kernel": "4.18.0-…" },
+  "cpu": {
+    "model": "…",
+    "logical_cpus": 32,
+    "allocated_cpus": [0,1,2,3,4,5,6,7],
+    "governor": "performance"
+  },
+  "nic": {
+    "iface": "eth1",
+    "model": "Mellanox …",
+    "speed_gbps": 25,
+    "mtu_bytes": 1500,
+    "offloads": { "tx_checksum_ipv4": "off", "tso": "off", "gso": "off", "gro": "on" }
+  },
+  "irq": { "rps_cpus": "0-7", "rfs_entries": 32768, "affinity_hint": "…" },
+  "socket_buffers": { "net_core_rmem_max_bytes": 268435456, "net_core_wmem_max_bytes": 268435456 },
+  "link_counters_start": { "rx_dropped": 0, "tx_dropped": 0, "rx_errors": 0, "tx_errors": 0 },
+  "link_counters_end":   { "rx_dropped": 0, "tx_dropped": 0, "rx_errors": 0, "tx_errors": 0 },
+  "resource_start": { "rss_bytes": 68000000, "fd_count": 42 },
+  "resource_end":   { "rss_bytes": 71000000, "fd_count": 42 }
+}
+```
+
+Manifest also records:
+
+- `trapdojo.version` and `trapdojo.git_commit`.
+- `trapninja.version`, `trapninja.git_commit` (from `trapninja --version --json`), and `trapninja.package_build_id` where present.
+- `scenario_sha256`, `fwd_config_sha256`, `filter_config_sha256`, `destinations_config_sha256`, `oid_mix_sha256`.
+
+Reporter comparison (`--compare`, R3+) validates:
+
+- Same `wire.wire_version`.
+- Same or compatible `manifest_schema_version` and `report_schema_version`.
+- Same `nic.model`, `nic.speed_gbps`, `nic.mtu_bytes`.
+- Same `cpu.governor`, same `allocated_cpus` count.
+- Same effective source mode and pool size (within tolerance).
+
+Any mismatch is rendered as an "INCOMPATIBLE ENVIRONMENTS" banner in the comparison report and no headline throughput is compared numerically.
 
 ---
 
 ## Observability of the Rig Itself
 
-The rig is under test-conditions-worth of pressure and must be introspectable:
-
-- `trapdojo generate` writes `sent_by_second.jsonl` continuously and a summary on SIGTERM.
-- `trapdojo sink` writes `sink_partial.jsonl` every 10 s and `sink_final.json` on stop.
-- Both components expose a `--stats-port <int>` (optional) that serves a tiny HTTP endpoint returning current counters as JSON — useful for `curl` during a run, not scraped by anything by default.
-- All processes log to stderr in a fixed key=value structured format; no rotation logic in R1 (systemd + journald handle it).
+- Generator writes `ledger.jsonl` continuously and a summary on SIGTERM.
+- Sink writes `partial.jsonl` every 5 s and `final.json` on stop, plus a per-epoch checkpoint file.
+- Orchestrator writes `timeline.jsonl` for every state transition, every SSH invocation, every action.
+- Both hot-path components accept `--stats-port <int>` optional HTTP endpoint for live curl-based inspection.
+- Structured stderr logs; systemd + journald handle rotation.
 
 ---
 
 ## Testing Strategy
 
-`dev/tests/` mirrors TrapNinja layout. Two tiers:
+`dev/tests/` mirrors TrapNinja layout. Tests are grouped by phase gate.
 
-**Unit (fast, no sockets):**
-- `test_wire.py` — pack/unpack identity varbind, offset table correctness for every template shape.
-- `test_gap_tracker.py` — insert/dup/finalize; property tests using `hypothesis` if available offline, else hand-rolled cases.
-- `test_rate.py` — token bucket accuracy under simulated clocks.
-- `test_profiles.py` — ramp/burst/replay produce expected rate schedules.
-- `test_scenario.py` — schema validation accepts good files, rejects bad ones (one test per rule).
-- `test_reconcile.py` — feeds synthetic manifest + counter files, asserts loss attribution math.
+### Unit (offline, no sockets)
 
-**Integration (localhost loopback):**
-- `test_loopback_baseline.py` — generator → sink on 127.0.0.1, 1k tps × 10 s, asserts `received == sent` and `unexplained == 0`.
-- `test_loopback_ramp.py` — ramp 1k → 10k, asserts monotonic sent and no gaps.
-- `test_sink_drop_visibility.py` — deliberately undersized `SO_RCVBUF`, asserts `sink_bottleneck` is flagged.
-- `test_orchestrator_dry_run.py` — dry-run of every shipped scenario produces the expected action list.
+- `test_wire.py` — pack/unpack v2 identity; round-trip; malformed inputs rejected.
+- `test_ledger.py` — accepted/abandoned interval merging; adjacency; finalise.
+- `test_gap_tracker.py` — insert/dup/finalise against a ledger; property tests via `hypothesis` if bundled offline.
+- `test_reconcile_input.py` — input equation over synthetic manifest + generator/SUT files.
+- `test_reconcile_delivery.py` — obligation set derivation over filter/redirection/fan-out configs; classification correctness.
+- `test_confidence.py` — mapping table; asserts `temporally_correlated` never becomes `proven`.
+- `test_rate.py` — deadline pacer produces correct grants and lateness metrics under a fake clock; no cumulative drift over 10⁶ steps.
+- `test_scenario.py` — schema validation; unit-suffix enforcement; acknowledgement gates; safety allowlist checks.
+- `test_extractor.py` — magic collision, wrong run token, unknown stream, short datagram, `MSG_TRUNC`, stale buffer, malformed BER, valid-identity-bad-PDU.
+- `test_partial_sendmmsg.py` — worker retries unsent tail with same seq; abandoned range recorded.
+- `test_reordering.py` — sink handles arbitrary permutations of a stream without corrupting duplicate/missing counts.
+- `test_duplicate_missing.py` — one missing + one unrelated duplicate produces FAIL.
+- `test_fanout.py` — one obligation to two destinations; loss on one destination only produces per-destination FAIL, not aggregate FAIL.
+- `test_redirection.py` — redirection removes obligation from destination A, adds to destination B; verdicts respect this.
+- `test_filter.py` — filter removes obligation entirely; delivery accounting reflects `not_expected_filtered`.
+- `test_dest_forward_failure.py` — TrapNinja records N forward failures in an epoch; reporter attributes at `temporally_correlated` confidence, never `proven`.
+- `test_delayed_drain.py` — obligations satisfied post-dwell but pre-settlement produce PASS.
+- `test_epoch_boundary.py` — sequences from epoch 1 and epoch 2 do not cross-contaminate counters.
+- `test_counter_reset.py` — reset detected via `process_start_tai_ns` change → interval invalidated.
+- `test_missing_metrics.py` — two consecutive missing polls → INVALID; three → ABORTED.
+- `test_listener_restart.py` — simulated listener crash triggers supervisor restart; epoch marked INVALID.
+- `test_sink_kernel_drops.py` — non-zero `/proc/net/udp` delta → INVALID.
+- `test_negative_delta.py` — negative counter delta → invalidate; never resolves to negative loss.
+- `test_gen_underachievement.py` — requested 50k tps but achieved 30k tps → INVALID, verdict_scope = "rig".
+- `test_clock_invalid.py` — pre/post clock offset above threshold → latency INVALID; delivery still evaluable.
+- `test_source_mode_no_fallback.py` — spoof probe fails and `allow_source_mode_fallback: false` → ABORTED.
+- `test_termination.py` — SIGTERM mid-run produces ABORTED with partial evidence; SIGKILL of a worker produces ABORTED.
 
-**Not tested in R1:**
-- Real SSH, real SUT, real Redis. Those are R2 targets and require a lab.
+### Integration (localhost loopback)
+
+- `test_loopback_baseline.py` — 1k tps × 10 s, verdict PASS, unexplained_count = 0.
+- `test_loopback_ramp.py` — 1k → 10k, monotonic ledger, no false gaps at epoch transitions.
+- `test_loopback_rcvbuf_undersized.py` — undersized `SO_RCVBUF`; verdict INVALID, scope = "rig".
+- `test_loopback_dry_run.py` — every shipped scenario passes `--dry-run`.
+- `test_loopback_pcap_valid.py` — generator egress pcap parses and all packets round-trip.
+
+### Property-based tests (if `hypothesis` bundleable)
+
+- Interval math (accepted/received/abandoned): union, intersection, gap computation over random inputs.
+- Reconciliation: for any generator ledger and any sink observation, the invariant
+
+  ```
+  obligations_total == satisfied + missing + not_expected + duplicates_beyond_first
+  ```
+
+  holds; a duplicate never reduces `missing`.
+
+### Not tested in R1
+
+- Real SSH, real SUT, real Redis, real HA. Move to R2+ with a lab.
 
 ---
 
 ## Performance Budgets & Validation
 
-Budgets validated by `trapdojo selfcheck` before any SUT conclusions are trusted:
+Budgets validated by `trapdojo selfcheck` on lab hardware before any SUT conclusion is trusted:
 
 | Component | Metric | Target |
 |---|---|---|
-| Generator | Per-worker send rate (128-batch sendmmsg, 200-byte packets, loopback) | ≥ 30k tps |
-| Generator | Aggregate send rate, 8 workers, loopback | ≥ 100k tps |
-| Generator | Steady-state RSS growth | 0 (post warm-up) |
-| Sink | Per-listener recv rate (recvmmsg-64, single process, loopback) | ≥ 120k tps |
-| Sink | End-to-end `unexplained` in loopback selfcheck | 0 |
-| Sink | Own kernel drops in loopback selfcheck at 100k tps | 0 |
-| Orchestrator | SUT poll overhead (SSH multiplex + parse) | < 100 ms per poll |
+| Generator | Per-worker successfully-offered rate (loopback, 128-batch sendmmsg, 200-byte packets) | ≥ 30,000 tps |
+| Generator | Aggregate successfully-offered rate, 8 workers | ≥ 100,000 tps |
+| Generator | Ledger accepted rate matches wire pcap count | equal within tolerance ≤ 0.01 fraction |
+| Generator | Steady-state allocations after warm-up | measured & reported (target: near zero) |
+| Generator | Pacing lateness p99 at target rate | ≤ 1 ms |
+| Sink | Single-listener received rate (loopback recvmmsg, 128-batch) | ≥ 120,000 tps; **qualified ceiling written into manifest** |
+| Sink | `unexplained` in loopback baseline | 0 |
+| Sink | Kernel drops in loopback baseline at 100k tps | 0 |
+| Orchestrator | SUT poll overhead per poll (multiplexed SSH + parse) | ≤ 100 ms |
+| Clock | Estimated max offset across all hosts, pre/post | ≤ 500 µs (default; scenario-adjustable) |
 
-Selfcheck must PASS on the actual lab hardware **before** the R2 exit criterion (`ramp-to-failure` produces a defensible breaking point) is claimed.
+Selfcheck must PASS on lab hardware **before** the R2 exit criterion is claimed.
 
 ---
 
-## Deferred to R2+
+## Build Phases & Gates
 
-- **Multi-listener sink with stream-pinning MPMC ring** (R2 if single-listener ceiling < 100k tps).
-- **Multi-generator-host coordination** — the manifest already partitions by `stream_id`; the coordination is orchestrator-side (start N generators, disjoint stream ranges).
-- **Action injector for destructive scenarios** (R4).
-- **SNMPv3 templates and rate ceiling exploration** (R5, gated by open question 5).
-- **`--compare` regression report** (R5).
-- **Ansible role fleshed out** (R4 alongside destructive scenarios, so lab allowlists are provisioned as part of the deploy).
+### R0 — Accounting and Protocol Proof (new gate)
+
+Deliverables:
+- Final wire format (this document's v2) with byte-exact spec.
+- `core/ledger.py`, `core/obligation.py`, `core/wire.py`, `core/template.py` (v2c encoder).
+- `reporting/reconcile_input.py`, `reporting/reconcile_delivery.py`, `reporting/confidence.py`.
+- Synthetic reconciliation tests (all unit tests listed above under [Testing Strategy](#testing-strategy)).
+- Partial-send and epoch-boundary tests.
+
+Exit criterion: every synthetic edge case produces an unambiguous correct verdict.
+
+### R1 — v2c Generator and Single-Process Sink
+
+Deliverables:
+- `generator/` (all modules).
+- `sink/` (single-process listener; extractor; gap tracker against ledger; drop monitor).
+- `cli/generate.py`, `cli/sink.py`, `cli/selfcheck.py`.
+- Loopback integration tests.
+- Two-host self-check with pcap validation.
+
+Exit criterion: rig sustains its qualified ceiling with zero unexplained input loss and zero rig-side drops, verified by pcap.
+
+### R2 — Orchestration and SUT Metrics
+
+Deliverables:
+- `orchestrator/` (all modules), `reporting/report_json.py`, `reporting/report_md.py`.
+- Lifecycle state machine with settlement barriers.
+- SUT counter uncertainty rules.
+- `cli/orchestrate.py`, `cli/report.py`.
+- Single-destination baseline and ramp scenarios.
+
+Exit criterion: `ramp-to-failure` produces a defensible, reproducible breaking point with confidence-labelled attribution and correct PASS/FAIL/INVALID classification.
+
+### R3 — Scale and Complex Delivery
+
+- Multi-source spoofing at scale, malformed classes, multi-destination routing (fan-out + redirection), burst profiles, SNMPv1 implementation.
+- Sink multi-listener via offline-union option.
+
+### R4 — HA and Dependency Disruption
+
+- Action injector for destructive scenarios (with all safety controls proven in R2).
+- Failover, Redis outage, split-brain.
+
+### R5 — SNMPv3 and Comparison Reporting
+
+- v3 contract signed off before any code.
+- `--compare` regression reports with incompatible-environment refusal.
 
 ---
 
 ## Open Design Questions
 
-Carried forward from HLD; each must be resolved before its dependent phase begins:
+Only genuinely unresolved decisions remain:
 
-1. **Enterprise OID arc for the identity varbind.** Placeholder `.1.3.6.1.4.1.99999.1.1` is not registered. Decision needed before code freeze — either register or pick an arc already reserved for lab use.
-2. **Hand-rolled BER encoder vs pysnmp for template construction.** Hand-rolled is proposed here for byte control and zero pysnmp import cost. Reviewer to confirm before implementation.
-3. **`multiprocessing.shared_memory` availability.** Python 3.9 has it. Confirm it works under RHEL 8's kernel/glibc without surprises for the sink's shared counter table — fall back to `mmap`+`struct` if not.
-4. **SNMPv3 template pre-encryption vs per-packet encryption.** HLD flagged as largest open question. R5 detailed design will pick a lane; R1–R4 do not depend on it.
-5. **Sink stream-pinning strategy.** Whether the R2 multi-listener design uses in-kernel `SO_ATTACH_REUSEPORT_CBPF` (BPF program hashing `stream_id` bytes to a fixed listener index) or userspace re-queue. eBPF path is faster but has a higher implementation cost and RHEL 8 kernel-version caveats.
+1. **Enterprise OID arc for the identity varbind.** Placeholder `.1.3.6.1.4.1.99999.1.1`. Decision needed before R0 code freeze — register or pick an arc reserved for lab use.
+2. **`hypothesis` in offline dependency bundle.** Property-based tests are strongly desired for interval math and reconciliation. Decide inclusion in `download-packages.sh` before R0 test bring-up.
+3. **`CLOCK_TAI` availability and discipline in the target lab.** Confirm the lab NTP/PTP setup drives `CLOCK_TAI` correctly on RHEL 8.10 / RHEL 9 (chrony is usually sufficient). If not, `require_tai: false` mode is the interim policy; latency measurements are then unavailable across hosts.
+4. **`trapninja_process_start_tai_ns` and `trapninja_metrics_snapshot_id` prerequisite.** These are new TrapNinja counters requested by this LLD. Confirm scope and land them before R2 collector work begins.
+5. **`trapninja config show --json --canonical` prerequisite.** Deterministic canonical form of the forwarding/filter/redirection config is required to freeze the obligation set. Confirm feasibility with the TrapNinja team.
+6. **v3 contract (R5).** Full USM/engine/salt/authentication policy — deferred but tracked.
 
 ---
 
-*Next step: review this LLD, resolve open questions 1 and 2, then produce the R1 implementation prompt for `core/` + `generator/` + `sink/` + `selfcheck`.*
+*Next step: review this LLD, resolve open questions 1, 4, 5. Then produce the R0 implementation prompt for `core/` + `reporting/reconcile_*` + the synthetic-test harness.*
