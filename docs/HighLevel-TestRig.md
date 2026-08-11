@@ -110,6 +110,7 @@ The key addition beyond the original phase plan is the **Trap Sink** (Component 
 - The Orchestrator is lightweight and can run on the sink host or a fourth box.
 - Network path between generator and SUT should be ≥1 Gbps (a 200-byte trap at 100k tps is ~160 Mbps; leave headroom for bursts) and, ideally, a switch — not a router doing its own policing.
 - The sink's destination IPs/ports are configured in TrapNinja's `destinations.json` exactly like a real NOC destination. TrapNinja needs no test-specific code path.
+- **Runtime independence.** Generator, sink, and orchestrator each run as either a container (default) or a bare-metal process; the runtime is recorded per host in the manifest, and comparison across runtime types is refused. See [LLD § Containerised Deployment](LowLevel-TestRig.md#containerised-deployment).
 
 ## Core Design Principle: Closed-Loop Loss Accounting
 
@@ -225,7 +226,7 @@ trapdojo report --run-id 2026-07-21-ramp-01 [--compare 2026-06-30-ramp-04]
 
 Generated traps are fully valid SNMP traps that any receiver would accept, with the test identity carried in a dedicated varbind. **Byte-exact layout lives in the [LLD](LowLevel-TestRig.md#wire-format-byte-exact-v2)**; the essentials:
 
-- Reserved OID under a lab-use enterprise arc (placeholder `.1.3.6.1.4.1.99999.1.1`; final value TBD at R0 code freeze) whose value is a **fixed 48-byte OCTET STRING** with layout: `wire_version (2) | flags (2) | run_token (16, random 128-bit) | generator_id (2) | stream_id (2) | epoch_id (4) | seq (8) | send_ts_tai_ns (8) | integrity_marker "TDJ2" (4)`.
+- OID `.1.3.6.1.3.5850.1.1` under the **IANA-reserved experimental subtree** (`1.3.6.1.3`, per RFC 1155). Value is a **fixed 48-byte OCTET STRING** with layout: `wire_version (2) | flags (2) | run_token (16, random 128-bit) | generator_id (2) | stream_id (2) | epoch_id (4) | seq (8) | send_ts_tai_ns (8) | integrity_marker "TDJ2" (4)`.
 - Templates are pre-encoded once at startup with `wire_version`, `flags`, `run_token`, `generator_id`, `stream_id`, and `integrity_marker` baked in. Only `epoch_id`, `seq`, and `send_ts_tai_ns` are patched per packet.
 - The 128-bit `run_token` prevents cross-run false-accepts; the 4-byte integrity marker is a fast sanity check but is never sufficient on its own.
 - The remaining varbinds are realistic (sysUpTime, snmpTrapOID, vendor-shaped payload varbinds) so TrapNinja's parser, filters, per-OID stats, and redirection rules exercise their production code paths.
@@ -314,12 +315,12 @@ The design deliberately requires **no test-specific code in TrapNinja** — the 
 | `trapninja metrics show` (JSON) for orchestrator polling | ✅ Implemented |
 | **Forward-failure metrics** (`trapninja_dest_failures_total` with `destination` and `reason` labels; forwarded counter honouring `forward_packet()` return) | ⚠️ **Prerequisite.** Must be implemented before R2 orchestrator work — otherwise stage 7 loss is invisible and every failed forward pollutes `unexplained` in delivery accounting |
 | Queue drop counters exposed in metrics export | Verify: `QueueStats` drops must appear in the `.prom` export, not only in `daemon queue-stats` |
-| **`trapninja_process_start_tai_ns` gauge** | ⚠️ **New prerequisite (v0.2).** Enables the orchestrator to detect process restarts and reset delta baselines atomically. Without it, restart-across-poll produces silently wrong deltas |
-| **`trapninja_metrics_snapshot_id` counter** | ⚠️ **New prerequisite (v0.2).** Increments on every export; lets the collector detect torn reads and avoid non-atomic snapshots |
-| **`trapninja config show --json --canonical`** | ⚠️ **New prerequisite (v0.2).** Deterministic canonical form of forwarding/filter/redirection/destinations config, so TrapDojo can freeze it (`fwd_config_sha256` in manifest) and derive the expected obligation set |
+| **P1. `trapninja_process_start_tai_ns` gauge** | ⚠️ **REQUIRED before R2.** Value = process start time in `CLOCK_TAI` nanoseconds. Lets the orchestrator detect process restart atomically and reset delta baselines. Without it, restart-across-poll silently corrupts deltas or invalidates healthy epochs. |
+| **P2. `trapninja_metrics_snapshot_id` counter** | ⚠️ **REQUIRED before R2.** Increments on every export write. Lets the collector detect torn `.prom` reads; without it, non-atomic snapshots occasionally produce impossible counter relationships that force `INVALID` verdicts on healthy runs. |
+| **P3. `trapninja config show --json --canonical`** | ⚠️ **REQUIRED before R2.** Deterministic canonical JSON of forwarding, filter, redirection, destinations, and SNMPv3 credentials-by-name. Lets TrapDojo hash the frozen forwarding config and derive the expected delivery-obligation set reproducibly. Without it, comparison reports either misfire or force TrapDojo to reimplement TrapNinja's config semantics itself. |
 | Counter reset or run-delta capability | Orchestrator computes **deltas** between snapshots. Counter-uncertainty rules (reset, restart, wraparound, label change, missing sample, delayed `.prom`, non-atomic snapshot, HA role change) each have a defined response in the LLD — ambiguous intervals are invalidated, not silently trusted |
 
-All three new prerequisites are small changes to existing TrapNinja metrics/CLI surface. They must land before R2 collector work begins.
+P1–P3 are TrapDojo's normative TrapNinja prerequisites. Full purpose and failure-mode detail in [LLD § SUT Counter Uncertainty Handling](LowLevel-TestRig.md#sut-counter-uncertainty-handling).
 
 ## Technology Constraints & Generator Performance Strategy
 
@@ -332,8 +333,12 @@ All three new prerequisites are small changes to existing TrapNinja metrics/CLI 
 ## Deployment Model
 
 - **Separate git repository** (standalone product), mirroring TrapNinja conventions: `src/` layout, `dev/`, `docs/`, `ansible/`, `config.example/`.
-- **Ansible role** deploys `trapdojo` to designated generator/sink hosts (never to SUT hosts) and templates host-role config.
-- **Privileges:** generator needs `CAP_NET_RAW` (spoofed sources); sink needs to bind its ports and read its own `/proc/net/udp`; orchestrator needs SSH access to SUT hosts for metric collection and action injection. Least privilege per role — the orchestrator's SSH account uses command-restricted keys and a sudoers entry whitelisted to the exact action commands.
+- **Canonical artefact: one OCI image** containing all four subcommands (`generate`, `sink`, `orchestrate`, `report`, `selfcheck`). Built once, signed, shipped as a tarball into the air-gap. Bare-metal Python venv deployment remains supported but is not the default. See [LLD § Containerised Deployment](LowLevel-TestRig.md#containerised-deployment) for the exact flag list, host prep, and manifest recording.
+- **Ansible role** prepares each generator/sink host (sysctls, CPU governor, container engine, image load) and never installs on SUT hosts. Same role handles bare-metal deployments where operators explicitly need them.
+- **Privileges (container or bare-metal):** generator needs `CAP_NET_RAW` + `CAP_NET_ADMIN` (spoofed sources, pcap, `ethtool`); sink needs `CAP_NET_ADMIN` (`/proc/net/udp` visibility under host netns); orchestrator needs SSH access to SUT hosts only. Least privilege per role — the orchestrator's SSH account uses command-restricted keys and a sudoers entry whitelisted to the exact action commands. **`--privileged` is never used**; every capability is explicit and recorded in the manifest.
+- **Security posture in the air-gap:** the OCI image runs with Docker/podman **default seccomp and AppArmor profiles**; TrapDojo's syscalls (`socket`, `sendmmsg`, `recvmmsg`, `sched_setaffinity`, ordinary file I/O) are all in the default allow list with `CAP_NET_RAW` granted. Selfcheck confirms this on the target runtime; narrow relaxation is documented per-host if ever needed.
+- **Runtime axis in the reproducibility manifest.** `environment.<host>.runtime` records the runtime type, engine version, image digest, capability set, seccomp/apparmor profile, cpuset, and bind mounts. `--compare` refuses to compare across runtime types (same discipline as source-mode and NIC differences).
+- **Container-vs-bare-metal parity is measured, not assumed.** R0/R1 selfcheck runs the same loopback baseline in the container and bare-metal on the same host; the delta on achieved offered rate, pacing lateness p99, sink received rate, and RSS growth is recorded. ≤ 1% delta → one qualified ceiling. > 1% delta → two ceilings (per runtime).
 
 ### Safety interlocks (extended in v0.2 to cover traffic targets)
 
@@ -367,6 +372,7 @@ trapdojo/
 │       └── core/                   # Trap templates, run manifest, constants
 ├── scenarios/                      # Scenario definition files (JSON)
 ├── config.example/
+├── containers/                     # OCI Dockerfile, entrypoint, host sysctl drop-ins
 ├── ansible/
 ├── dev/tests/
 └── docs/
@@ -390,16 +396,27 @@ TrapNinja prerequisites (must land before the phase named):
 
 ## Risks & Open Questions
 
-Items resolved in v0.2 are dropped. Remaining genuine risks and open questions:
+Product review on 2026-08-11 closed four v0.2 items. What remains is one genuine open decision plus one deferred contract; everything else on this list is a known operational risk with a defined mitigation.
 
-1. **Python send-rate ceiling.** The 100k tps aggregate target from one host is plausible but unproven on the actual lab hardware. R1 selfcheck measures this before any SUT conclusion. Mitigations: multi-host generation (additive; already supported by `generator_id`), tcpreplay fallback (documented in Technology Constraints).
-2. **Sink qualified ceiling is a hard scenario gate.** R1 uses a single listener; scenarios above ceiling are refused, not silently degraded. If the measured ceiling is inadequate for headline claims (100k tps burst), R3 introduces multi-listener via offline-union — implementation cost that is only paid if needed.
-3. **`CLOCK_TAI` availability and discipline in the lab.** Confirm chrony is configured to drive `CLOCK_TAI` on RHEL 8.10 / 9. If not, `require_tai: false` mode limits cross-host latency reporting to `INVALID`; TrapNinja same-clock pipeline latency is unaffected.
-4. **TrapNinja prerequisites.** Three new small metrics/CLI additions (`trapninja_process_start_tai_ns`, `trapninja_metrics_snapshot_id`, `trapninja config show --json --canonical`) must land before R2. All three are small and well-scoped; confirm timing with the TrapNinja team.
-5. **v3 contract (R5).** Per-packet USM encryption cost, engine boots/time behaviour, salt/IV policy, credential lifecycle, and how the identity survives TrapNinja's v3→v2c conversion are all unresolved. Deferred until R5; no v3 code before contract sign-off.
-6. **Enterprise OID arc for the identity varbind.** Placeholder `.1.3.6.1.4.1.99999.1.1`. Register or select a lab-reserved arc before R0 code freeze.
-7. **`hypothesis` in the offline dependency bundle.** Property-based tests are strongly desired for interval math and reconciliation. Decide inclusion in `download-packages.sh` before R0 test bring-up.
+### Genuine open decisions
+
+1. **`hypothesis` in the offline dependency bundle.** Property-based tests are strongly desired for interval math (ledger vs received vs obligation set) and reconciliation invariants. Decide inclusion in `download-packages.sh` before R0 test bring-up. Concrete example tests exist to inform the decision.
+2. **SNMPv3 contract (R5).** Per-packet USM encryption cost, engine boots/time behaviour, salt/IV policy, credential lifecycle, and how the identity survives TrapNinja's v3→v2c conversion are all unresolved. Deferred until R5; no v3 code before contract sign-off.
+
+### Known operational risks with defined mitigations
+
+3. **Python send-rate ceiling.** The 100k tps aggregate target from one host is plausible but unproven on the actual lab hardware. R1 selfcheck measures this before any SUT conclusion. Mitigations: multi-host generation (additive; already supported by `generator_id`), tcpreplay fallback (documented in Technology Constraints).
+4. **Sink qualified ceiling is a hard scenario gate.** R1 uses a single listener; scenarios above ceiling are refused, not silently degraded. If the measured ceiling is inadequate for headline claims (100k tps burst), R3 introduces multi-listener via offline-union — implementation cost that is only paid if needed.
+
+### Resolved (2026-08-11)
+
+| # | Question | Resolution |
+|---|---|---|
+| — | Identity OID arc | `.1.3.6.1.3.5850.1.1` under IANA experimental subtree `1.3.6.1.3` (RFC 1155). Baked into templates. See [LLD § Wire Format](LowLevel-TestRig.md#wire-format-byte-exact-v2). |
+| — | `CLOCK_TAI` in the lab | `chronyd` confirmed running on every host. `chronyc tracking` and `chronyc sources -v` are the sync-health source. TAI-offset application is verified per host and recorded in the manifest. See [LLD § Clock Model](LowLevel-TestRig.md#clock-model). |
+| — | TrapNinja metrics prerequisites (P1, P2) | **REQUIRED** additions to TrapNinja before R2. See TrapNinja-Side Requirements above. |
+| — | TrapNinja canonical-config CLI (P3) | **REQUIRED** addition to TrapNinja before R2. See TrapNinja-Side Requirements above. |
 
 ---
 
-*Next step: review this HLD, resolve open questions 4, 6, 7, then produce the R0 detailed design / implementation prompt for `core/` + reconciliation + the synthetic-test harness.*
+*Next step: decide on `hypothesis` bundle inclusion, then produce the R0 detailed design / implementation prompt for `core/` + reconciliation + the synthetic-test harness.*

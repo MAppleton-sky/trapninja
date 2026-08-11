@@ -35,6 +35,7 @@
 - [Report Schema](#report-schema)
 - [CLI Specification](#cli-specification)
 - [Configuration Files](#configuration-files)
+- [Containerised Deployment](#containerised-deployment)
 - [SNMP Version Handling](#snmp-version-handling)
 - [Malformed Traffic Accounting](#malformed-traffic-accounting)
 - [Raw-Network Qualification](#raw-network-qualification)
@@ -253,6 +254,10 @@ trapdojo/
 │           └── platform_probe.py         # CPU/NIC/kernel/offload facts
 ├── scenarios/
 ├── config.example/
+├── containers/
+│   ├── Dockerfile                         # one image, all four subcommands
+│   ├── entrypoint.sh                      # dispatches to trapdojo <verb>
+│   └── profiles/                          # host-prep systemd units, sysctl drop-ins
 ├── ansible/                              # role stubs; fleshed out at R3+
 ├── dev/tests/
 └── docs/
@@ -299,7 +304,7 @@ Every generated trap carries an **identity varbind** in a fixed location. Genera
 
 ### Identity varbind
 
-- **OID:** an enterprise arc reserved for lab use (final value TBD in R0; placeholder `.1.3.6.1.4.1.99999.1.1`).
+- **OID:** `.1.3.6.1.3.5850.1.1`, under the IANA-reserved **experimental** subtree (`iso.org.dod.internet.experimental` = `1.3.6.1.3`, per RFC 1155). The experimental branch is explicitly reserved for experimental and lab use; the sub-arc `5850` is chosen as a stable TrapDojo-local identifier and is baked into every wire template. Any receiver that is not TrapDojo will treat this OID as an unknown vendor varbind and ignore it, so lab traffic never presents itself as a claimed production enterprise.
 - **Type:** `OCTET STRING`, fixed length **48 bytes**.
 
 Payload layout (network byte order, big-endian):
@@ -389,13 +394,16 @@ For `send_ts_tai_ns` (embedded in the wire identity) and for any cross-host even
 - `CLOCK_TAI` via `time.clock_gettime(time.CLOCK_TAI)` when available and disciplined.
 - Otherwise disciplined `CLOCK_REALTIME`, with an explicit degradation flag in the manifest.
 
+**Assumed sync daemon: `chronyd`.** The lab confirmed `chronyd` is the running time daemon on every host. TrapDojo therefore treats `chronyc` as the primary source of truth for sync health. `chronyd` drives `CLOCK_TAI` correctly when it has a leap-second source (usually its upstream stratum-1 servers publish this); the sync-health capture below records whether the TAI offset has actually been applied via `chronyc tracking` and `chronyc sourcestats`. If `CLOCK_TAI == CLOCK_REALTIME + 0`, TrapDojo flags the manifest with `tai_offset_applied: false` and degrades to `CLOCK_REALTIME` for cross-host timestamps.
+
 ### Sync-health capture
 
 At run start and again after settlement, on every host (generator, sink, orchestrator, and SUT via SSH), TrapDojo captures:
 
 - `time.clock_gettime` for `CLOCK_REALTIME`, `CLOCK_TAI`, `CLOCK_MONOTONIC`.
-- `chronyc tracking` (or `ntpq -c rv 0`) output: source, stratum, offset, estimated maximum error, last update, leap status.
-- Any step events since the previous capture (via `chronyc measurements` or `journalctl -u chronyd` since last epoch).
+- `chronyc tracking` output: source, stratum, `System time` offset, `Root delay`, `Root dispersion`, `Update interval`, `Leap status`.
+- `chronyc sources -v` output: selected source(s), stratum, offset.
+- Any step events since the previous capture (via `journalctl -u chronyd --since` bounded by the previous capture's TAI timestamp).
 
 Persisted to `<run-dir>/clocks/<host>.json`.
 
@@ -412,7 +420,7 @@ Scenario declares:
 
 - If any host's estimated maximum error exceeds `latency_max_offset_ns` **at run start or after settlement**, one-way latency for that run is marked `INVALID` and the `report.md` shows `latency: INVALID` with the reason (which host, what offset).
 - Same-clock pipeline latency from TrapNinja's own metrics (queue_wait, processing p99) is always reported and is unaffected by clock validity — it never leaves a single host.
-- If TrapDojo cannot obtain sync health from any host (e.g. `chrony` not installed), `require_tai: true` refuses to start; `require_tai: false` marks latency `INVALID` and continues with delivery accounting only.
+- If TrapDojo cannot obtain sync health from any host (e.g. `chronyc` not on `PATH` or the daemon not responding), `require_tai: true` refuses to start; `require_tai: false` marks latency `INVALID` and continues with delivery accounting only.
 
 ---
 
@@ -584,7 +592,7 @@ Written by the orchestrator (or by `trapdojo generate` when standalone) at run s
 
   "wire": {
     "wire_version": 2,
-    "identity_oid": "1.3.6.1.4.1.99999.1.1",
+    "identity_oid": "1.3.6.1.3.5850.1.1",
     "identity_length_bytes": 48,
     "integrity_marker_hex": "54444a32"     // "TDJ2"
   },
@@ -1283,6 +1291,164 @@ Per-host `~/.config/trapdojo/config.json` (unchanged from v0.1 concept, expanded
 
 ---
 
+## Containerised Deployment
+
+TrapDojo's canonical air-gap deployment artefact is a **single OCI image** built from `containers/Dockerfile` and containing all four subcommands (`generate`, `sink`, `orchestrate`, `report`, `selfcheck`). The same image runs every component. The image is signed and shipped as a tarball into the air-gap.
+
+Bare-metal (Python venv + wheels) deployment remains supported for hosts where the operator explicitly needs it, but is not the default. Every claim below applies equally to both runtimes; only the invocation differs.
+
+### Design principle
+
+**The container adds no capability the bare-metal deployment does not have, and takes no capability away.** Every measurement is valid in either runtime provided the runtime is recorded in the manifest. `--compare` refuses to compare across runtime types.
+
+### Security posture
+
+- **Never `--privileged`.** Always the explicit capability list below. `--privileged` grants strictly more than TrapDojo needs and is opaque to the reproducibility manifest.
+- **Default seccomp and AppArmor profiles are kept.** TrapDojo's syscalls (`socket`, `sendmmsg`, `recvmmsg`, `sched_setaffinity`, ordinary file I/O) are all allowed by Docker's default seccomp profile with `CAP_NET_RAW` granted, and by the `docker-default` AppArmor profile. Selfcheck confirms this on the target runtime; if a specific denial is observed, the offending profile is relaxed narrowly and the reason recorded in the deployment README.
+- The air-gapped environment eliminates the network-borne threat models seccomp/AppArmor primarily defend against, but keeping the default profiles is strictly cheaper than relaxing them and gives operators one fewer thing to justify in an audit.
+
+### Component-by-component container flags
+
+**Orchestrator** — low-privilege by default:
+
+```
+docker run --rm \
+    --user trapdojo:trapdojo \
+    -v ~/.ssh:/home/trapdojo/.ssh:ro \
+    -v /var/lib/trapdojo/runs:/var/lib/trapdojo/runs:rw \
+    -v /var/lib/trapdojo/ssh-control:/var/lib/trapdojo/ssh-control:rw \
+    -v /etc/trapdojo:/etc/trapdojo:ro \
+    trapdojo:0.2.0 orchestrate --scenario /etc/trapdojo/scenarios/ramp-to-failure-ebpf.json
+```
+
+No host network, no elevated caps, no host bind-mounts beyond SSH keys and the run directory.
+
+**Generator** — host network + `NET_RAW` for spoofing:
+
+```
+docker run --rm \
+    --name trapdojo-gen \
+    --network=host \
+    --cap-add=NET_RAW \
+    --cap-add=NET_ADMIN \
+    --cpuset-cpus=0-7 \
+    --ulimit rtprio=99 \
+    --cap-add=SYS_NICE \
+    -v /etc/trapdojo:/etc/trapdojo:ro \
+    -v /var/lib/trapdojo/runs:/var/lib/trapdojo/runs:rw \
+    -v /proc:/host/proc:ro \
+    -v /sys:/host/sys:ro \
+    -v /etc/os-release:/host/etc/os-release:ro \
+    -v /var/run/chrony:/var/run/chrony:ro \
+    -e TRAPDOJO_HOST_PROC=/host/proc \
+    -e TRAPDOJO_HOST_SYS=/host/sys \
+    -e TRAPDOJO_HOST_OS_RELEASE=/host/etc/os-release \
+    trapdojo:0.2.0 generate --scenario /etc/trapdojo/scenarios/... --run-id ... --generator-id 1
+```
+
+Capability notes:
+
+- `NET_RAW` enables raw sockets + `IP_HDRINCL` for spoofed sources.
+- `NET_ADMIN` enables `ethtool -k` / `-S` and pcap operations required by selfcheck.
+- `SYS_NICE` + `--ulimit rtprio=99` is reserved for future pacer real-time scheduling; harmless if unused.
+- `--network=host` places the container in the host network namespace so spoofed IPs egress correctly and `/proc/net/*` reflects the real path.
+- `/host/proc`, `/host/sys`, `/host/etc/os-release` bind mounts let `platform_probe.py` populate the reproducibility manifest with host values (kernel version, CPU model, NIC model, offload state, IRQ affinity) rather than container-local values.
+- `/var/run/chrony` bind mount lets `chronyc tracking` / `chronyc sources -v` reach the host's chrony daemon.
+
+**Sink** — host network + `NET_ADMIN` for `/proc/net/udp` visibility:
+
+```
+docker run --rm \
+    --name trapdojo-sink \
+    --network=host \
+    --cap-add=NET_ADMIN \
+    --cpuset-cpus=8-11 \
+    -v /etc/trapdojo:/etc/trapdojo:ro \
+    -v /var/lib/trapdojo/runs:/var/lib/trapdojo/runs:rw \
+    -v /proc:/host/proc:ro \
+    -v /sys:/host/sys:ro \
+    -v /etc/os-release:/host/etc/os-release:ro \
+    -v /var/run/chrony:/var/run/chrony:ro \
+    -e TRAPDOJO_HOST_PROC=/host/proc \
+    -e TRAPDOJO_HOST_SYS=/host/sys \
+    -e TRAPDOJO_HOST_OS_RELEASE=/host/etc/os-release \
+    trapdojo:0.2.0 sink --scenario /etc/trapdojo/scenarios/... --run-id ...
+```
+
+The sink does not need `NET_RAW` (no raw sockets), only `NET_ADMIN` for reading per-socket drop counters exposed under the host netns.
+
+### Host preparation
+
+These items must be set on the *host* at deploy time. They are identical to what bare-metal deployment would need, so the Ansible role that provisions the host is unchanged:
+
+| Item | Value | Set by |
+|---|---|---|
+| `net.core.rmem_max` | `≥ 33554432` (32 MiB) | sysctl drop-in in `containers/profiles/` |
+| `net.core.wmem_max` | `≥ 33554432` | sysctl drop-in |
+| CPU governor on measurement hosts | `performance` | systemd unit or Ansible task |
+| `chronyd` running with a good source | — | Existing lab config |
+| NIC offload state | Per scenario (documented per run) | `ethtool -K` at host prep time |
+| Firewall / uRPF permitting spoofed egress | — | Lab network config |
+| `trapdojo` UID/GID on host | For `--user` and bind-mount ownership | Ansible task |
+
+The container never modifies host sysctls or firewall state at runtime.
+
+### Manifest `runtime` field
+
+`environment.<host>` gains a `runtime` block populated at run start:
+
+```jsonc
+"runtime": {
+  "type": "container",                          // "container" | "bare_metal"
+  "container_engine": "docker",                 // "docker" | "podman" | "containerd"
+  "container_engine_version": "25.0.3",
+  "image_ref": "trapdojo:0.2.0",
+  "image_digest": "sha256:…",
+  "network_mode": "host",
+  "cap_add": ["NET_RAW", "NET_ADMIN", "SYS_NICE"],
+  "cap_drop": [],
+  "seccomp_profile": "default",                 // or "unconfined" if relaxed
+  "apparmor_profile": "docker-default",         // or "unconfined"
+  "cpuset_cpus": "0-7",
+  "host_bind_mounts": [
+    "/proc:/host/proc:ro",
+    "/sys:/host/sys:ro",
+    "/etc/os-release:/host/etc/os-release:ro",
+    "/var/run/chrony:/var/run/chrony:ro"
+  ]
+}
+```
+
+Bare-metal runs record `{"type": "bare_metal", "container_engine": null, ...}` — the same schema, so the reporter never branches on runtime.
+
+### `--compare` refusal rule
+
+The comparison reporter (R5) refuses to compare two runs whose `runtime.type`, `runtime.container_engine`, `runtime.container_engine_version`, `runtime.seccomp_profile`, or `runtime.apparmor_profile` differ. Runs may be re-baselined (a fresh selfcheck ceiling on the new runtime) before comparison resumes. This is the same discipline already applied to source-mode and NIC differences.
+
+### Container-vs-bare-metal parity experiment
+
+R0/R1 selfcheck adds a mandatory parity measurement on lab hardware:
+
+1. Run `trapdojo selfcheck --loopback --duration_s 300 --workers 8` on bare-metal.
+2. Run the same selfcheck under the container image on the same host, same flags.
+3. Compare achieved offered rate, pacing lateness p99, sink received rate, and RSS growth.
+
+Acceptance:
+
+- Delta ≤ 1% of ceiling on all four metrics → publish one qualified ceiling; runtime overhead is documented as noise.
+- Delta > 1% → publish two ceilings (container / bare-metal); scenarios choose the runtime they require; `--compare` refusal already prevents cross-comparison.
+
+The delta measurement itself becomes part of the R1 exit artefact.
+
+### What the container does NOT change
+
+- Wire format, accounting model, verdict semantics, safety interlocks — all identical.
+- Scenario schema, manifest schema, report schema — identical; only the `runtime` block is added.
+- CLI commands and flags — identical.
+- The Ansible role that provisions the host — essentially identical (still installs the sysctl drop-in and governor unit; adds container-engine install and image load; drops the venv install).
+
+---
+
 ## SNMP Version Handling
 
 **R1: v2c only.** All templates emitted by R1 are SNMPv2c `snmpV2-Trap` PDUs.
@@ -1421,11 +1587,21 @@ The orchestrator's collector handles the following events **explicitly** — no 
 | Non-atomic snapshot | Two counters obviously inconsistent (e.g. `accepted > offered`) | Invalidate the interval |
 | Export-interval skew between HA nodes | Different `.prom` write intervals | Recorded; per-node analysis, no attempt to sum across |
 
-**TrapNinja prerequisite (added by review):**
+**TrapNinja prerequisites (REQUIRED — must land in TrapNinja before R2 collector work begins):**
 
-- Expose `trapninja_process_start_tai_ns` gauge (or an equivalent unique boot/process epoch identifier) in `.prom` and `metrics show --json`.
-- Guarantee `.prom` writes are atomic (`.tmp` + rename) — already required by TrapNinja's own metrics rules.
-- Emit `trapninja_metrics_snapshot_id` that increments on every export, so the collector can identify torn reads.
+These three additions are small, well-scoped, and each has a specific correctness role. TrapDojo cannot ship R2 without them because the alternatives all silently corrupt delivery-obligation accounting.
+
+| Requirement | Purpose | Failure mode if absent |
+|---|---|---|
+| **P1. `trapninja_process_start_tai_ns` gauge** — exported in `.prom` and `trapninja metrics show --json`, value = process start time in `CLOCK_TAI` nanoseconds. Set once at daemon startup. | Lets the orchestrator detect a TrapNinja process restart between two polls atomically and reset the delta baseline exactly at that boundary. | A restart between polls looks like a counter reset; the entire straddling interval is invalidated instead of just the restart boundary, and epochs that were actually healthy become `INVALID`. |
+| **P2. `trapninja_metrics_snapshot_id` counter** — increments by 1 on every `.prom` export write (and every `metrics show --json` call). | Lets the orchestrator detect torn reads: a `.prom` file read while it is being rewritten produces an inconsistent counter set; the snapshot id lets the reader retry until it sees a stable id. | Non-atomic snapshots occasionally produce impossible relationships between counters (e.g. `accepted > offered`), which the uncertainty rules classify as `INVALID` — legitimate runs are marked `INVALID` for a rig-side reading problem. |
+| **P3. `trapninja config show --json --canonical`** — deterministic canonical JSON of forwarding, filter, redirection, destinations, and SNMPv3 credentials-by-name (never material). Sorted keys, no whitespace ambiguity, integer-vs-string encoding pinned. | Lets TrapDojo hash the frozen forwarding config (`fwd_config_sha256`, `filter_config_sha256`, `destinations_config_sha256` in the manifest) and derive the expected delivery-obligation set reproducibly. | Non-canonical output produces different hashes for identical configs; comparison reports either misfire or force TrapDojo to reimplement TrapNinja's config semantics itself — a maintenance liability we will not accept. |
+
+Additional invariants (already required by TrapNinja's own rules, restated here so the R2 collector can rely on them):
+
+- `.prom` writes are atomic (`.tmp` + `os.rename`).
+- Counter names/labels do not change within a running process; a label-set change implies a code deploy and a process restart, which P1 will disambiguate.
+- Every counter exported in `.prom` is also available in `trapninja metrics show --json` under the same name and labels.
 
 Pre-run and post-drain snapshots of every SUT counter are always taken and included verbatim in the manifest.
 
@@ -1438,6 +1614,18 @@ Manifest `environment.<host>` block for every host:
 ```jsonc
 {
   "os": { "distro": "rhel", "version": "8.10", "kernel": "4.18.0-…" },
+  "runtime": {
+    "type": "container",
+    "container_engine": "docker",
+    "container_engine_version": "25.0.3",
+    "image_ref": "trapdojo:0.2.0",
+    "image_digest": "sha256:…",
+    "network_mode": "host",
+    "cap_add": ["NET_RAW", "NET_ADMIN"],
+    "seccomp_profile": "default",
+    "apparmor_profile": "docker-default",
+    "cpuset_cpus": "0-7"
+  },
   "cpu": {
     "model": "…",
     "logical_cpus": 32,
@@ -1470,6 +1658,7 @@ Reporter comparison (`--compare`, R3+) validates:
 
 - Same `wire.wire_version`.
 - Same or compatible `manifest_schema_version` and `report_schema_version`.
+- Same `runtime.type`, `runtime.container_engine`, `runtime.container_engine_version`, `runtime.seccomp_profile`, `runtime.apparmor_profile`.
 - Same `nic.model`, `nic.speed_gbps`, `nic.mtu_bytes`.
 - Same `cpu.governor`, same `allocated_cpus` count.
 - Same effective source mode and pool size (within tolerance).
@@ -1529,6 +1718,7 @@ Any mismatch is rendered as an "INCOMPATIBLE ENVIRONMENTS" banner in the compari
 - `test_loopback_rcvbuf_undersized.py` — undersized `SO_RCVBUF`; verdict INVALID, scope = "rig".
 - `test_loopback_dry_run.py` — every shipped scenario passes `--dry-run`.
 - `test_loopback_pcap_valid.py` — generator egress pcap parses and all packets round-trip.
+- `test_container_bare_metal_parity.py` — same loopback baseline in the container image and bare-metal on the same host; asserts ≤ 1% delta on achieved offered rate, pacing lateness p99, sink received rate, and RSS growth. Delta value recorded in the R1 exit artefact regardless of pass/fail.
 
 ### Property-based tests (if `hypothesis` bundleable)
 
@@ -1563,6 +1753,7 @@ Budgets validated by `trapdojo selfcheck` on lab hardware before any SUT conclus
 | Sink | Kernel drops in loopback baseline at 100k tps | 0 |
 | Orchestrator | SUT poll overhead per poll (multiplexed SSH + parse) | ≤ 100 ms |
 | Clock | Estimated max offset across all hosts, pre/post | ≤ 500 µs (default; scenario-adjustable) |
+| Runtime parity | Container vs bare-metal delta on achieved offered rate, pacing lateness p99, sink received rate, RSS growth | ≤ 1% of ceiling on all four (or two ceilings published) |
 
 Selfcheck must PASS on lab hardware **before** the R2 exit criterion is claimed.
 
@@ -1622,15 +1813,20 @@ Exit criterion: `ramp-to-failure` produces a defensible, reproducible breaking p
 
 ## Open Design Questions
 
-Only genuinely unresolved decisions remain:
+Only genuinely unresolved decisions remain. Four items previously in this list (identity OID, TrapNinja metrics prerequisites, canonical-config CLI, `chronyd`-based clock discipline) were resolved by product review on 2026-08-11 and are now normative in the sections above.
 
-1. **Enterprise OID arc for the identity varbind.** Placeholder `.1.3.6.1.4.1.99999.1.1`. Decision needed before R0 code freeze — register or pick an arc reserved for lab use.
-2. **`hypothesis` in offline dependency bundle.** Property-based tests are strongly desired for interval math and reconciliation. Decide inclusion in `download-packages.sh` before R0 test bring-up.
-3. **`CLOCK_TAI` availability and discipline in the target lab.** Confirm the lab NTP/PTP setup drives `CLOCK_TAI` correctly on RHEL 8.10 / RHEL 9 (chrony is usually sufficient). If not, `require_tai: false` mode is the interim policy; latency measurements are then unavailable across hosts.
-4. **`trapninja_process_start_tai_ns` and `trapninja_metrics_snapshot_id` prerequisite.** These are new TrapNinja counters requested by this LLD. Confirm scope and land them before R2 collector work begins.
-5. **`trapninja config show --json --canonical` prerequisite.** Deterministic canonical form of the forwarding/filter/redirection config is required to freeze the obligation set. Confirm feasibility with the TrapNinja team.
-6. **v3 contract (R5).** Full USM/engine/salt/authentication policy — deferred but tracked.
+1. **`hypothesis` in offline dependency bundle.** Property-based tests are strongly desired for interval math (ledger vs received-set vs obligation-set) and reconciliation invariants. Decide inclusion in `dev/scripts/download-packages.sh` before R0 test bring-up. Concrete example tests are drafted in the R0 test plan to inform the decision.
+2. **v3 contract (R5).** Full USM/engine/salt/authentication policy — deferred but tracked. See [SNMP Version Handling](#snmp-version-handling) for the required contract content.
+
+### Resolved (2026-08-11)
+
+| # | Question | Resolution |
+|---|---|---|
+| 1 | Enterprise OID arc | Use `.1.3.6.1.3.5850.1.1` under the IANA-reserved experimental subtree `1.3.6.1.3` (RFC 1155). Baked into templates; documented in [Wire Format](#wire-format-byte-exact-v2). |
+| 3 | `CLOCK_TAI` in the lab | `chronyd` confirmed running on every host. `chronyc tracking` / `chronyc sources -v` are the sync-health source. Manifest records `tai_offset_applied` per host; degradation to `CLOCK_REALTIME` is explicit, never silent. See [Clock Model](#clock-model). |
+| 4 | TrapNinja metrics prerequisites | Elevated to **REQUIRED** in [SUT Counter Uncertainty Handling](#sut-counter-uncertainty-handling): `trapninja_process_start_tai_ns` (P1) and `trapninja_metrics_snapshot_id` (P2). Must land before R2. |
+| 5 | Canonical-config CLI prerequisite | Elevated to **REQUIRED** in [SUT Counter Uncertainty Handling](#sut-counter-uncertainty-handling): `trapninja config show --json --canonical` (P3). Must land before R2. |
 
 ---
 
-*Next step: review this LLD, resolve open questions 1, 4, 5. Then produce the R0 implementation prompt for `core/` + `reporting/reconcile_*` + the synthetic-test harness.*
+*Next step: decide on Q1 (`hypothesis` bundle), then produce the R0 implementation prompt for `core/` + `reporting/reconcile_*` + the synthetic-test harness.*
