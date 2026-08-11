@@ -7,6 +7,8 @@
 **Companion:** [LowLevel-TestRig.md](LowLevel-TestRig.md)
 **Supersedes:** HLD v0.1
 
+> **New to TrapDojo?** Start with the plain-language [Overview](Overview-TestRig.md) — designed to be read in ten minutes, no engineering background required. Come back here for design decisions and rationale.
+
 > **Design-review status.** This HLD reflects the v0.2 design after the loss-accounting, sequence-semantics, sink-safety, clock-model, and phase-gate corrections. The full change summary, decision log, and traceability table live in the [LLD](LowLevel-TestRig.md#change-summary-v01--v02).
 
 **Key structural changes from v0.1:**
@@ -24,6 +26,7 @@
 ## Table of Contents
 
 - [Purpose & Goals](#purpose--goals)
+- [Terminology](#terminology)
 - [Relationship to the Existing Load-Test Initiative](#relationship-to-the-existing-load-test-initiative)
 - [Scope & Non-Goals](#scope--non-goals)
 - [Test Topology](#test-topology)
@@ -52,6 +55,25 @@ TrapDojo is a **standalone product** that load-tests TrapNinja as a black box ov
 2. **Establish throughput thresholds.** Produce defensible numbers per capture mode (eBPF / socket / sniff) for: maximum sustained rate with zero loss, maximum burst absorption, and recovery time after a burst.
 3. **Prove production readiness.** Demonstrate the headline claims (10k+ sustained, 100k burst, <3s failover, zero trap loss) with evidence, not assertion — including under HA failover, SNMPv3 decryption load, and Redis outage conditions.
 4. **Make results repeatable.** Every run is a scripted scenario with a machine-readable report, so regressions between TrapNinja versions are detectable ("v0.8.x sustained 42k tps zero-loss; v0.9.0 sustained 44k").
+
+## Terminology
+
+These terms are used throughout both this HLD and the LLD.
+
+| Term | Meaning |
+|---|---|
+| **SUT** | **System Under Test.** The thing being load-tested. For TrapDojo, the SUT is the TrapNinja HA pair (primary + secondary) plus its Redis and any dependencies. TrapDojo never runs on SUT hosts. |
+| **Rig** | TrapDojo itself — generator + sink + orchestrator + reporter. "Rig-side" faults are TrapDojo's problem; "SUT-side" faults are TrapNinja's problem. |
+| **Generator** | The TrapDojo component that produces SNMP traps at a controlled offered rate. |
+| **Sink** | The TrapDojo component that receives traps forwarded by TrapNinja and independently verifies what arrived. |
+| **Orchestrator** | The TrapDojo component that drives a scenario end-to-end, polls SUT metrics, and produces the run's verdict. |
+| **Reporter** | The TrapDojo component that reconciles evidence into `report.json` and `report.md`. |
+| **NOC** | **Network Operations Centre.** The production destination TrapNinja normally forwards traps to. In TrapDojo runs, the sink stands in for a NOC. |
+| **Offered rate** | Traps per second the generator successfully hands to the kernel (post-`sendmmsg` acceptance). Not the same as configured target rate. |
+| **Delivery obligation** | A unique `(run_token, generator_id, stream_id, epoch_id, seq, destination)` tuple that the frozen TrapNinja config says should be delivered. |
+| **Epoch** | A distinct measurement phase of a run (probe, warmup, dwell step, burst, recovery, cooldown). Every generated trap carries its `epoch_id` on the wire. |
+| **Settlement barrier** | End-of-epoch wait for all in-flight traps to arrive (or timeout) before evaluating loss for that epoch. |
+| **Verdict** | `PASS \| FAIL \| INVALID \| ABORTED` with a `scope` of `sut`, `rig`, `environment`, or `evidence`. Rig or environment problems never render as a SUT `FAIL`. |
 
 ## Relationship to the Existing Load-Test Initiative
 

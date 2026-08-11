@@ -14,6 +14,7 @@
 - [Design-Review Decision Log](#design-review-decision-log)
 - [Traceability: Review Item → Section](#traceability-review-item--section)
 - [Purpose of This Document](#purpose-of-this-document)
+- [Terminology](#terminology)
 - [Scope of This LLD](#scope-of-this-lld)
 - [Units Policy](#units-policy)
 - [Repository Layout](#repository-layout)
@@ -143,6 +144,24 @@ The HLD defines *what* TrapDojo does and *why*. This LLD defines *how* it is imp
 - Structured validity states so rig or environment failures never masquerade as SUT failures.
 
 Where this LLD references TrapNinja modules, it does so only via TrapNinja's public surface (CLI + `.prom` files + SSH-invoked actions on an allowlisted host).
+
+---
+
+## Terminology
+
+These terms are used throughout this LLD. Full definitions live in the [HLD Terminology section](HighLevel-TestRig.md#terminology); this table is the quick-reference so a developer reading this document alone is not blocked by an acronym.
+
+| Term | Meaning |
+|---|---|
+| **SUT** | **System Under Test.** The TrapNinja HA pair (primary + secondary) plus its Redis and any dependencies. TrapDojo never runs on SUT hosts. |
+| **Rig** | TrapDojo itself. Rig-side faults are TrapDojo's problem; SUT-side faults are TrapNinja's problem. |
+| **NOC** | **Network Operations Centre** — the production trap destination that TrapNinja normally forwards to. In TrapDojo runs, the sink stands in for a NOC. |
+| **Offered rate** | Traps per second the generator's `sendmmsg` accepted (kernel-accepted, ledger-recorded), not the configured target rate. Breaking-point analysis uses this. |
+| **Delivery obligation** | A unique `(run_token, generator_id, stream_id, epoch_id, seq, destination)` tuple that the frozen forwarding config says should be delivered. |
+| **Epoch** | A distinct measurement phase (probe, warmup, dwell step, burst, recovery, cooldown), carried as `epoch_id` on the wire. |
+| **Settlement barrier** | End-of-epoch wait for last-offered watermark to arrive at the sink (or timeout) before loss is evaluated. |
+| **Verdict** | `PASS \| FAIL \| INVALID \| ABORTED` with a `scope` of `sut`, `rig`, `environment`, or `evidence`. |
+| **Ledger** | The generator's per-stream, per-epoch record of exactly which sequences the kernel accepted and which were abandoned. Source of truth for what the sink should have received. |
 
 ---
 
