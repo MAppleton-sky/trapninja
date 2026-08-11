@@ -673,6 +673,18 @@ Written by the orchestrator (or by `trapdojo generate` when standalone) at run s
     "sut_secondary": { /* … */ }
   },
 
+  "operator": {
+    "logname": "alice",                        // from $LOGNAME on the orchestrator host at run start
+    "sudo_user": null,                         // from $SUDO_USER if present, else null
+    "cli_override": null,                      // from --operator <name> if supplied, else null
+    "effective": "alice",                      // cli_override, else sudo_user, else logname
+    "orchestrator_host": "gen-01",
+    "orchestrator_uid": 1001,
+    "orchestrator_pid": 12345,
+    "invocation_command": "trapdojo orchestrate --scenario ramp-to-failure-ebpf.json --run-id 2026-08-11-ramp-01",
+    "invocation_tai_ns": 1913097600000000000
+  },
+
   "clock": {
     "policy": { "require_tai": true, "latency_max_offset_ns": 500000 },
     "samples": [
@@ -997,6 +1009,15 @@ Records per-poll: raw counter values, `process_start_tai_ns`, `poll_tai_ns_start
 
 Whitelist-only actions (unchanged from v0.1). Each action requires two independent flags: the top-level `destructive: true` and `acknowledgements.disruptive_actions: true`. R1 does not exercise the injector (safety scenarios move to R3).
 
+**SSH access model (current lab).** Lab SUT hosts accept a shared team SSH public key with root login; there is no restricted `command="…"` key and no per-account sudoers restriction. Consequently the injector's action whitelist is the **sole** layer preventing arbitrary command execution on SUT hosts. Enforcement requirements:
+
+- The action-type → command mapping is a hard-coded string table in `injector.py`. Command strings are **not** constructed from scenario input at runtime; scenario input can only *select* an entry.
+- Adding an entry requires a code change and passes through code review.
+- The whitelist is covered by a dedicated test (`test_injector_whitelist.py`) asserting: (a) every action-type the scenario schema accepts has a corresponding whitelist entry, and (b) no whitelist entry contains shell metacharacters or format placeholders that would allow argument injection.
+- Every SSH invocation is recorded in `timeline.jsonl` with the resolved command string, the target host, the TAI timestamp, and the operator (see `operator` block in the [Run Manifest](#run-manifest)).
+
+**Future hardening.** When lab practice allows, move to a dedicated `trapdojo` SSH account with a `command="…"` restricted key that enforces the whitelist at the SSH layer as well. No code change in TrapDojo is required for this transition; the injector already emits only whitelisted commands.
+
 ### 4. Failure evaluator (`orchestrator/failure.py`)
 
 At each epoch boundary (post-settlement), computes:
@@ -1265,6 +1286,7 @@ trapdojo orchestrate
     --scenario <path>
     --run-id <str>              # default: auto-generated
     --run-dir <path>
+    [--operator <name>]         # override $LOGNAME / $SUDO_USER attribution in the manifest
     [--dry-run]                 # validate scenario + print planned SSH invocations
 
 trapdojo report

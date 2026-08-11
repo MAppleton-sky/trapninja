@@ -101,7 +101,7 @@ To run TrapDojo you need:
 - **Three or four dedicated machines**, on the same fast network as TrapNinja, but **never on the TrapNinja machines themselves** — running the test on the same host would contaminate the measurement.
 - **A ≥ 1 Gbps switch** between the generator and TrapNinja. Even a 100k-alarms-per-second flood is only about 160 Mbps, but headroom matters.
 - **`chronyd` running** on every host for accurate time. (This is standard on the lab servers already.)
-- **SSH access** from the orchestrator machine to the TrapNinja servers, using a locked-down account that can only run a small whitelist of commands.
+- **SSH access** from the orchestrator machine to the TrapNinja servers, matching the current lab practice: a shared team SSH key with root login. TrapDojo relies on its own internal action whitelist (a hard-coded list of commands it is allowed to run) rather than on the SSH key being restricted. Moving to a per-operator or command-restricted key later is a future improvement, not a blocker.
 - **A signed copy of the TrapDojo container image**, delivered through the normal air-gap process.
 
 There is nothing to install on the TrapNinja servers themselves.
@@ -120,6 +120,8 @@ TrapDojo can be very disruptive if pointed at the wrong thing. The design makes 
 - **No production access.** TrapDojo cannot reach production TrapNinja instances because the inventory of allowed targets is scoped to lab hosts.
 
 The rig is designed on the principle that the worst thing that can happen is "the lab TrapNinja fell over and someone needs to restart it". Anything worse than that is a bug in TrapDojo and gets treated accordingly.
+
+**One thing to be aware of (current lab):** the lab servers currently use a shared team SSH key with root access. TrapDojo works within this and does not make the situation worse. It does mean two things: (a) the SUT's own system logs cannot tell TrapDojo operators apart, so per-run attribution lives in TrapDojo's own report (which records who launched the run and when); and (b) TrapDojo's internal action whitelist is the only layer stopping it from running arbitrary commands as root — that whitelist is hard-coded, code-reviewed, and covered by dedicated tests. Moving to per-operator SSH keys in the future would give an extra layer of defence, but is not required for TrapDojo to work correctly.
 
 ---
 

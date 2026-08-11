@@ -357,7 +357,9 @@ P1–P3 are TrapDojo's normative TrapNinja prerequisites. Full purpose and failu
 - **Separate git repository** (standalone product), mirroring TrapNinja conventions: `src/` layout, `dev/`, `docs/`, `ansible/`, `config.example/`.
 - **Canonical artefact: one OCI image** containing all four subcommands (`generate`, `sink`, `orchestrate`, `report`, `selfcheck`). Built once, signed, shipped as a tarball into the air-gap. Bare-metal Python venv deployment remains supported but is not the default. See [LLD § Containerised Deployment](LowLevel-TestRig.md#containerised-deployment) for the exact flag list, host prep, and manifest recording.
 - **Ansible role** prepares each generator/sink host (sysctls, CPU governor, container engine, image load) and never installs on SUT hosts. Same role handles bare-metal deployments where operators explicitly need them.
-- **Privileges (container or bare-metal):** generator needs `CAP_NET_RAW` + `CAP_NET_ADMIN` (spoofed sources, pcap, `ethtool`); sink needs `CAP_NET_ADMIN` (`/proc/net/udp` visibility under host netns); orchestrator needs SSH access to SUT hosts only. Least privilege per role — the orchestrator's SSH account uses command-restricted keys and a sudoers entry whitelisted to the exact action commands. **`--privileged` is never used**; every capability is explicit and recorded in the manifest.
+- **Privileges (container or bare-metal):** generator needs `CAP_NET_RAW` + `CAP_NET_ADMIN` (spoofed sources, pcap, `ethtool`); sink needs `CAP_NET_ADMIN` (`/proc/net/udp` visibility under host netns); orchestrator needs SSH access to SUT hosts only. **`--privileged` is never used**; every capability is explicit and recorded in the manifest.
+- **SSH access model (current lab).** Lab SUT hosts accept a **shared team SSH public key with root login**. TrapDojo's orchestrator uses this key. Because the key is not command-restricted, TrapDojo's **action whitelist is the primary defence** against arbitrary command execution: the scenario names an `action_type` and the injector maps it to a hard-coded command string. Freeform commands from the scenario file are structurally impossible. Every SSH invocation is logged to `timeline.jsonl` on the orchestrator host, providing a per-run audit trail keyed by TrapDojo operator (see [LLD § Run Manifest](LowLevel-TestRig.md#run-manifest) `operator` block).
+- **Future hardening (recommended, not blocking).** When lab practice allows, move to a dedicated `trapdojo` SSH account with a `command="…"` restricted key that enforces the whitelist at the SSH layer too. This gives defence-in-depth: a bug in TrapDojo that tries to run an unlisted command would be refused at the SSH layer as well as in the injector.
 - **Security posture in the air-gap:** the OCI image runs with Docker/podman **default seccomp and AppArmor profiles**; TrapDojo's syscalls (`socket`, `sendmmsg`, `recvmmsg`, `sched_setaffinity`, ordinary file I/O) are all in the default allow list with `CAP_NET_RAW` granted. Selfcheck confirms this on the target runtime; narrow relaxation is documented per-host if ever needed.
 - **Runtime axis in the reproducibility manifest.** `environment.<host>.runtime` records the runtime type, engine version, image digest, capability set, seccomp/apparmor profile, cpuset, and bind mounts. `--compare` refuses to compare across runtime types (same discipline as source-mode and NIC differences).
 - **Container-vs-bare-metal parity is measured, not assumed.** R0/R1 selfcheck runs the same loopback baseline in the container and bare-metal on the same host; the delta on achieved offered rate, pacing lateness p99, sink received rate, and RSS growth is recorded. ≤ 1% delta → one qualified ceiling. > 1% delta → two ceilings (per runtime).
@@ -377,6 +379,16 @@ High-rate or malformed UDP generation is potentially disruptive; safety controls
 - **Dry-run mandatory before destructive scenarios.** `trapdojo orchestrate --dry-run` prints every SSH invocation, every action, every target validation, without executing anything.
 
 Pointing a ramp-to-failure at a production HA pair by typo must be structurally impossible.
+
+### Residual risk: shared root SSH key
+
+The current lab uses a **shared team SSH key with root access** on SUT hosts. This is a known lab-hygiene state, not a design decision, and TrapDojo's design does not attempt to compensate for it beyond what is honest. What it means concretely:
+
+- **TrapDojo's action whitelist is the sole layer** preventing arbitrary command execution on SUT hosts. The whitelist is a hard-coded string table (no dynamic construction from scenario input) and is covered by unit tests.
+- **SUT `journalctl` cannot distinguish TrapDojo operators** from any other user of the team key. Per-run attribution therefore lives in TrapDojo's own manifest (`operator` block) and `timeline.jsonl`, not in the SUT's system logs.
+- **A compromise of the team key gives unrestricted root on every lab host.** This is true whether TrapDojo exists or not; TrapDojo neither creates nor materially reduces this risk. The mitigation belongs at the lab-hygiene layer (moving to per-operator keys), not the TrapDojo layer.
+
+The destructive-action interlock, lab allowlist, and per-capability acknowledgements still refuse to run scenarios outside the lab allowlist regardless of what SSH access exists.
 
 ## Proposed Repository Structure
 
