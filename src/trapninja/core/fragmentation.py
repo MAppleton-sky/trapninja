@@ -421,6 +421,17 @@ class FragmentReassemblyBuffer:
                 more_fragments=bool(ip_layer.flags.MF),
                 data=bytes(ip_layer.payload),
             )
+            key = (fragment.src_ip, fragment.dst_ip, fragment.protocol, fragment.ip_id)
+            with self._lock:
+                existing_datagram = self._datagrams.get(key)
+                existing_offsets = (
+                    set(existing_datagram.fragments.keys())
+                    if existing_datagram is not None
+                    else set()
+                )
+            fragment_count = len(existing_offsets)
+            if fragment.byte_offset not in existing_offsets:
+                fragment_count += 1
             
             # Try to reassemble
             reassembled = self.add_fragment(fragment)
@@ -438,8 +449,7 @@ class FragmentReassemblyBuffer:
                         'dst_port': dst_port,
                         'payload': udp_payload,
                         'fragmented': True,
-                        'fragment_count': len([k for k in self._datagrams.keys() 
-                                               if k[:3] == fragment.key[:3]]) + 1,
+                        'fragment_count': fragment_count,
                     }
             
             return None

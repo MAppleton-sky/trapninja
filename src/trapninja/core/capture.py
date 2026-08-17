@@ -51,7 +51,7 @@ def initialize_fragment_reassembly(handles: 'SubsystemHandles') -> None:
     Initialize IP fragment reassembly if configured and available.
 
     Reads capture_config.json for fragment_reassembly settings and
-    initializes the fragment buffer if enabled.
+    initializes the fragment buffer by default unless explicitly disabled.
 
     Args:
         handles: SubsystemHandles to update with fragment state
@@ -63,16 +63,17 @@ def initialize_fragment_reassembly(handles: 'SubsystemHandles') -> None:
     try:
         capture_config_file = os.path.join(CONFIG_DIR, "capture_config.json")
         if not os.path.exists(capture_config_file):
-            logger.debug(
-                "No capture_config.json found, fragment reassembly disabled"
+            logger.info(
+                "No capture_config.json found, using default fragment reassembly settings"
             )
-            return
-
-        with open(capture_config_file, "r") as f:
-            capture_cfg = json.load(f)
+            capture_cfg = {}
+        else:
+            with open(capture_config_file, "r") as f:
+                capture_cfg = json.load(f)
 
         frag_cfg = capture_cfg.get("fragment_reassembly", {})
-        if not frag_cfg.get("enabled", False):
+        if frag_cfg.get("enabled", True) is False:
+            logger.info("Fragment reassembly disabled by capture_config.json")
             return
 
         timeout_seconds = frag_cfg.get("timeout_seconds", 5.0)

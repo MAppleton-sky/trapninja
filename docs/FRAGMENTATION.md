@@ -39,15 +39,14 @@ Fragment 3: [IP Header (offset>0, MF=0)] [NO UDP HDR] [Data part 3]
 | Mode | Fragments Handled | How |
 |------|------------------|-----|
 | **Socket** | ✅ Automatic | Kernel reassembles before delivery |
-| **Sniff** (standard) | ❌ Broken | BPF filter drops non-first fragments |
-| **Sniff** (with reassembly) | ✅ Works | TrapNinja reassembles fragments |
-| **eBPF** | ❌ Broken | Sees fragments separately |
+| **Sniff** | ✅ Works by default | Fragment-aware BPF filter captures non-first fragments and TrapNinja reassembles them |
+| **eBPF/raw** | ✅ Works by default | Raw packet loop detects IPv4 UDP fragments and TrapNinja reassembles them |
 
 ## Configuration
 
-### Enabling Fragment Reassembly
+### Fragment Reassembly Configuration
 
-Create or edit `config/capture_config.json`:
+Fragment reassembly is enabled by default. Operators should leave it enabled unless they have a specific reason to opt out:
 
 ```json
 {
@@ -65,7 +64,7 @@ Create or edit `config/capture_config.json`:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `enabled` | `false` | Enable fragment reassembly |
+| `enabled` | `true` | Reassemble fragmented traps in sniff/eBPF capture modes; set `false` only to opt out |
 | `timeout_seconds` | `5.0` | Time to wait for all fragments |
 | `max_buffer_mb` | `100.0` | Maximum memory for fragment buffer |
 | `max_datagrams` | `10000` | Maximum concurrent incomplete datagrams |
@@ -203,7 +202,7 @@ Check the BPF filter in logs:
 grep "BPF filter" /var/log/trapninja/trapninja.log
 ```
 
-Should show the fragment-aware filter if enabled.
+Should show the fragment-aware filter unless reassembly has been explicitly disabled.
 
 **High Timeout Rate**
 
@@ -222,7 +221,7 @@ If `datagrams_evicted` is high:
 **Incomplete Traps**
 
 If traps arrive incomplete:
-1. Verify fragment reassembly is enabled
+1. Verify fragment reassembly has not been explicitly disabled
 2. Check BPF filter includes fragment capture
 3. Look for packet loss on the network path
 
@@ -240,7 +239,7 @@ if [ -f "$CONFIG" ]; then
     if grep -q '"enabled": true' "$CONFIG" 2>/dev/null; then
         echo "✓ Fragment reassembly enabled in config"
     else
-        echo "✗ Fragment reassembly NOT enabled"
+      echo "✗ Fragment reassembly explicitly disabled"
     fi
 else
     echo "✗ No capture_config.json found"

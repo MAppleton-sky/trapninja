@@ -551,6 +551,83 @@ class TestFragmentReassemblyEnabled:
         item = packet_q.get_nowait()
         assert item['payload'] == snmp_payload
 
+
+# ---------------------------------------------------------------------------
+# Tests: Scapy/sniff FragmentReassemblyBuffer.process_packet() path
+# ---------------------------------------------------------------------------
+
+class TestScapyFragmentProcessPacket:
+    """Scapy/sniff reassembly must return a completed packet without errors."""
+
+    class _FakeIP:
+        pass
+
+    class _FakeUDP:
+        pass
+
+    class _FakeRaw:
+        pass
+
+    class _FakeFlags:
+        def __init__(self, mf):
+            self.MF = mf
+
+    class _FakeIPLayer:
+        def __init__(self, src, dst, proto, ip_id, frag, mf, payload):
+            self.src = src
+            self.dst = dst
+            self.proto = proto
+            self.id = ip_id
+            self.frag = frag
+            self.flags = TestScapyFragmentProcessPacket._FakeFlags(mf)
+            self.payload = payload
+
+    class _FakeScapyPacket:
+        def __init__(self, ip_layer):
+            self.ip_layer = ip_layer
+
+        def haslayer(self, layer):
+            return layer is TestScapyFragmentProcessPacket._FakeIP
+
+        def __getitem__(self, layer):
+            if layer is TestScapyFragmentProcessPacket._FakeIP:
+                return self.ip_layer
+            raise KeyError(layer)
+
+    def test_process_packet_reassembles_fragmented_udp_trap(self, fragment_buffer):
+        """
+        The Scapy/sniff process_packet path must reassemble a fragmented UDP
+        trap and report the fragment count without referencing missing fields.
+        """
+        snmp_payload = b'\x30' + b'\x08' * 1500
+        full_udp = _build_udp_header(12345, 162, len(snmp_payload)) + snmp_payload
+        first_chunk = full_udp[:1480]
+        second_chunk = full_udp[1480:]
+        ip_id = 0x5150
+
+        first_packet = self._FakeScapyPacket(self._FakeIPLayer(
+            '10.4.4.1', '10.0.0.1', 17, ip_id, 0, True, first_chunk
+        ))
+        second_packet = self._FakeScapyPacket(self._FakeIPLayer(
+            '10.4.4.1', '10.0.0.1', 17, ip_id, 185, False, second_chunk
+        ))
+
+        fake_scapy = MagicMock(
+            IP=self._FakeIP,
+            UDP=self._FakeUDP,
+            Raw=self._FakeRaw,
+        )
+        with patch.dict(sys.modules, {'scapy.all': fake_scapy}):
+            assert fragment_buffer.process_packet(first_packet) is None
+            result = fragment_buffer.process_packet(second_packet)
+
+        assert result is not None
+        assert result['src_ip'] == '10.4.4.1'
+        assert result['dst_port'] == 162
+        assert result['payload'] == snmp_payload
+        assert result['fragmented'] is True
+        assert result['fragment_count'] == 2
+
     def test_reassembled_packet_has_correct_dst_port(
         self, capture_with_frag, packet_q, stop_ev
     ):
@@ -788,6 +865,88 @@ class TestTryEbpfCaptureFragmentInit:
 
 
 # ---------------------------------------------------------------------------
+# Tests: initialize_fragment_reassembly() default-on behaviour
+# ---------------------------------------------------------------------------
+
+class TestInitializeFragmentReassemblyDefaults:
+    """Fragment reassembly should initialize unless operators explicitly opt out."""
+
+    def test_missing_capture_config_uses_default_reassembly_settings(self):
+        """A missing capture_config.json must not disable fragmented trap handling."""
+        with _stub_scapy(), tempfile.TemporaryDirectory() as config_dir:
+            from trapninja.core.capture import initialize_fragment_reassembly
+            from trapninja.core.service_init import SubsystemHandles
+
+            handles = SubsystemHandles()
+            mock_buffer = MagicMock()
+
+            with patch('trapninja.core.capture.CONFIG_DIR', config_dir), \
+                 patch('trapninja.core.capture.modules') as mock_modules:
+                mock_modules.fragmentation.available = True
+                mock_modules.fragmentation.initialize.return_value = mock_buffer
+
+                initialize_fragment_reassembly(handles)
+
+            mock_modules.fragmentation.initialize.assert_called_once_with(
+                timeout_seconds=5.0,
+                max_buffer_mb=100.0,
+                max_datagrams=10000,
+            )
+            assert handles.fragment_buffer is mock_buffer
+            assert handles.fragment_reassembly_enabled is True
+
+    def test_missing_fragment_block_uses_default_reassembly_settings(self):
+        """An older config without fragment_reassembly still gets safe defaults."""
+        with _stub_scapy(), tempfile.TemporaryDirectory() as config_dir:
+            config_path = Path(config_dir) / 'capture_config.json'
+            config_path.write_text(json.dumps({'mode': 'auto'}))
+
+            from trapninja.core.capture import initialize_fragment_reassembly
+            from trapninja.core.service_init import SubsystemHandles
+
+            handles = SubsystemHandles()
+            mock_buffer = MagicMock()
+
+            with patch('trapninja.core.capture.CONFIG_DIR', config_dir), \
+                 patch('trapninja.core.capture.modules') as mock_modules:
+                mock_modules.fragmentation.available = True
+                mock_modules.fragmentation.initialize.return_value = mock_buffer
+
+                initialize_fragment_reassembly(handles)
+
+            mock_modules.fragmentation.initialize.assert_called_once_with(
+                timeout_seconds=5.0,
+                max_buffer_mb=100.0,
+                max_datagrams=10000,
+            )
+            assert handles.fragment_buffer is mock_buffer
+            assert handles.fragment_reassembly_enabled is True
+
+    def test_enabled_false_is_explicit_opt_out(self):
+        """Operators can explicitly disable reassembly with enabled=false."""
+        with _stub_scapy(), tempfile.TemporaryDirectory() as config_dir:
+            config_path = Path(config_dir) / 'capture_config.json'
+            config_path.write_text(json.dumps({
+                'fragment_reassembly': {'enabled': False}
+            }))
+
+            from trapninja.core.capture import initialize_fragment_reassembly
+            from trapninja.core.service_init import SubsystemHandles
+
+            handles = SubsystemHandles()
+
+            with patch('trapninja.core.capture.CONFIG_DIR', config_dir), \
+                 patch('trapninja.core.capture.modules') as mock_modules:
+                mock_modules.fragmentation.available = True
+
+                initialize_fragment_reassembly(handles)
+
+            mock_modules.fragmentation.initialize.assert_not_called()
+            assert handles.fragment_buffer is None
+            assert handles.fragment_reassembly_enabled is False
+
+
+# ---------------------------------------------------------------------------
 # Tests: capture_config.json fragment_reassembly block
 # ---------------------------------------------------------------------------
 
@@ -810,11 +969,11 @@ class TestCaptureConfigFragmentBlock:
         assert 'max_buffer_mb' in frag
         assert 'max_datagrams' in frag
 
-    def test_capture_config_fragment_reassembly_disabled_by_default(self):
-        """fragment_reassembly.enabled defaults to false (opt-in for operators)."""
+    def test_capture_config_fragment_reassembly_enabled_by_default(self):
+        """fragment_reassembly.enabled defaults to true so large traps are handled."""
         config_path = SRC_DIR / 'config' / 'capture_config.json'
         with open(config_path) as f:
             cfg = json.load(f)
 
-        assert cfg['fragment_reassembly']['enabled'] is False, \
-            "fragment_reassembly should default to disabled (operator opt-in)"
+        assert cfg['fragment_reassembly']['enabled'] is True, \
+            "fragment_reassembly should default to enabled (operator opt-out)"

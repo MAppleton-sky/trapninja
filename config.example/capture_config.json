@@ -11,8 +11,8 @@
   "fragment_reassembly": {
     "_comment": "IP fragment reassembly for SNMP traps exceeding MTU",
     
-    "enabled": false,
-    "_enabled_comment": "Enable for sniff mode when large traps (>1472 bytes) are expected",
+    "enabled": true,
+    "_enabled_comment": "Enabled by default for sniff and eBPF modes; set false only to opt out",
     
     "timeout_seconds": 5.0,
     "_timeout_comment": "Time to wait for all fragments (increase for high-latency networks)",
