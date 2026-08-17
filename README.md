@@ -61,9 +61,6 @@ trapninja/
 │   ├── INSTALL.md
 │   ├── CLI.md
 │   └── ...
-├── ansible/                # Deployment automation
-│   ├── deploy.yml
-│   └── templates/
 ├── README.md               # This file
 └── .gitignore
 ```
@@ -162,34 +159,19 @@ sudo python3.9 -O trapninja.py --block-oid 1.3.6.1.4.1.9.9.41.2.0.1
 
 See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for complete usage instructions.
 
-## Deployment with Ansible
+## Deployment
 
-The ansible playbook deploys only the `src/` directory, keeping the target system clean:
+Production deployment is driven by Ansible playbooks maintained in a separate
+internal repository. Those playbooks deploy only the contents of `src/` to
+`/opt/trapninja/` on the target host:
 
-```bash
-# Deploy to servers defined in inventory
-ansible-playbook -i inventory/hosts ansible/deploy.yml
-
-# Deploy specific components
-ansible-playbook -i inventory/hosts ansible/deploy.yml --tags install
-ansible-playbook -i inventory/hosts ansible/deploy.yml --tags config
-ansible-playbook -i inventory/hosts ansible/deploy.yml --tags service
-```
-
-### What Gets Deployed
-
-Only the contents of `src/` are deployed to `/opt/trapninja/`:
 - `trapninja.py` - Entry point
 - `trapninja/` - Python package
 - `config/` - Default configurations
 - `VERSION` - Version file
 
-### What Stays Local
-
-- `dev/` - Development files, requirements, changelog
-- `docs/` - Documentation
-- `ansible/` - Deployment configs
-- `README.md` - Repository readme
+Everything else in this repository (`dev/`, `docs/`, `README.md`) is
+development-only and is not shipped to production hosts.
 
 ## Configuration
 

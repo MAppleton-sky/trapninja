@@ -336,7 +336,7 @@ sequenceDiagram
 **Infrastructure:**
 - RHEL 8.x / CentOS 8 / Rocky Linux 8 (production OS)
 - systemd (service management)
-- Ansible (deployment automation)
+- Ansible (deployment automation, playbooks maintained in a separate repository)
 
 **Networking:**
 - Raw sockets (high-performance forwarding)
@@ -757,10 +757,6 @@ trapninja/
 │
 ├── docs/                             # DOCUMENTATION (not deployed)
 │
-├── ansible/                          # DEPLOYMENT AUTOMATION
-│   ├── deploy.yml                    # Main playbook
-│   └── templates/                    # Jinja2 templates
-│
 ├── config.example/                   # EXAMPLE CONFIGURATIONS
 │
 ├── pyproject.toml                    # Python packaging (pip install)
@@ -996,25 +992,15 @@ Site-specific configurations are stored separately:
 | `src/config/` | Default configs | Yes (copied to /etc/) |
 | `dev/` | Development files | No |
 | `docs/` | Documentation | No |
-| `ansible/` | Deployment automation | No |
 | `config.example/` | Example configurations | No |
 
 ### Ansible Deployment
 
-```yaml
-# From ansible/deploy.yml
-- name: Sync TrapNinja application files
-  synchronize:
-    src: "{{ trapninja_src }}/src/"     # Only deploy src/
-    dest: "{{ trapninja_dest }}/"
-    delete: yes
-    rsync_opts:
-      - "--exclude=__pycache__/"
-      - "--exclude=*.pyc"
-      - "--exclude=*.pyo"
-      - "--exclude=.DS_Store"
-      - "--exclude=*.bak"
-```
+Production deployment is driven by Ansible playbooks maintained in a separate
+internal repository. Those playbooks rsync only the contents of `src/` to
+`/opt/trapninja/`, excluding `__pycache__/`, `*.pyc`, `*.pyo`, `.DS_Store`, and
+`*.bak`. See that repository for the authoritative playbook, inventory, and
+templates.
 
 ### Air-Gapped Deployment
 

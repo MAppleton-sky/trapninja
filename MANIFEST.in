@@ -34,9 +34,6 @@ prune .pytest_cache
 prune .git
 prune .idea
 
-# Exclude ansible (deployment-specific, not needed in package)
-prune ansible
-
 # Exclude documentation (available in repository)
 prune docs
 

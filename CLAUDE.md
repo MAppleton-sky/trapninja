@@ -29,8 +29,9 @@ config.example/    — Example / template configs
 dev/tests/         — Primary test suite
 tests/unit/        — Additional unit tests
 docs/              — All documentation (authoritative)
-ansible/           — Deployment playbooks and templates
 dev/tools/         — Diagnostic and operational scripts
+
+Note: Ansible playbooks and inventory live in a separate internal repository.
 ```
 
 ---
@@ -248,7 +249,10 @@ or clearly note what needs to be changed.
 ### 10.1 Ansible-Driven Deployments
 - Configs are environment-specific (dev / test / prod).
 - Changes must consider: how they are versioned, rolled out, and rolled back.
-- Prefer patterns that integrate cleanly with Ansible templates in `ansible/templates/`.
+- Ansible playbooks and templates live in a separate internal repository. When a
+  code change requires a corresponding change to a deployment template (e.g. new
+  systemd unit directive, new config file, new capability), call it out clearly
+  in the commit/PR so the deployment repo can be updated in lockstep.
 
 ### 10.2 Config Validation at Start
 - Always validate config fully before the daemon starts.
