@@ -4,7 +4,7 @@
 
 TrapNinja is a **production-grade SNMP Trap Forwarder** for telecommunications infrastructure. It is not a demo, prototype, or general-purpose tool. NOC teams depend on it for real-time alarm visibility. A dropped trap is a dropped alarm.
 
-- **Python 3.9** (RHEL 8/9 production target — no 3.10+ syntax)
+- **Python 3.12+** (RHEL 8/9 production target)
 - **Redis 5.0.3** on production (Redis 6+ commands will fail silently at runtime)
 - **Ansible air-gapped deployment** — no pip install at runtime on production servers
 - **Config location**: `/etc/trapninja/` — **Source**: `src/` only (never deploy `dev/tests/`)
@@ -47,7 +47,7 @@ Validate all config before any listener starts. Fail fast with specific, actiona
 Two nodes forwarding = duplicate alarm storm at NMS. Zero nodes forwarding = outage. The HA state machine is the highest-risk code in the system. Do not modify it without explicit human approval of the proposed change.
 
 **8. `assert` is stripped in production.**
-Production runs `python3.9 -O` which removes all `assert` statements. Use explicit `if not condition: raise ValueError(...)` for runtime safety checks.
+Production runs `python3.12 -O` which removes all `assert` statements. Use explicit `if not condition: raise ValueError(...)` for runtime safety checks.
 
 **9. Mock patches target the call site, not the definition.**
 `unittest.mock.patch` must point to where the function is **imported and used**, not where it is **defined**. This is the most common source of test failures in this project.

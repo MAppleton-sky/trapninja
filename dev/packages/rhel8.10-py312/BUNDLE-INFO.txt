@@ -1,0 +1,10 @@
+TrapNinja Python dependency wheelhouse
+
+Target: RHEL 8.10, x86_64, CPython 3.12
+Build date (UTC): 2026-10-26T12:25:13Z
+Python resolver: Python 3.12.15
+Requirements source: dev/requirements-rhel8-runtime.txt
+Redis client: omitted; cache disabled for this deployment profile
+Build image: registry.access.redhat.com/ubi8/python-312:latest
+Build image ID: cc48f9e0d1311df8cae68675c1677d6f296c57c99e767cad2efa4344de57cac9
+Validation: dependency wheels install and import offline; application tests and Redis integration are not covered by this check.

@@ -35,7 +35,7 @@ Once I've answered, produce a task specification in this format:
 [list]
 
 ### Constraints (always apply)
-- Python 3.9 only
+- Python 3.12 target
 - Redis 5.0.3: use XRANGE/XDEL, never XTRIM MINID
 - No blocking operations on the forwarding thread
 - No SNMPv3 credential logging at any level
