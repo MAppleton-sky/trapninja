@@ -24,6 +24,10 @@ def test_something(self, mock_resolve):
 
 If a mock isn't being called (`assert_called_once_with` fails unexpectedly), this is almost certainly the cause. Check it first.
 
+## Test Secrets
+
+Never embed passwords, SNMP passphrases, Redis passwords, or HA shared secrets in test files. Generate disposable values with `from fixtures.secrets import new_test_secret`; keep each generated value local to the test and never print or log it.
+
 ## Redis and eBPF — Always Mock in Unit Tests
 
 Never use a live Redis instance or live eBPF in unit tests:

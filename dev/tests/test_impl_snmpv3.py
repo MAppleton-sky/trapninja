@@ -32,7 +32,8 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch, PropertyMock
 from typing import Dict, List, Any, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from fixtures.secrets import new_test_secret
 
 # Shared fixtures and utilities from fixtures/ directory
 from fixtures import (
@@ -267,9 +268,9 @@ class MockSNMPv3User:
     """Mock SNMPv3 user for testing."""
     username: str = "testuser"
     auth_protocol: str = "SHA"
-    auth_passphrase: str = "authpass123"
+    auth_passphrase: str = field(default_factory=new_test_secret)
     priv_protocol: str = "AES128"
-    priv_passphrase: str = "privpass123"
+    priv_passphrase: str = field(default_factory=new_test_secret)
     engine_id: str = "80001f8880"
 
 
@@ -421,7 +422,7 @@ class TestKeyLocalization:
         """Key localization with SHA1 produces correct length."""
         from trapninja.snmpv3_decryption import _localize_key
         
-        passphrase = "testpassword123"
+        passphrase = new_test_secret()
         engine_id = bytes.fromhex("80001f8880")
         
         key = _localize_key(passphrase, engine_id, "SHA")
@@ -433,7 +434,7 @@ class TestKeyLocalization:
         """Key localization with MD5 produces correct length."""
         from trapninja.snmpv3_decryption import _localize_key
         
-        passphrase = "testpassword123"
+        passphrase = new_test_secret()
         engine_id = bytes.fromhex("80001f8880")
         
         key = _localize_key(passphrase, engine_id, "MD5")
@@ -445,7 +446,7 @@ class TestKeyLocalization:
         """Key localization with SHA256 produces correct length."""
         from trapninja.snmpv3_decryption import _localize_key
         
-        passphrase = "testpassword123"
+        passphrase = new_test_secret()
         engine_id = bytes.fromhex("80001f8880")
         
         key = _localize_key(passphrase, engine_id, "SHA256")
@@ -457,7 +458,7 @@ class TestKeyLocalization:
         """Same inputs produce same key."""
         from trapninja.snmpv3_decryption import _localize_key
         
-        passphrase = "testpassword123"
+        passphrase = new_test_secret()
         engine_id = bytes.fromhex("80001f8880")
         
         key1 = _localize_key(passphrase, engine_id, "SHA")
@@ -469,7 +470,7 @@ class TestKeyLocalization:
         """Different engine IDs produce different keys."""
         from trapninja.snmpv3_decryption import _localize_key
         
-        passphrase = "testpassword123"
+        passphrase = new_test_secret()
         engine_id_1 = bytes.fromhex("80001f8880")
         engine_id_2 = bytes.fromhex("80001f8881")
         

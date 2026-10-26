@@ -19,6 +19,7 @@ import tempfile
 import json
 from pathlib import Path
 from unittest.mock import patch, MagicMock, PropertyMock
+from fixtures.secrets import new_test_secret
 
 
 # =============================================================================
@@ -26,7 +27,13 @@ from unittest.mock import patch, MagicMock, PropertyMock
 # =============================================================================
 
 @pytest.fixture
-def ha_config_primary():
+def ha_shared_secret():
+    """Generate one ephemeral shared key for both test peers."""
+    return new_test_secret()
+
+
+@pytest.fixture
+def ha_config_primary(ha_shared_secret):
     """Create HA configuration for primary node."""
     from trapninja.ha.config import HAConfig
     
@@ -39,12 +46,12 @@ def ha_config_primary():
         listen_port=60006,
         heartbeat_interval=0.5,
         heartbeat_timeout=2.0,
-        shared_secret='test_secret_123'
+        shared_secret=ha_shared_secret
     )
 
 
 @pytest.fixture
-def ha_config_secondary():
+def ha_config_secondary(ha_shared_secret):
     """Create HA configuration for secondary node."""
     from trapninja.ha.config import HAConfig
     
@@ -57,7 +64,7 @@ def ha_config_secondary():
         listen_port=60007,
         heartbeat_interval=0.5,
         heartbeat_timeout=2.0,
-        shared_secret='test_secret_123'
+        shared_secret=ha_shared_secret
     )
 
 

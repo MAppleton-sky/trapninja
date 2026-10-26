@@ -20,6 +20,7 @@ import json
 import pytest
 from unittest.mock import MagicMock, patch, mock_open
 from dataclasses import asdict
+from fixtures.secrets import new_test_secret
 
 
 class TestSNMPv3User:
@@ -32,9 +33,9 @@ class TestSNMPv3User:
         user = SNMPv3User(
             username="testuser",
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
-            priv_passphrase="privpass123",
+            priv_passphrase=new_test_secret(),
             engine_id="80001234"
         )
         
@@ -50,9 +51,9 @@ class TestSNMPv3User:
         user = SNMPv3User(
             username="testuser",
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
-            priv_passphrase="privpass123",
+            priv_passphrase=new_test_secret(),
             engine_id="80001234"
         )
         
@@ -69,9 +70,9 @@ class TestSNMPv3User:
         data = {
             'username': 'testuser',
             'auth_protocol': 'SHA',
-            'auth_passphrase': 'authpass123',
+            'auth_passphrase': new_test_secret(),
             'priv_protocol': 'AES128',
-            'priv_passphrase': 'privpass123',
+            'priv_passphrase': new_test_secret(),
             'engine_id': '80001234'
         }
         
@@ -91,9 +92,9 @@ class TestSNMPv3UserValidation:
         user = SNMPv3User(
             username="testuser",
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
-            priv_passphrase="privpass123",
+            priv_passphrase=new_test_secret(),
             engine_id="80001234"
         )
         
@@ -109,9 +110,9 @@ class TestSNMPv3UserValidation:
         user = SNMPv3User(
             username="",
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
-            priv_passphrase="privpass123",
+            priv_passphrase=new_test_secret(),
             engine_id="80001234"
         )
         
@@ -127,9 +128,9 @@ class TestSNMPv3UserValidation:
         user = SNMPv3User(
             username="a" * 33,
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
-            priv_passphrase="privpass123",
+            priv_passphrase=new_test_secret(),
             engine_id="80001234"
         )
         
@@ -145,7 +146,7 @@ class TestSNMPv3UserValidation:
         """Test validation accepts valid auth protocols."""
         from trapninja.snmpv3_credentials import SNMPv3User
         
-        passphrase = "authpass123" if protocol != "NONE" else ""
+        passphrase = new_test_secret() if protocol != "NONE" else ""
         
         user = SNMPv3User(
             username="testuser",
@@ -167,9 +168,9 @@ class TestSNMPv3UserValidation:
         user = SNMPv3User(
             username="testuser",
             auth_protocol="INVALID",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
-            priv_passphrase="privpass123",
+            priv_passphrase=new_test_secret(),
             engine_id="80001234"
         )
         
@@ -185,12 +186,12 @@ class TestSNMPv3UserValidation:
         """Test validation accepts valid priv protocols."""
         from trapninja.snmpv3_credentials import SNMPv3User
         
-        passphrase = "privpass123" if protocol != "NONE" else ""
+        passphrase = new_test_secret() if protocol != "NONE" else ""
         
         user = SNMPv3User(
             username="testuser",
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol=protocol,
             priv_passphrase=passphrase,
             engine_id="80001234"
@@ -207,9 +208,9 @@ class TestSNMPv3UserValidation:
         user = SNMPv3User(
             username="testuser",
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol="INVALID",
-            priv_passphrase="privpass123",
+            priv_passphrase=new_test_secret(),
             engine_id="80001234"
         )
         
@@ -227,7 +228,7 @@ class TestSNMPv3UserValidation:
             auth_protocol="SHA",
             auth_passphrase="short",  # < 8 chars
             priv_protocol="AES128",
-            priv_passphrase="privpass123",
+            priv_passphrase=new_test_secret(),
             engine_id="80001234"
         )
         
@@ -243,7 +244,7 @@ class TestSNMPv3UserValidation:
         user = SNMPv3User(
             username="testuser",
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
             priv_passphrase="short",  # < 8 chars
             engine_id="80001234"
@@ -261,9 +262,9 @@ class TestSNMPv3UserValidation:
         user = SNMPv3User(
             username="testuser",
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
-            priv_passphrase="privpass123",
+            priv_passphrase=new_test_secret(),
             engine_id=""
         )
         
@@ -279,9 +280,9 @@ class TestSNMPv3UserValidation:
         user = SNMPv3User(
             username="testuser",
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
-            priv_passphrase="privpass123",
+            priv_passphrase=new_test_secret(),
             engine_id="not-hex-value"
         )
         
@@ -327,9 +328,9 @@ class TestSNMPv3CredentialStore:
         return SNMPv3User(
             username="testuser",
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
-            priv_passphrase="privpass123",
+            priv_passphrase=new_test_secret(),
             engine_id="80001234abcd"
         )
 
@@ -376,9 +377,9 @@ class TestSNMPv3CredentialStore:
         invalid_user = SNMPv3User(
             username="",  # Invalid
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
-            priv_passphrase="privpass123",
+            priv_passphrase=new_test_secret(),
             engine_id="80001234"
         )
         
@@ -454,9 +455,9 @@ class TestSNMPv3CredentialStore:
         user2 = SNMPv3User(
             username="user2",
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
-            priv_passphrase="privpass123",
+            priv_passphrase=new_test_secret(),
             engine_id=valid_user.engine_id
         )
         
@@ -493,9 +494,9 @@ class TestSNMPv3CredentialStore:
         user2 = SNMPv3User(
             username="user2",
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
-            priv_passphrase="privpass123",
+            priv_passphrase=new_test_secret(),
             engine_id="aaaa1111"
         )
         
@@ -540,9 +541,9 @@ class TestCredentialEncryption:
         user = SNMPv3User(
             username="testuser",
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
-            priv_passphrase="privpass123",
+            priv_passphrase=new_test_secret(),
             engine_id="80001234"
         )
         
@@ -560,9 +561,9 @@ class TestCredentialEncryption:
         user = SNMPv3User(
             username="testuser",
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
-            priv_passphrase="privpass123",
+            priv_passphrase=new_test_secret(),
             engine_id="80001234"
         )
         
@@ -598,9 +599,9 @@ class TestCredentialPersistence:
         return SNMPv3User(
             username="testuser",
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
-            priv_passphrase="privpass123",
+            priv_passphrase=new_test_secret(),
             engine_id="80001234"
         )
 
@@ -626,12 +627,14 @@ class TestCredentialPersistence:
         
         # Create and save
         store1 = SNMPv3CredentialStore(str(cred_file))
+        auth_passphrase = new_test_secret()
+        priv_passphrase = new_test_secret()
         user = SNMPv3User(
             username="testuser",
             auth_protocol="SHA",
-            auth_passphrase="authpass123",
+            auth_passphrase=auth_passphrase,
             priv_protocol="AES128",
-            priv_passphrase="privpass123",
+            priv_passphrase=priv_passphrase,
             engine_id="80001234"
         )
         store1.add_user(user)
@@ -643,7 +646,7 @@ class TestCredentialPersistence:
         
         assert loaded_user is not None
         assert loaded_user.username == "testuser"
-        assert loaded_user.auth_passphrase == "authpass123"
+        assert loaded_user.auth_passphrase == auth_passphrase
 
     def test_load_missing_file_ok(self, tmp_path):
         """Test loading non-existent file doesn't raise."""
@@ -687,21 +690,25 @@ class TestAuditLogging:
     def test_log_audit_strips_sensitive_data(self):
         """Test audit logging strips sensitive data."""
         from trapninja.snmpv3_credentials import _log_audit, AuditEvent
+
+        auth_passphrase = new_test_secret()
+        priv_passphrase = new_test_secret()
+        password = new_test_secret()
         
         with patch('trapninja.snmpv3_credentials.audit_logger') as mock_logger:
             _log_audit(AuditEvent.CREDENTIAL_ADD, {
                 'username': 'testuser',
-                'auth_passphrase': 'secret123',  # Should be stripped
-                'priv_passphrase': 'secret456',  # Should be stripped
-                'password': 'password123'  # Should be stripped
+                'auth_passphrase': auth_passphrase,
+                'priv_passphrase': priv_passphrase,
+                'password': password
             })
             
             # Get the logged message
             call_args = mock_logger.info.call_args[0][0]
             
-            assert 'secret123' not in call_args
-            assert 'secret456' not in call_args
-            assert 'password123' not in call_args
+            assert auth_passphrase not in call_args
+            assert priv_passphrase not in call_args
+            assert password not in call_args
 
 
 class TestGlobalCredentialStore:

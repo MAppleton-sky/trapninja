@@ -12,6 +12,7 @@ import threading
 import pytest
 from unittest.mock import patch, MagicMock, PropertyMock
 from datetime import datetime, timedelta
+from fixtures.secrets import new_test_secret
 
 
 class TestCacheConfig:
@@ -35,18 +36,19 @@ class TestCacheConfig:
         """Test CacheConfig with custom values."""
         from trapninja.cache.redis_backend import CacheConfig
         
+        password = new_test_secret()
         config = CacheConfig(
             enabled=True,
             host="redis.example.com",
             port=6380,
-            password="secret",
+            password=password,
             retention_hours=4.0
         )
         
         assert config.enabled is True
         assert config.host == "redis.example.com"
         assert config.port == 6380
-        assert config.password == "secret"
+        assert config.password == password
         assert config.retention_hours == 4.0
 
     def test_from_dict(self):
@@ -92,11 +94,12 @@ class TestCacheConfig:
         """Test from_dict(to_dict()) produces equivalent config."""
         from trapninja.cache.redis_backend import CacheConfig
         
+        password = new_test_secret()
         original = CacheConfig(
             enabled=True,
             host="redis.test",
             port=6382,
-            password="pass123",
+            password=password,
             retention_hours=3.5
         )
         

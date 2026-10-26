@@ -68,11 +68,20 @@ class TestGetConfigDir:
 class TestSafeLoadJson:
     """Tests for safe_load_json function."""
 
-    def test_loads_valid_json(self, tmp_path):
+    @pytest.fixture
+    def config_dir(self, tmp_path, monkeypatch):
+        import trapninja.config as config_module
+
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        monkeypatch.setattr(config_module, "CONFIG_DIR", str(config_dir))
+        return config_dir
+
+    def test_loads_valid_json(self, config_dir):
         """Test loading valid JSON file."""
         from trapninja.config import safe_load_json
         
-        json_file = tmp_path / "test.json"
+        json_file = config_dir / "destinations.json"
         data = {"key": "value", "number": 42}
         json_file.write_text(json.dumps(data))
         
@@ -80,33 +89,33 @@ class TestSafeLoadJson:
         
         assert result == data
 
-    def test_returns_fallback_for_missing_file(self, tmp_path):
+    def test_returns_fallback_for_missing_file(self, config_dir):
         """Test fallback returned when file doesn't exist."""
         from trapninja.config import safe_load_json
         
-        missing_file = tmp_path / "missing.json"
+        missing_file = config_dir / "destinations.json"
         fallback = {"default": True}
         
         result = safe_load_json(str(missing_file), fallback)
         
         assert result == fallback
 
-    def test_returns_fallback_for_invalid_json(self, tmp_path):
+    def test_returns_fallback_for_invalid_json(self, config_dir):
         """Test fallback returned for malformed JSON."""
         from trapninja.config import safe_load_json
         
-        json_file = tmp_path / "invalid.json"
+        json_file = config_dir / "blocked_traps.json"
         json_file.write_text("{ invalid json }")
         
         result = safe_load_json(str(json_file), {"fallback": True})
         
         assert result == {"fallback": True}
 
-    def test_returns_fallback_on_permission_error(self, tmp_path, monkeypatch):
+    def test_returns_fallback_on_permission_error(self, config_dir, monkeypatch):
         """Test fallback returned on permission error."""
         from trapninja.config import safe_load_json
         
-        json_file = tmp_path / "test.json"
+        json_file = config_dir / "destinations.json"
         json_file.write_text('{"key": "value"}')
         
         def mock_open(*args, **kwargs):
@@ -117,11 +126,11 @@ class TestSafeLoadJson:
         
         assert result == {"fallback": True}
 
-    def test_loads_list_data(self, tmp_path):
+    def test_loads_list_data(self, config_dir):
         """Test loading JSON array data."""
         from trapninja.config import safe_load_json
         
-        json_file = tmp_path / "list.json"
+        json_file = config_dir / "destinations.json"
         data = [["192.168.1.1", 162], ["192.168.1.2", 162]]
         json_file.write_text(json.dumps(data))
         
@@ -129,16 +138,46 @@ class TestSafeLoadJson:
         
         assert result == data
 
-    def test_loads_empty_json(self, tmp_path):
+    def test_loads_empty_json(self, config_dir):
         """Test loading empty JSON objects."""
         from trapninja.config import safe_load_json
         
-        json_file = tmp_path / "empty.json"
+        json_file = config_dir / "destinations.json"
         json_file.write_text("{}")
         
         result = safe_load_json(str(json_file), {"default": True})
         
         assert result == {}
+
+    def test_rejects_path_outside_config_directory(self, tmp_path, config_dir):
+        """A config filename outside CONFIG_DIR is rejected."""
+        from trapninja.config import safe_load_json
+
+        outside_file = tmp_path / "destinations.json"
+        outside_file.write_text('{"outside": true}')
+
+        assert safe_load_json(str(outside_file), {"fallback": True}) == {"fallback": True}
+
+    def test_rejects_symlink_outside_config_directory(self, tmp_path, config_dir):
+        """A symlink from CONFIG_DIR to an external file is rejected."""
+        from trapninja.config import safe_load_json
+
+        outside_file = tmp_path / "outside.json"
+        outside_file.write_text('{"outside": true}')
+        config_link = config_dir / "destinations.json"
+        config_link.symlink_to(outside_file)
+
+        assert safe_load_json(str(config_link), {"fallback": True}) == {"fallback": True}
+
+    def test_rejects_config_write_outside_directory(self, tmp_path, config_dir):
+        """Config JSON writes cannot target paths outside CONFIG_DIR."""
+        from trapninja.config import _write_config_json
+
+        outside_file = tmp_path / "outside" / "destinations.json"
+        outside_file.parent.mkdir()
+        with pytest.raises(ValueError, match="outside the config directory"):
+            _write_config_json(str(outside_file), {"outside": True})
+        assert not outside_file.exists()
 
 
 class TestLoadConfig:
@@ -149,7 +188,8 @@ class TestLoadConfig:
         """Set up a temporary config directory with all files."""
         config_dir = tmp_path / "config"
         config_dir.mkdir()
-        
+        import trapninja.config as config_module
+        monkeypatch.setattr(config_module, "CONFIG_DIR", str(config_dir))
         monkeypatch.setenv("TRAPNINJA_CONFIG", str(config_dir))
         
         # Create all config files
@@ -337,6 +377,8 @@ class TestLoadRedirectionConfig:
         """Set up redirection config files."""
         config_dir = tmp_path / "config"
         config_dir.mkdir()
+        import trapninja.config as config_module
+        monkeypatch.setattr(config_module, "CONFIG_DIR", str(config_dir))
         
         (config_dir / "redirected_ips.json").write_text(
             json.dumps([
@@ -434,6 +476,11 @@ class TestLoadRedirectionConfig:
 
 class TestCIDRLoading:
     """Tests for CIDR range splitting in blocked_ips and redirected_ips loaders."""
+
+    @pytest.fixture(autouse=True)
+    def patch_config_root(self, tmp_path, monkeypatch):
+        import trapninja.config as config_module
+        monkeypatch.setattr(config_module, "CONFIG_DIR", str(tmp_path))
 
     def _stop_event(self):
         return MagicMock(is_set=lambda: True)
@@ -663,13 +710,32 @@ class TestCIDRLoading:
 class TestEnsureConfigDir:
     """Tests for ensure_config_dir function."""
 
-    def test_creates_config_directory(self, tmp_path, monkeypatch):
-        """Test that config directory is created if missing."""
+    @pytest.fixture
+    def config_paths(self, tmp_path, monkeypatch):
         import trapninja.config as config
-        
-        new_config_dir = tmp_path / "new_config"
-        
-        monkeypatch.setattr(config, 'CONFIG_DIR', str(new_config_dir))
+
+        config_dir = tmp_path / "config"
+        monkeypatch.setattr(config, 'CONFIG_DIR', str(config_dir))
+        for name in (
+            'MAIN_CONFIG_FILE',
+            'DESTINATIONS_FILE',
+            'BLOCKED_TRAPS_FILE',
+            'LISTEN_PORTS_FILE',
+            'BLOCKED_IPS_FILE',
+            'REDIRECTED_IPS_FILE',
+            'REDIRECTED_OIDS_FILE',
+            'REDIRECTED_DESTINATIONS_FILE',
+        ):
+            monkeypatch.setattr(
+                config,
+                name,
+                str(config_dir / os.path.basename(getattr(config, name))),
+            )
+        return config, config_dir
+
+    def test_creates_config_directory(self, config_paths):
+        """Test that config directory is created if missing."""
+        config, new_config_dir = config_paths
         
         # Should not exist initially
         assert not new_config_dir.exists()
@@ -679,30 +745,10 @@ class TestEnsureConfigDir:
         # Should exist now
         assert new_config_dir.exists()
 
-    def test_creates_example_files(self, tmp_path, monkeypatch):
+    def test_creates_example_files(self, config_paths):
         """Test that example config files are created."""
-        import trapninja.config as config
-        
-        config_dir = tmp_path / "config"
+        config, config_dir = config_paths
         config_dir.mkdir()
-        
-        monkeypatch.setattr(config, 'CONFIG_DIR', str(config_dir))
-        monkeypatch.setattr(config, 'MAIN_CONFIG_FILE', 
-                          str(config_dir / "trapninja.json"))
-        monkeypatch.setattr(config, 'DESTINATIONS_FILE', 
-                          str(config_dir / "destinations.json"))
-        monkeypatch.setattr(config, 'BLOCKED_TRAPS_FILE', 
-                          str(config_dir / "blocked_traps.json"))
-        monkeypatch.setattr(config, 'LISTEN_PORTS_FILE', 
-                          str(config_dir / "listen_ports.json"))
-        monkeypatch.setattr(config, 'BLOCKED_IPS_FILE', 
-                          str(config_dir / "blocked_ips.json"))
-        monkeypatch.setattr(config, 'REDIRECTED_IPS_FILE', 
-                          str(config_dir / "redirected_ips.json"))
-        monkeypatch.setattr(config, 'REDIRECTED_OIDS_FILE', 
-                          str(config_dir / "redirected_oids.json"))
-        monkeypatch.setattr(config, 'REDIRECTED_DESTINATIONS_FILE', 
-                          str(config_dir / "redirected_destinations.json"))
         
         config.ensure_config_dir()
         
@@ -711,19 +757,16 @@ class TestEnsureConfigDir:
         assert (config_dir / "blocked_traps.json").exists()
         assert (config_dir / "listen_ports.json").exists()
 
-    def test_does_not_overwrite_existing_files(self, tmp_path, monkeypatch):
+    def test_does_not_overwrite_existing_files(self, config_paths):
         """Test that existing config files are not overwritten."""
-        import trapninja.config as config
-        
-        config_dir = tmp_path / "config"
+        config, config_dir = config_paths
         config_dir.mkdir()
         
         # Create existing file with custom content
         dest_file = config_dir / "destinations.json"
         dest_file.write_text(json.dumps([["10.0.0.1", 999]]))
         
-        monkeypatch.setattr(config, 'CONFIG_DIR', str(config_dir))
-        monkeypatch.setattr(config, 'DESTINATIONS_FILE', str(dest_file))
+        config.DESTINATIONS_FILE = str(dest_file)
         
         config.ensure_config_dir()
         
@@ -737,7 +780,8 @@ class TestLoadMainConfig:
 
     def test_loads_main_config_file(self, tmp_path, monkeypatch):
         """Test loading main trapninja.json config."""
-        from trapninja.config import _load_main_config
+        import trapninja.config as config
+        monkeypatch.setattr(config, 'CONFIG_DIR', str(tmp_path))
         
         config_file = tmp_path / "trapninja.json"
         config_data = {
@@ -748,20 +792,35 @@ class TestLoadMainConfig:
         config_file.write_text(json.dumps(config_data))
         
         with patch('trapninja.config.MAIN_CONFIG_FILE', str(config_file)):
-            result = _load_main_config()
+            result = config._load_main_config()
         
         assert result["interface"] == "eth0"
         assert result["capture_mode"] == "sniff"
 
-    def test_returns_empty_dict_if_missing(self, tmp_path):
+    def test_returns_empty_dict_if_missing(self, tmp_path, monkeypatch):
         """Test empty dict returned when file doesn't exist."""
-        from trapninja.config import _load_main_config
-        
-        with patch('trapninja.config.MAIN_CONFIG_FILE', 
-                  str(tmp_path / "missing.json")):
-            result = _load_main_config()
-        
+        import trapninja.config as config
+        monkeypatch.setattr(config, 'CONFIG_DIR', str(tmp_path))
+
+        with patch('trapninja.config.MAIN_CONFIG_FILE',
+                   str(tmp_path / "trapninja.json")):
+            result = config._load_main_config()
+
         assert result == {}
+
+    def test_rejects_main_config_outside_config_directory(self, tmp_path, monkeypatch):
+        """Main config loading rejects a path that escapes CONFIG_DIR."""
+        import trapninja.config as config
+
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        outside_file = tmp_path / "outside" / "trapninja.json"
+        outside_file.parent.mkdir()
+        outside_file.write_text(json.dumps({"interface": "outside"}))
+        monkeypatch.setattr(config, "CONFIG_DIR", str(config_dir))
+        monkeypatch.setattr(config, "MAIN_CONFIG_FILE", str(outside_file))
+
+        assert config._load_main_config() == {}
 
 
 class TestAutoDetectInterface:
@@ -817,6 +876,7 @@ class TestCacheConfig:
     def test_load_cache_config_from_file(self, tmp_path, monkeypatch):
         """Test loading cache configuration from file."""
         import trapninja.config as config
+        monkeypatch.setattr(config, 'CONFIG_DIR', str(tmp_path))
         
         cache_file = tmp_path / "cache_config.json"
         cache_data = {
@@ -844,6 +904,7 @@ class TestCacheConfig:
     def test_save_cache_config(self, tmp_path, monkeypatch):
         """Test saving cache configuration to file."""
         import trapninja.config as config
+        monkeypatch.setattr(config, 'CONFIG_DIR', str(tmp_path))
         
         cache_file = tmp_path / "cache_config.json"
         monkeypatch.setattr(config, 'CACHE_CONFIG_FILE', str(cache_file))

@@ -11,6 +11,7 @@ Tests cover:
 import unittest
 from unittest.mock import MagicMock, patch, PropertyMock
 from dataclasses import asdict
+from fixtures.secrets import new_test_secret
 
 
 # =============================================================================
@@ -22,9 +23,9 @@ def _make_mock_user():
     user = MagicMock()
     user.username = 'testuser'
     user.auth_protocol = 'SHA256'
-    user.auth_passphrase = 'authpass12345678'
+    user.auth_passphrase = new_test_secret()
     user.priv_protocol = 'AES128'
-    user.priv_passphrase = 'privpass12345678'
+    user.priv_passphrase = new_test_secret()
     user.engine_id = '80001234567890abcdef'
     return user
 

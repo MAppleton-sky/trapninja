@@ -17,6 +17,7 @@ Author: TrapNinja Team
 import pytest
 import time
 from dataclasses import FrozenInstanceError
+from fixtures.secrets import new_test_secret
 
 
 class TestTypeAliases:
@@ -647,25 +648,28 @@ class TestSNMPv3Credentials:
         """Test authNoPriv credentials."""
         from trapninja.core.types import SNMPv3Credentials
         
+        auth_key = new_test_secret()
         creds = SNMPv3Credentials(
             username="admin",
             auth_protocol="SHA",
-            auth_key="authkey123"
+            auth_key=auth_key
         )
         
         assert creds.auth_protocol == "SHA"
-        assert creds.auth_key == "authkey123"
+        assert creds.auth_key == auth_key
 
     def test_full_credentials(self):
         """Test authPriv credentials."""
         from trapninja.core.types import SNMPv3Credentials
         
+        auth_key = new_test_secret()
+        priv_key = new_test_secret()
         creds = SNMPv3Credentials(
             username="admin",
             auth_protocol="SHA256",
-            auth_key="authkey123",
+            auth_key=auth_key,
             priv_protocol="AES128",
-            priv_key="privkey456",
+            priv_key=priv_key,
             engine_id="0x80001234"
         )
         

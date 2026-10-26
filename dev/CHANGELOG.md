@@ -43,6 +43,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.8.7] - 2026-10-26
+
+### Fixed
+
+- Validate config paths against the configured directory and allowlisted filenames
+  before loading or writing JSON, rejecting traversal and symlink escapes.
+
+---
+
 ## [0.8.6] - 2026-10-26
 
 ### Fixed
@@ -1208,7 +1217,8 @@ When contributing, please:
 
 ---
 
-[Unreleased]: https://github.com/yourusername/trapninja/compare/v0.8.6...HEAD
+[Unreleased]: https://github.com/yourusername/trapninja/compare/v0.8.7...HEAD
+[0.8.7]: https://github.com/yourusername/trapninja/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/yourusername/trapninja/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/yourusername/trapninja/compare/v0.8.4...v0.8.5
 [0.8.0]: https://github.com/yourusername/trapninja/compare/v0.7.14...v0.8.0

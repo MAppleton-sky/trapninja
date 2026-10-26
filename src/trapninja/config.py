@@ -16,6 +16,7 @@ import logging
 import time
 from threading import Timer, Event
 from collections import defaultdict
+from typing import Any
 import ipaddress
 
 # Paths to config files
@@ -104,6 +105,15 @@ def _validate_config_path(file_path: str) -> bool:
         return False
 
 
+def _write_config_json(file_path: str, data: Any) -> None:
+    """Write JSON only to an allowlisted file inside CONFIG_DIR."""
+    if not _validate_config_path(file_path):
+        raise ValueError("Refusing to write configuration outside the config directory")
+
+    with open(file_path, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
 # Main configuration file
 MAIN_CONFIG_FILE = os.path.join(CONFIG_DIR, "trapninja.json")
 
@@ -171,6 +181,10 @@ def _load_main_config():
         dict: Configuration dictionary
     """
     log = logging.getLogger("trapninja")
+
+    if not _validate_config_path(MAIN_CONFIG_FILE):
+        log.error("Refusing to load main configuration from an unsafe path")
+        return {}
     
     if os.path.exists(MAIN_CONFIG_FILE):
         try:
@@ -341,47 +355,39 @@ def ensure_config_dir():
                 "capture_mode": "auto",
                 "config_check_interval": 60
             }
-            with open(MAIN_CONFIG_FILE, 'w') as f:
-                json.dump(example_main_config, f, indent=2)
+            _write_config_json(MAIN_CONFIG_FILE, example_main_config)
             log.info(f"Created example main config file: {MAIN_CONFIG_FILE}")
 
         if not os.path.exists(DESTINATIONS_FILE):
-            with open(DESTINATIONS_FILE, 'w') as f:
-                json.dump([["192.168.1.100", 162]], f, indent=2)
+            _write_config_json(DESTINATIONS_FILE, [["192.168.1.100", 162]])
             log.info(f"Created example destinations file: {DESTINATIONS_FILE}")
 
         if not os.path.exists(BLOCKED_TRAPS_FILE):
-            with open(BLOCKED_TRAPS_FILE, 'w') as f:
-                json.dump([], f, indent=2)
+            _write_config_json(BLOCKED_TRAPS_FILE, [])
             log.info(f"Created example blocked traps file: {BLOCKED_TRAPS_FILE}")
 
         if not os.path.exists(LISTEN_PORTS_FILE):
-            with open(LISTEN_PORTS_FILE, 'w') as f:
-                json.dump([162], f, indent=2)
+            _write_config_json(LISTEN_PORTS_FILE, [162])
             log.info(f"Created example listen ports file: {LISTEN_PORTS_FILE}")
 
         if not os.path.exists(BLOCKED_IPS_FILE):
-            with open(BLOCKED_IPS_FILE, 'w') as f:
-                json.dump([], f, indent=2)
+            _write_config_json(BLOCKED_IPS_FILE, [])
             log.info(f"Created example blocked IPs file: {BLOCKED_IPS_FILE}")
 
         if not os.path.exists(REDIRECTED_IPS_FILE):
-            with open(REDIRECTED_IPS_FILE, 'w') as f:
-                json.dump([["192.168.10.50", "security"]], f, indent=2)
+            _write_config_json(REDIRECTED_IPS_FILE, [["192.168.10.50", "security"]])
             log.info(f"Created example redirected IPs file: {REDIRECTED_IPS_FILE}")
 
         if not os.path.exists(REDIRECTED_OIDS_FILE):
-            with open(REDIRECTED_OIDS_FILE, 'w') as f:
-                json.dump([["1.3.6.1.4.1.8072.2.3.0.1", "security"]], f, indent=2)
+            _write_config_json(REDIRECTED_OIDS_FILE, [["1.3.6.1.4.1.8072.2.3.0.1", "security"]])
             log.info(f"Created example redirected OIDs file: {REDIRECTED_OIDS_FILE}")
 
         if not os.path.exists(REDIRECTED_DESTINATIONS_FILE):
-            with open(REDIRECTED_DESTINATIONS_FILE, 'w') as f:
-                example_destinations = {
-                    "security": [["127.0.0.1", 1362]],
-                    "config": [["127.0.0.1", 1462]]
-                }
-                json.dump(example_destinations, f, indent=2)
+            example_destinations = {
+                "security": [["127.0.0.1", 1362]],
+                "config": [["127.0.0.1", 1462]]
+            }
+            _write_config_json(REDIRECTED_DESTINATIONS_FILE, example_destinations)
             log.info(f"Created example redirected destinations file: {REDIRECTED_DESTINATIONS_FILE}")
     except Exception as e:
         log.error(f"Failed to create example config files: {e}")
@@ -391,10 +397,7 @@ def safe_load_json(file_path, fallback):
     """
     Safely load JSON from file with error handling.
     
-    Security Note (CWE-23): This function is used with hardcoded config
-    file paths (constants like DESTINATIONS_FILE). User input validation
-    is handled separately in cli/validation.py. Use _validate_config_path()
-    if you need to validate a user-provided path.
+    The path must resolve to an allowlisted filename inside CONFIG_DIR.
 
     Args:
         file_path (str): Path to the JSON file
@@ -407,6 +410,10 @@ def safe_load_json(file_path, fallback):
     log = logging.getLogger("trapninja")
 
     try:
+        if not _validate_config_path(file_path):
+            log.error("Refusing to load configuration from an unsafe path")
+            return fallback
+
         if os.path.exists(file_path):
             with open(file_path, 'r') as f:
                 data = json.load(f)
@@ -722,8 +729,7 @@ def save_cache_config(config):
         if data.get('password') is None:
             data.pop('password', None)
         
-        with open(CACHE_CONFIG_FILE, 'w') as f:
-            json.dump(data, f, indent=2)
+        _write_config_json(CACHE_CONFIG_FILE, data)
         
         log.info(f"Saved cache config to {CACHE_CONFIG_FILE}")
         return True

@@ -1,6 +1,6 @@
 # TrapNinja Architecture
 
-**Version:** 0.8.6
+**Version:** 0.8.7
 **Last Updated:** October 2026
 
 ---

@@ -19,6 +19,7 @@ import hashlib
 import struct
 import pytest
 from unittest.mock import MagicMock, patch
+from fixtures.secrets import new_test_secret
 
 
 def _build_snmpv3_message(engine_id: bytes, username: bytes = b'') -> bytes:
@@ -223,7 +224,7 @@ class TestLocalizeKey:
         """Test key derivation with MD5."""
         from trapninja.snmpv3_decryption import _localize_key
         
-        passphrase = "authpassword"
+        passphrase = new_test_secret()
         engine_id = bytes.fromhex('80001234')
         
         key = _localize_key(passphrase, engine_id, 'MD5')
@@ -234,7 +235,7 @@ class TestLocalizeKey:
         """Test key derivation with SHA1."""
         from trapninja.snmpv3_decryption import _localize_key
         
-        passphrase = "authpassword"
+        passphrase = new_test_secret()
         engine_id = bytes.fromhex('80001234')
         
         key = _localize_key(passphrase, engine_id, 'SHA')
@@ -245,7 +246,7 @@ class TestLocalizeKey:
         """Test key derivation with SHA256."""
         from trapninja.snmpv3_decryption import _localize_key
         
-        passphrase = "authpassword"
+        passphrase = new_test_secret()
         engine_id = bytes.fromhex('80001234')
         
         key = _localize_key(passphrase, engine_id, 'SHA256')
@@ -256,7 +257,7 @@ class TestLocalizeKey:
         """Test key derivation is deterministic."""
         from trapninja.snmpv3_decryption import _localize_key
         
-        passphrase = "authpassword"
+        passphrase = new_test_secret()
         engine_id = bytes.fromhex('80001234')
         
         key1 = _localize_key(passphrase, engine_id, 'SHA')
@@ -268,7 +269,7 @@ class TestLocalizeKey:
         """Test different engine IDs produce different keys."""
         from trapninja.snmpv3_decryption import _localize_key
         
-        passphrase = "authpassword"
+        passphrase = new_test_secret()
         
         key1 = _localize_key(passphrase, bytes.fromhex('80001234'), 'SHA')
         key2 = _localize_key(passphrase, bytes.fromhex('80005678'), 'SHA')

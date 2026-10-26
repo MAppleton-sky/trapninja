@@ -248,7 +248,7 @@ Configuration files are stored in `/etc/trapninja/` (production) or `./config/` 
 
 ## Version
 
-Current version is read from `src/VERSION` (currently 0.8.6 Beta).
+Current version is read from `src/VERSION` (currently 0.8.7 Beta).
 
 See [dev/CHANGELOG.md](dev/CHANGELOG.md) for version history.
 
