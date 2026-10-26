@@ -10,10 +10,12 @@ New commands:
 
 from typing import Optional
 from .validation import InputValidator
+from ..core.constants import DEFAULT_HA_PORT
 
 
-def configure_ha(mode: str, peer_host: str, priority: int = 100, 
-                 peer_port: int = 8162, listen_port: int = 8162,
+def configure_ha(mode: str, peer_host: str, priority: int = 100,
+                 peer_port: int = DEFAULT_HA_PORT,
+                 listen_port: int = DEFAULT_HA_PORT,
                  auto_failback: bool = False) -> bool:
     """
     Configure High Availability settings
@@ -603,7 +605,7 @@ TROUBLESHOOTING:
     ssh secondary "python trapninja.py --status"
 
   Check connectivity:
-    nc -zv <peer_ip> 8162
+    nc -zv <peer_ip> 60006
 
   View logs:
     tail -f /var/log/trapninja/trapninja.log | grep HA

@@ -1,6 +1,6 @@
 # TrapNinja SNMPv3 Credentials Guide
 
-**Version 0.7.14 (Beta)**
+**Version 0.8.0 (Beta)**
 
 Complete guide to managing SNMPv3 user credentials for trap decryption.
 
@@ -56,7 +56,7 @@ If dependencies are missing, you'll see:
 
 ## Credential Storage Security
 
-TrapNinja encrypts SNMPv3 credentials at rest using Fernet symmetric encryption. The encryption key is derived from the Engine ID using PBKDF2 with 100,000 iterations, meaning credentials can only be decrypted when the correct Engine ID is known.
+TrapNinja encrypts SNMPv3 credentials at rest using Fernet symmetric encryption. The encryption key is derived from the Engine ID using PBKDF2-HMAC-SHA256 with 600,000 iterations, following the OWASP 2023 recommendation. Credentials can only be decrypted when the correct Engine ID is known.
 
 Credentials are stored in `config/snmpv3_credentials.json` with restrictive file permissions (0600 - owner read/write only). Passphrases are never stored in plaintext.
 
@@ -604,4 +604,4 @@ SNMPv3 passphrases must be at least 8 characters. If your network element requir
 
 ---
 
-*TrapNinja v0.7.14 (Beta)*
+*TrapNinja v0.8.0 (Beta)*

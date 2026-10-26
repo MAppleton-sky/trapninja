@@ -268,7 +268,7 @@ trapninja ha configure --mode secondary --peer 192.168.1.101 --priority 100
 
 # Configure with custom ports
 trapninja ha configure --mode primary --peer 192.168.1.102 \
-    --peer-port 8162 --listen-port 8162
+    --peer-port 60006 --listen-port 60006
 ```
 
 ### Status and Control

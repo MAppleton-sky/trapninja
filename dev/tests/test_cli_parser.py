@@ -337,6 +337,8 @@ class TestHACommands:
         assert args.command == 'configure'
         assert args.mode == 'primary'
         assert args.ha_peer_host == '192.168.1.102'
+        assert args.peer_port == 60006
+        assert args.listen_port == 60006
 
     def test_ha_promote(self):
         """Test ha promote parsing."""

@@ -25,8 +25,10 @@ cd trapninja
 # Install dependencies
 pip3.9 install --break-system-packages -r dev/requirements.txt
 
-# Configure destinations
-echo '[["192.168.1.100", 162]]' > src/config/destinations.json
+# Configure the runtime directory and destinations
+sudo mkdir -p /etc/trapninja
+sudo cp config.example/*.json /etc/trapninja/
+echo '[["192.168.1.100", 162]]' | sudo tee /etc/trapninja/destinations.json >/dev/null
 
 # Start forwarding (from src directory)
 cd src

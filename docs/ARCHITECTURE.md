@@ -1,7 +1,7 @@
 # TrapNinja Architecture
 
 **Version:** 0.8.0
-**Last Updated:** February 2026
+**Last Updated:** August 2026
 
 ---
 
@@ -114,7 +114,7 @@ graph TD
     Nokia -.->|"UDP 162<br/>SNMP Traps"| Secondary
     OtherNE -.->|"UDP 162<br/>SNMP Traps"| Secondary
 
-    Primary <-->|"TCP 5000<br/>HA Heartbeat"| Secondary
+    Primary <-->|"TCP 60006<br/>HA Heartbeat and config sync"| Secondary
     Primary -->|"Redis Streams<br/>Trap Caching"| Redis
     Secondary -->|"Redis Streams<br/>Trap Caching"| Redis
 
@@ -123,8 +123,8 @@ graph TD
     Primary -->|"UDP 162<br/>Forwarded Traps"| TransNOC
     Primary -->|"UDP 162<br/>Forwarded Traps"| CoreNOC
 
-    Primary -->|"HTTP /metrics<br/>Prometheus Format"| Prometheus
-    Secondary -->|"HTTP /metrics<br/>Prometheus Format"| Prometheus
+    Primary -->|".prom textfile<br/>node_exporter"| Prometheus
+    Secondary -->|".prom textfile<br/>node_exporter"| Prometheus
     Prometheus -->|"PromQL Queries"| Grafana
 
     classDef user fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
@@ -196,7 +196,7 @@ graph TD
     subgraph ExternalDeps ["External Dependencies"]
         Redis[("💾 Redis 5.0+<br/>Streams API")]
         Destinations["📡 NOC Destinations<br/>UDP 162"]
-        PeerNode["🔄 HA Peer Node<br/>TCP 5000"]
+        PeerNode["🔄 HA Peer Node<br/>TCP 60006"]
     end
 
     eBPF --> PacketQueue
@@ -341,7 +341,7 @@ sequenceDiagram
 **Networking:**
 - Raw sockets (high-performance forwarding)
 - UDP port 162 (SNMP trap reception)
-- TCP port 5000 (HA heartbeat)
+- TCP port 60006 (HA heartbeat and config synchronisation)
 
 **Monitoring & Security:**
 - Prometheus (metrics export)
@@ -712,7 +712,7 @@ trapninja/
 │   │   │   ├── __init__.py
 │   │   │   ├── collector.py          # Metrics collection
 │   │   │   ├── config.py             # Metrics configuration
-│   │   │   └── exporter.py           # Prometheus HTTP export
+│   │   │   └── exporter.py           # Prometheus textfile/JSON export
 │   │   │
 │   │   ├── processing/               # Packet processing (7 files)
 │   │   │   ├── __init__.py
@@ -729,23 +729,13 @@ trapninja/
 │   │       ├── models.py             # IPStats, OIDStats, etc.
 │   │       └── api.py                # Query API
 │   │
-│   └── config/                       # Configuration files (16 files)
+│   └── config.example/              # Example configurations
 │       ├── trapninja.json
-│       ├── destinations.json
-│       ├── blocked_ips.json
-│       ├── blocked_traps.json
-│       ├── redirected_ips.json
-│       ├── redirected_oids.json
-│       ├── redirected_destinations.json
-│       ├── ha_config.json
 │       ├── cache_config.json
 │       ├── capture_config.json
-│       ├── shadow_config.json
-│       ├── stats_config.json
-│       ├── sync_config.json
-│       ├── listen_ports.json
-│       ├── ha_config_primary_example.json
-│       └── ha_config_secondary_example.json
+│       ├── diagnostics_config.json
+│       ├── ha_config.json
+│       └── metrics_config.json
 │
 ├── dev/                              # DEVELOPMENT FILES (not deployed)
 │   ├── CHANGELOG.md
@@ -892,15 +882,15 @@ Primary/Secondary clustering with automatic failover.
 | `sync/manager.py` | `ConfigSyncManager` for config replication between nodes |
 | `sync/config_bundle.py` | `SharedConfig` types, shared vs local config definitions |
 
-#### `metrics/` - Prometheus Metrics
+### `metrics/` - Prometheus Metrics
 
-Prometheus-compatible metrics collection and HTTP export.
+Prometheus-compatible metrics collection and textfile/JSON export.
 
 | Module | Purpose |
 |--------|---------|
 | `collector.py` | Metrics collection from service components |
 | `config.py` | Metrics configuration and settings |
-| `exporter.py` | HTTP endpoint serving Prometheus-format metrics |
+| `exporter.py` | Prometheus textfile and JSON metric export |
 
 #### `processing/` - Packet Processing
 
@@ -958,12 +948,12 @@ Only the contents of `src/` are deployed to the target system:
 │   ├── processing/           # Processing module
 │   ├── stats/                # Statistics module
 │   └── *.py                  # Top-level modules
-└── config/                   # Default configs (copied to /etc/)
+└── (runtime configuration supplied separately)
 ```
 
 ### Configuration Directory
 
-Site-specific configurations are stored separately:
+Site-specific configurations are stored separately, normally under `/etc/trapninja/`:
 
 ```
 /etc/trapninja/               # trapninja_config_dest
@@ -989,18 +979,17 @@ Site-specific configurations are stored separately:
 |-----------|---------|-----------|
 | `src/` | Production code | Yes |
 | `src/trapninja/` | Python package | Yes |
-| `src/config/` | Default configs | Yes (copied to /etc/) |
+| `config.example/` | Example configs | No |
 | `dev/` | Development files | No |
 | `docs/` | Documentation | No |
 | `config.example/` | Example configurations | No |
 
-### Ansible Deployment
+### Deployment Automation
 
-Production deployment is driven by Ansible playbooks maintained in a separate
-internal repository. Those playbooks rsync only the contents of `src/` to
-`/opt/trapninja/`, excluding `__pycache__/`, `*.pyc`, `*.pyo`, `.DS_Store`, and
-`*.bak`. See that repository for the authoritative playbook, inventory, and
-templates.
+Production deployment automation is maintained outside this repository. This
+repository provides the Python package, example configuration, and offline
+package scripts; consult the deployment repository for authoritative playbooks,
+inventory, and service templates.
 
 ### Air-Gapped Deployment
 
@@ -1116,7 +1105,7 @@ graph TD
     VIP -->|"UDP 162"| Primary
     VIP -.->|"UDP 162"| Secondary
 
-    Primary <-->|"TCP 5000<br/>Heartbeat"| Secondary
+    Primary <-->|"TCP 60006<br/>Heartbeat and config sync"| Secondary
     Primary --> PrimaryRedis
     Secondary --> SecondaryRedis
 
@@ -1124,8 +1113,8 @@ graph TD
     Primary -->|"Forwarded Traps"| BroadbandNOC
     Primary -->|"Forwarded Traps"| TransNOC
 
-    Primary -->|"/metrics"| Prometheus
-    Secondary -->|"/metrics"| Prometheus
+    Primary -->|".prom textfile<br/>node_exporter"| Prometheus
+    Secondary -->|".prom textfile<br/>node_exporter"| Prometheus
     Prometheus --> Grafana
 
     classDef primary fill:#c8e6c9,stroke:#2e7d32,stroke-width:3px
@@ -1348,7 +1337,7 @@ Privacy protocols: `NONE`, `DES`, `3DES`, `AES128` (default), `AES192`, `AES256`
 ### Prometheus Metrics Endpoint
 
 ```
-GET /metrics    Prometheus-format metrics export (HTTP)
+*.prom file    Prometheus-format metrics for node_exporter textfile collector
 ```
 
 Key metrics exposed:

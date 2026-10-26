@@ -24,7 +24,7 @@ every alarm being delivered — silent trap loss is never acceptable.
 ### Project Layout
 ```
 src/trapninja/     — Main application package
-src/config/        — Live configuration files (JSON)
+config.example/    — Example configuration files (JSON)
 config.example/    — Example / template configs
 dev/tests/         — Primary test suite
 tests/unit/        — Additional unit tests
@@ -79,7 +79,7 @@ Every code change must serve at least one of these. Challenge code that doesn't.
   or provide a significantly cleaner interface.
 - When breaking changes are introduced: clearly describe what changed, why, and any
   migration steps operators need to take.
-- Do **not** keep obsolete flags, modes, or dual code paths "just in case."
+- Keep the existing hidden legacy flat-flag parser only for current automation compatibility; do not add new legacy flags or expand that compatibility layer without an explicit migration need. New usage must use the hierarchical subcommand interface.
 
 ### 3.3 Configuration over Code Changes
 - Behaviour that operators might want to change should be **configurable** — not hardcoded.

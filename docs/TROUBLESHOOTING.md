@@ -17,7 +17,7 @@ trapninja daemon foreground --debug
 tail -f /var/log/trapninja/trapninja.log
 
 # Monitor metrics
-curl http://localhost:8080/metrics | grep trapninja
+grep trapninja /var/log/trapninja/metrics/trapninja_metrics.prom
 ```
 
 ---
@@ -301,7 +301,7 @@ top -p $(pgrep -f trapninja)
 **Diagnostics**:
 ```bash
 # Check queue metrics
-curl -s http://localhost:8080/metrics | grep queue
+grep queue /var/log/trapninja/metrics/trapninja_metrics.prom
 ```
 
 **Solutions**:
@@ -322,7 +322,7 @@ curl -s http://localhost:8080/metrics | grep queue
 **Diagnostics**:
 ```bash
 # Check processing histogram
-curl -s http://localhost:8080/metrics | grep processing_seconds
+grep processing_seconds /var/log/trapninja/metrics/trapninja_metrics.prom
 ```
 
 **Solutions**:
@@ -628,7 +628,7 @@ nc -vzu <dest_ip> 162
 grep -i "error.*forward\|destination" /var/log/trapninja/trapninja.log
 
 # Check metrics for failures
-curl -s http://localhost:8080/metrics | grep forward_errors
+grep forward_errors /var/log/trapninja/metrics/trapninja_metrics.prom
 ```
 
 ---
@@ -740,10 +740,10 @@ grep -i "forward\|process\|drop" /var/log/trapninja/trapninja.log | tail -20
 
 ```bash
 # All metrics
-curl -s http://localhost:8080/metrics
+cat /var/log/trapninja/metrics/trapninja_metrics.prom
 
 # Specific metrics
-curl -s http://localhost:8080/metrics | grep -E "received|forwarded|dropped|ha_blocked"
+grep -E "received|forwarded|dropped|ha_blocked" /var/log/trapninja/metrics/trapninja_metrics.prom
 ```
 
 ### Network Diagnostics

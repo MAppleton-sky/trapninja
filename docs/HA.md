@@ -19,8 +19,8 @@ TrapNinja supports High Availability (HA) clustering with automatic failover for
 │   └────────┬────────┘                └────────┬────────┘            │
 │            │                                  │                      │
 │            ▼                                  ▼                      │
-│      Forwards Traps                    Drops Traps                   │
-│     to Destinations                  (monitors only)                 │
+│      Forwards Traps                    Caches Traps                  │
+│     to Destinations                  (for failover replay)            │
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -58,7 +58,7 @@ Expected output on PRIMARY:
 ```
 HA Status: primary
 Forwarding: True
-Peer: 192.168.1.102:8162
+Peer: 192.168.1.102:60006
 Peer Status: CONNECTED
 Last Heartbeat: 1s ago
 ```
@@ -67,7 +67,7 @@ Expected output on SECONDARY:
 ```
 HA Status: secondary
 Forwarding: False
-Peer: 192.168.1.101:8162
+Peer: 192.168.1.101:60006
 Peer Status: CONNECTED
 Last Heartbeat: 1s ago
 ```
@@ -83,8 +83,8 @@ Location: `config/ha_config.json`
     "enabled": true,
     "mode": "primary",
     "peer_host": "192.168.1.102",
-    "peer_port": 8162,
-    "listen_port": 8162,
+   "peer_port": 60006,
+   "listen_port": 60006,
     "listen_address": "0.0.0.0",
     "priority": 150,
     "heartbeat_interval": 1.0,
@@ -100,10 +100,10 @@ Location: `config/ha_config.json`
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enabled` | bool | false | Enable HA functionality |
-| `mode` | string | "standalone" | Role: "primary", "secondary", or "standalone" |
+| `mode` | string | "primary" | Role: "primary" or "secondary" |
 | `peer_host` | string | - | IP address of peer node |
-| `peer_port` | int | 8162 | UDP port for HA communication |
-| `listen_port` | int | 8162 | Local UDP port for HA |
+| `peer_port` | int | 60006 | TCP port for HA communication |
+| `listen_port` | int | 60006 | Local TCP port for HA |
 | `listen_address` | string | "0.0.0.0" | IP address to bind HA listener (CWE-284) |
 | `priority` | int | 100 | Election priority (higher wins) |
 | `heartbeat_interval` | float | 1.0 | Seconds between heartbeats |
@@ -204,12 +204,12 @@ If both nodes believe they are PRIMARY:
 
 | Port | Protocol | Direction | Purpose |
 |------|----------|-----------|---------|
-| 8162 | UDP | Bidirectional | HA heartbeat and state sync |
+| 60006 | TCP | Bidirectional | HA heartbeat and state sync |
 | 162 | UDP | Inbound | SNMP trap reception |
 
 ```bash
 # Example firewall rules (firewalld)
-firewall-cmd --permanent --add-port=8162/udp
+firewall-cmd --permanent --add-port=60006/tcp
 firewall-cmd --permanent --add-port=162/udp
 firewall-cmd --reload
 ```
@@ -256,7 +256,7 @@ trapninja ha configure --mode secondary --peer 192.168.1.101 --priority 100
 
 # Configure with custom ports
 trapninja ha configure --mode primary --peer 192.168.1.102 \
-    --peer-port 8162 --listen-port 8162
+   --peer-port 60006 --listen-port 60006
 ```
 
 ### Status and Control
@@ -305,13 +305,13 @@ trapninja daemon status | grep ha_blocked
 **Symptom**: Frequent failovers, peer shown as disconnected.
 
 **Checks**:
-1. Firewall allowing UDP port 8162
+1. Firewall allowing TCP port 60006
 2. Network connectivity between nodes
 3. Correct peer IP in configuration
 
 ```bash
 # Test connectivity
-nc -vzu <peer_ip> 8162
+nc -vz <peer_ip> 60006
 
 # Check firewall
 firewall-cmd --list-ports
@@ -500,8 +500,8 @@ trapninja daemon start
     "enabled": true,
     "mode": "primary",
     "peer_host": "192.168.1.102",
-    "peer_port": 8162,
-    "listen_port": 8162,
+   "peer_port": 60006,
+   "listen_port": 60006,
     "listen_address": "192.168.1.101",
     "priority": 150,
     "heartbeat_interval": 1.0,
@@ -519,8 +519,8 @@ trapninja daemon start
     "enabled": true,
     "mode": "secondary",
     "peer_host": "192.168.1.101",
-    "peer_port": 8162,
-    "listen_port": 8162,
+   "peer_port": 60006,
+   "listen_port": 60006,
     "listen_address": "192.168.1.102",
     "priority": 100,
     "heartbeat_interval": 1.0,

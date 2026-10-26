@@ -282,8 +282,8 @@ class TestRegistryHADispatch:
             mode='primary',
             ha_peer_host='192.168.1.102',
             priority=100,
-            peer_port=8162,
-            listen_port=8162,
+            peer_port=60006,
+            listen_port=60006,
             ha_mode=None, ha_priority=None,
             ha_peer_port=None, ha_listen_port=None,
         )

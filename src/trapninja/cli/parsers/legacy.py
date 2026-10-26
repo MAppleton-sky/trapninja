@@ -19,6 +19,7 @@ Migration guide:
 import argparse
 
 from .base import validated_ip, validated_oid, validated_tag, validated_port
+from ...core.constants import DEFAULT_HA_PORT
 
 
 def add_legacy_arguments(parser: argparse.ArgumentParser):
@@ -58,9 +59,9 @@ def add_legacy_arguments(parser: argparse.ArgumentParser):
     # HA parameters (legacy)
     parser.add_argument('--ha-mode', choices=['primary', 'secondary'], help=_S)
     parser.add_argument('--ha-peer-host', type=validated_ip, help=_S)
-    parser.add_argument('--ha-peer-port', type=validated_port, default=8162,
+    parser.add_argument('--ha-peer-port', type=validated_port, default=DEFAULT_HA_PORT,
                         help=_S)
-    parser.add_argument('--ha-listen-port', type=validated_port, default=8162,
+    parser.add_argument('--ha-listen-port', type=validated_port, default=DEFAULT_HA_PORT,
                         help=_S)
     parser.add_argument('--ha-priority', type=int, default=100, help=_S)
     parser.add_argument('--force', action='store_true', help=_S)

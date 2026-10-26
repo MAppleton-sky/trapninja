@@ -8,6 +8,7 @@ Commands: configure, status, promote, demote, force-failover, disable
 import textwrap
 
 from .base import TrapNinjaHelpFormatter, validated_ip, validated_port
+from ...core.constants import DEFAULT_HA_PORT
 
 
 def add_ha_subcommands(subparsers):
@@ -37,10 +38,10 @@ def add_ha_subcommands(subparsers):
     configure_cmd.add_argument('--peer', '--peer-host', type=validated_ip,
                                required=True, dest='ha_peer_host',
                                help='Peer IP address')
-    configure_cmd.add_argument('--peer-port', type=validated_port, default=8162,
-                               help='Peer port (default: 8162)')
-    configure_cmd.add_argument('--listen-port', type=validated_port, default=8162,
-                               help='Listen port (default: 8162)')
+    configure_cmd.add_argument('--peer-port', type=validated_port, default=DEFAULT_HA_PORT,
+                               help=f'Peer port (default: {DEFAULT_HA_PORT})')
+    configure_cmd.add_argument('--listen-port', type=validated_port, default=DEFAULT_HA_PORT,
+                               help=f'Listen port (default: {DEFAULT_HA_PORT})')
     configure_cmd.add_argument('--priority', type=int, default=100,
                                help='Priority 1-1000 (default: 100)')
 

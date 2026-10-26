@@ -60,8 +60,8 @@ Production runs `python3.9 -O` which removes all `assert` statements. Use explic
 @patch('trapninja.forwarder.forwarder.resolve_oid')
 ```
 
-**10. No backward compatibility preservation by default.**
-Clean forward architecture wins. Breaking changes are preferred over legacy code bloat. All legacy flat-flag CLI invocations were removed in v0.8.0. Do not re-introduce them.
+**10. No new legacy CLI surface by default.**
+The current v0.8.0 implementation retains hidden legacy flat-flag CLI parsing for existing automation, but all new commands and documentation must use the hierarchical subcommand interface. Do not add new legacy flags or expand the compatibility layer without an explicit migration need.
 
 ---
 

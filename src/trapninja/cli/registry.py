@@ -25,6 +25,7 @@ Author: TrapNinja Team
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from argparse import Namespace
+from ..core.constants import DEFAULT_HA_PORT
 
 
 # =============================================================================
@@ -287,8 +288,8 @@ def _ha_configure(args: Namespace) -> bool:
     return ha_commands.configure_ha(
         mode, peer,
         getattr(args, 'priority', None) or getattr(args, 'ha_priority', 100),
-        getattr(args, 'peer_port', None) or getattr(args, 'ha_peer_port', 8162),
-        getattr(args, 'listen_port', None) or getattr(args, 'ha_listen_port', 8162),
+        getattr(args, 'peer_port', None) or getattr(args, 'ha_peer_port', DEFAULT_HA_PORT),
+        getattr(args, 'listen_port', None) or getattr(args, 'ha_listen_port', DEFAULT_HA_PORT),
     )
 
 

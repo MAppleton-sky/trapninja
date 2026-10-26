@@ -21,9 +21,12 @@ trapninja stats baseline compare <name>
 trapninja metrics
 ```
 
-## No Legacy Flat-Flag Support
+## Legacy Flat-Flag Compatibility
 
-All legacy flat-flag invocations (`trapninja --start`, `trapninja --stats`) were removed in v0.8.0. Do not re-introduce them. There is no compatibility shim and there will not be one.
+The current v0.8.0 implementation retains hidden legacy flat-flag parsing for
+existing automation. Do not add new legacy flags or expand the compatibility
+layer without an explicit migration need; new commands and documentation use
+the hierarchical subcommand interface.
 
 ## Error Messages
 

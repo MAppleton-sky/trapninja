@@ -255,8 +255,8 @@ sudo chmod 755 /var/log/trapninja
 ### 6. Initial Configuration
 
 ```bash
-# Copy configuration files from source
-cp -r src/config/* /etc/trapninja/
+# Copy example configuration files from the repository
+cp config.example/*.json /etc/trapninja/
 
 # Create minimal destinations.json
 cat > /etc/trapninja/destinations.json << 'EOF'
