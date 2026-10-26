@@ -18,13 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Reuse one persistent background thread for periodic metrics exports instead
-  of creating a new timer thread every interval. Export failures are isolated,
-  later cycles continue, and orderly service shutdown stops the exporter after
-  writing a final metrics snapshot.
-
 ### Added
 
 #### Capture File Replay Engine
@@ -47,6 +40,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Supports SNMPv1, v2c, and v3 traps with version detection for statistics
 - Memory-efficient streaming via Scapy PcapReader (handles multi-GB files)
 - Documentation added: `docs/REPLAY.md`
+
+---
+
+## [0.8.5] - 2026-10-26
+
+### Fixed
+
+- Reuse one persistent background thread for periodic metrics exports instead
+  of creating a new timer thread every interval. Export failures are isolated,
+  later cycles continue, and orderly service shutdown stops the exporter after
+  writing a final metrics snapshot.
 
 ---
 
@@ -1194,7 +1198,8 @@ When contributing, please:
 
 ---
 
-[Unreleased]: https://github.com/yourusername/trapninja/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/yourusername/trapninja/compare/v0.8.5...HEAD
+[0.8.5]: https://github.com/yourusername/trapninja/compare/v0.8.4...v0.8.5
 [0.8.0]: https://github.com/yourusername/trapninja/compare/v0.7.14...v0.8.0
 [0.7.14]: https://github.com/yourusername/trapninja/compare/v0.7.13...v0.7.14
 [0.7.13]: https://github.com/yourusername/trapninja/compare/v0.7.12...v0.7.13

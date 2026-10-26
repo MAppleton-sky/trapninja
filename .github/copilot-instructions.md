@@ -8,7 +8,7 @@ TrapNinja is a **production-grade SNMP Trap Forwarder** for telecommunications i
 - **Redis 5.0.3** on production (Redis 6+ commands will fail silently at runtime)
 - **Ansible air-gapped deployment** — no pip install at runtime on production servers
 - **Config location**: `/etc/trapninja/` — **Source**: `src/` only (never deploy `dev/tests/`)
-- **Current version**: v0.8.0
+- **Current version**: v0.8.5
 - **Test suite**: ~1,830 tests across 45 modules in `dev/tests/`
 
 ---
@@ -61,9 +61,17 @@ Production runs `python3.12 -O` which removes all `assert` statements. Use expli
 ```
 
 **10. No new legacy CLI surface by default.**
-The current v0.8.0 implementation retains hidden legacy flat-flag CLI parsing for existing automation, but all new commands and documentation must use the hierarchical subcommand interface. Do not add new legacy flags or expand the compatibility layer without an explicit migration need.
+The current v0.8.5 implementation retains hidden legacy flat-flag CLI parsing for existing automation, but all new commands and documentation must use the hierarchical subcommand interface. Do not add new legacy flags or expand the compatibility layer without an explicit migration need.
 
 ---
+
+## Versioning
+
+For every application behavior change, update `src/VERSION` and add the matching
+entry to `dev/CHANGELOG.md` in the same change. During beta, use PATCH for
+backward-compatible bug fixes, MINOR for features or breaking changes, and
+MAJOR when the project reaches a stable 1.x release with a breaking change.
+Keep current-version references in README and contributor guidance aligned.
 
 ## Architecture Overview
 
