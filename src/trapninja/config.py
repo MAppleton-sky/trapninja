@@ -265,6 +265,7 @@ SNMPV3_CREDENTIALS_FILE = os.path.join(CONFIG_DIR, "snmpv3_credentials.json")
 
 # Daemon settings
 PID_FILE = "/var/run/trapninja.pid"
+RUNNING_VERSION_FILE = "/var/run/trapninja.version.json"
 LOG_FILE = "/var/log/trapninja/trapninja.log"
 LOG_LEVEL = "INFO"
 

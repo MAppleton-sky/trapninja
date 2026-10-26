@@ -6,17 +6,34 @@ Handles daemon control operations (start, stop, status, restart).
 Fixed to ensure Python 3.6 compatibility by avoiding subprocess.run() with capture_output parameter.
 """
 import os
+import json
 import sys
 import time
 import signal
 import logging
 import subprocess
 
-from .config import PID_FILE, LOG_FILE, ensure_config_dir
+from .config import PID_FILE, RUNNING_VERSION_FILE, LOG_FILE, ensure_config_dir
+from .__version__ import __version__
 from .service import run_service
 
 # Get logger instance
 logger = logging.getLogger("trapninja")
+
+
+def _read_running_version(pid: int):
+    """Return the version recorded by this daemon PID, if available."""
+    try:
+        with open(RUNNING_VERSION_FILE, "r") as version_file:
+            runtime_metadata = json.load(version_file)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+
+    if runtime_metadata.get("pid") != pid:
+        return None
+
+    version = runtime_metadata.get("version")
+    return version if isinstance(version, str) and version else None
 
 
 def _build_process_check_cmd(own_pid: int) -> str:
@@ -471,6 +488,7 @@ def status_daemon():
     """
     # Get our own PID to exclude from the check
     own_pid = os.getpid()
+    print(f"Installed CLI version: {__version__}")
 
     # First check for PID file
     if not os.path.exists(PID_FILE):
@@ -480,6 +498,7 @@ def status_daemon():
         if processes:
             print("TrapNinja appears to be running but PID file is missing:")
             print(processes)
+            print("Running daemon version: unknown (PID/version metadata is unavailable)")
             return 0
         else:
             print("TrapNinja is not running")
@@ -504,6 +523,19 @@ def status_daemon():
         try:
             os.kill(pid, 0)
             print(f"TrapNinja is running with PID {pid}")
+            running_version = _read_running_version(pid)
+            if running_version is None:
+                print(
+                    "Running daemon version: unknown "
+                    "(daemon must be restarted to record its version)"
+                )
+            else:
+                print(f"Running daemon version: {running_version}")
+                if running_version != __version__:
+                    print(
+                        "WARNING: Installed CLI and running daemon versions differ; "
+                        "restart TrapNinja to load the installed version."
+                    )
 
             # Get the command line of the process
             cmd_line = run_command_safe(f"ps -p {pid} -o command=")

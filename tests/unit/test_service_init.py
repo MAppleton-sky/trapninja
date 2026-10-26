@@ -267,6 +267,26 @@ class TestSetupLogging:
 class TestSetupProcess:
     """Test PID file and signal handler setup."""
 
+    def test_records_running_version_metadata(self, initializer, tmp_path):
+        """Startup records the loaded app version against its PID."""
+        import json
+        import os
+        from trapninja import __version__
+        from trapninja.core import service_init
+
+        pid_file = tmp_path / "trapninja.pid"
+        version_file = tmp_path / "trapninja.version.json"
+        with patch.object(service_init, "PID_FILE", str(pid_file)), \
+             patch.object(service_init, "RUNNING_VERSION_FILE", str(version_file)), \
+             patch("trapninja.core.service_init.signal.signal"):
+            initializer.setup_process()
+
+        runtime_metadata = json.loads(version_file.read_text())
+        assert runtime_metadata == {
+            "pid": os.getpid(),
+            "version": __version__,
+        }
+
     @patch("trapninja.core.service_init.signal.signal")
     @patch("builtins.open", mock_open())
     def test_registers_signal_handlers(self, mock_signal, initializer):

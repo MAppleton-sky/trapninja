@@ -43,6 +43,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.8.6] - 2026-10-26
+
+### Fixed
+
+- `trapninja daemon status` now reports the version recorded by the running
+  daemon separately from the installed CLI version. Daemons started before
+  runtime version metadata was introduced are reported as unknown until restart.
+
+---
+
 ## [0.8.5] - 2026-10-26
 
 ### Fixed
@@ -1198,7 +1208,8 @@ When contributing, please:
 
 ---
 
-[Unreleased]: https://github.com/yourusername/trapninja/compare/v0.8.5...HEAD
+[Unreleased]: https://github.com/yourusername/trapninja/compare/v0.8.6...HEAD
+[0.8.6]: https://github.com/yourusername/trapninja/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/yourusername/trapninja/compare/v0.8.4...v0.8.5
 [0.8.0]: https://github.com/yourusername/trapninja/compare/v0.7.14...v0.8.0
 [0.7.14]: https://github.com/yourusername/trapninja/compare/v0.7.13...v0.7.14

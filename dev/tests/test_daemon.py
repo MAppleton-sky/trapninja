@@ -375,8 +375,10 @@ class TestStatusDaemon:
     @patch('trapninja.daemon.run_command_safe')
     @patch('trapninja.daemon.os.getpid')
     @patch('trapninja.daemon.os.kill')
-    def test_returns_zero_when_running(self, mock_kill, mock_getpid, mock_run_cmd):
-        """Test returns 0 when daemon is running."""
+    def test_reports_running_and_installed_versions(
+        self, mock_kill, mock_getpid, mock_run_cmd, capsys
+    ):
+        """Status distinguishes the running daemon version from the installed CLI."""
         from trapninja.daemon import status_daemon
         
         mock_getpid.return_value = 99999
@@ -388,16 +390,58 @@ class TestStatusDaemon:
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
             f.write("12345")
             temp_pid_file = f.name
+        version_file = f"{temp_pid_file}.version.json"
+        with open(version_file, 'w') as f:
+            f.write('{"pid": 12345, "version": "0.8.4"}')
         
         try:
             with patch('trapninja.daemon.PID_FILE', temp_pid_file):
-                with patch('trapninja.daemon.os.path.exists') as mock_exists:
-                    mock_exists.side_effect = [True, True, False]  # PID file, PID file, LOG file
-                    result = status_daemon()
+                with patch('trapninja.daemon.RUNNING_VERSION_FILE', version_file):
+                    with patch('trapninja.daemon.os.path.exists') as mock_exists:
+                        mock_exists.side_effect = [True, True, False]
+                        result = status_daemon()
             
             assert result == 0
+            output = capsys.readouterr().out
+            assert "Installed CLI version:" in output
+            assert "Running daemon version: 0.8.4" in output
+            assert "versions differ" in output
         finally:
             # Cleanup
+            if os.path.exists(temp_pid_file):
+                os.unlink(temp_pid_file)
+            if os.path.exists(version_file):
+                os.unlink(version_file)
+
+    @patch('trapninja.daemon.run_command_safe')
+    @patch('trapninja.daemon.os.getpid')
+    @patch('trapninja.daemon.os.kill')
+    def test_reports_unknown_for_running_daemon_without_version_metadata(
+        self, mock_kill, mock_getpid, mock_run_cmd, capsys
+    ):
+        """Status does not misreport the installed version for an older daemon."""
+        from trapninja.daemon import status_daemon
+
+        mock_getpid.return_value = 99999
+        mock_run_cmd.side_effect = [
+            "trapninja --foreground-daemon",
+            "00:05:32",
+        ]
+
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+            f.write("12345")
+            temp_pid_file = f.name
+
+        try:
+            with patch('trapninja.daemon.PID_FILE', temp_pid_file):
+                with patch('trapninja.daemon.RUNNING_VERSION_FILE', f"{temp_pid_file}.missing"):
+                    with patch('trapninja.daemon.os.path.exists') as mock_exists:
+                        mock_exists.side_effect = [True, True, False]
+                        result = status_daemon()
+
+            assert result == 0
+            assert "Running daemon version: unknown" in capsys.readouterr().out
+        finally:
             if os.path.exists(temp_pid_file):
                 os.unlink(temp_pid_file)
 

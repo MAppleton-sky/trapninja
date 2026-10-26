@@ -30,6 +30,7 @@ Author: TrapNinja Team
 
 import logging
 import multiprocessing
+import json
 import os
 import queue
 import signal
@@ -46,9 +47,11 @@ from ..config import (
     LISTEN_PORTS,
     LOG_FILE,
     PID_FILE,
+    RUNNING_VERSION_FILE,
     load_config,
     stop_event,
 )
+from ..__version__ import __version__
 from ..ha import (
     HAState,
     get_ha_cluster,
@@ -300,6 +303,19 @@ class ServiceInitializer:
             logger.info(f"PID file updated with current PID: {os.getpid()}")
         except Exception as e:
             logger.error(f"Failed to write PID file: {e}")
+
+        version_temp_file = f"{RUNNING_VERSION_FILE}.{os.getpid()}.tmp"
+        try:
+            with open(version_temp_file, "w") as version_file:
+                json.dump({"pid": os.getpid(), "version": __version__}, version_file)
+                version_file.write("\n")
+            os.replace(version_temp_file, RUNNING_VERSION_FILE)
+        except Exception as e:
+            logger.error(f"Failed to record running TrapNinja version: {e}")
+            try:
+                os.remove(version_temp_file)
+            except OSError:
+                pass
 
         # Register signal handlers
         signal.signal(signal.SIGTERM, self._handle_signal)
@@ -948,6 +964,16 @@ class ServiceInitializer:
             cleanup_metrics()
         except Exception as e:
             logger.error(f"Error shutting down metrics exporter: {e}")
+
+        try:
+            with open(RUNNING_VERSION_FILE, "r") as version_file:
+                runtime_metadata = json.load(version_file)
+            if runtime_metadata.get("pid") == os.getpid():
+                os.remove(RUNNING_VERSION_FILE)
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            logger.warning(f"Could not remove running version metadata: {e}")
 
         # Final metrics
         self._log_final_metrics()

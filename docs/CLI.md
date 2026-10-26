@@ -107,6 +107,10 @@ trapninja daemon restart --shadow-mode
 trapninja daemon status
 ```
 
+Daemon status reports the installed CLI version separately from the version
+recorded by the running daemon. A daemon started before runtime version tracking
+was added is shown as `unknown`; restart it to populate the running version.
+
 ### Shadow/Parallel Mode Options
 
 These options are available for `start`, `restart`, and `foreground`:
