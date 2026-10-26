@@ -15,25 +15,24 @@ TrapNinja is an enterprise-grade SNMP trap forwarding system designed for teleco
 - **Prometheus Metrics**: Comprehensive monitoring and alerting
 - **eBPF Acceleration**: Optional kernel-level packet filtering
 
-## Quick Start
+## Production Deployment
 
 ```bash
-# Clone repository
-git clone <repository-url>
-cd trapninja
-
-# Install dependencies
-pip3.12 install --break-system-packages -r dev/requirements.txt
-
-# Configure the runtime directory and destinations
-sudo mkdir -p /etc/trapninja
-sudo cp config.example/*.json /etc/trapninja/
-echo '[["192.168.1.100", 162]]' | sudo tee /etc/trapninja/destinations.json >/dev/null
-
-# Start forwarding (from src directory)
-cd src
-sudo python3.12 -O trapninja.py
+# From the gnoa-network-assurance-automation-ansible checkout:
+bash run_playbook.sh samplicator playbooks/trapninja/deploy_code.yaml stage
 ```
+
+The wrapper prompts for the Ansible Vault password. The playbook then prompts
+for the TrapNinja branch; press Enter to use the branch configured for that
+inventory, or enter a branch/tag explicitly. Replace `samplicator` and `stage`
+with the required host-group limit and inventory environment (`prod`, `stage`,
+or `dev`).
+
+Production deployment is Ansible-managed: it installs Python 3.12, creates
+`/opt/trapninja-venv`, verifies and installs the locked offline wheelhouse,
+deploys the application and configuration, and manages the systemd service.
+Do not install production dependencies manually with `pip`.
+See [docs/INSTALL.md](docs/INSTALL.md) for prerequisites and verification.
 
 ## Repository Structure
 
@@ -75,24 +74,13 @@ trapninja/
 - Python 3.12+
 - Root privileges (for raw socket access)
 
-### Package Installation (Recommended)
+### Production Installation
 
-```bash
-# Install system dependencies
-sudo dnf install -y python3.12 python3.12-pip libpcap libpcap-devel
+Use the Ansible deployment command above. It installs the locked Python runtime
+dependencies into `/opt/trapninja-venv`; do not install production packages
+manually with system `pip`.
 
-# Minimal installation (basic forwarding)
-pip3.12 install --break-system-packages trapninja
-
-# Full installation (all features)
-pip3.12 install --break-system-packages "trapninja[full]"
-
-# Feature-specific installation
-pip3.12 install --break-system-packages "trapninja[cache]"      # Redis caching
-pip3.12 install --break-system-packages "trapninja[snmpv3]"     # SNMPv3 decryption
-```
-
-### Build from Source
+### Developer Package Build (Not Used for Production)
 
 ```bash
 # Clone and build
@@ -119,61 +107,37 @@ pip3.12 install --break-system-packages -r dev/requirements.txt
 pip3.12 install --break-system-packages -e ".[dev]"
 ```
 
-### Install System Packages
-
-```bash
-# Required
-sudo dnf install -y python3.12 python3.12-pip libpcap libpcap-devel
-
-# Optional - Redis for trap caching
-sudo dnf install -y redis
-sudo systemctl enable --now redis
-
-# Optional - eBPF acceleration
-sudo dnf install -y bcc python3-bcc kernel-devel-$(uname -r)
-```
+Host-level dependencies such as BCC, libpcap, and matching kernel headers are
+provided by the server's base provisioning; the application playbook only
+installs Python 3.12 and the locked application wheels. Redis caching is disabled
+in the current runtime profile.
 
 See [docs/INSTALL.md](docs/INSTALL.md) for detailed installation instructions.
 
 ## Usage
 
 ```bash
-# Run from the src directory
-cd src
-
-# Start the service
-sudo python3.12 -O trapninja.py
-
-# Check status
-sudo python3.12 -O trapninja.py --status
-
-# View statistics
-sudo python3.12 -O trapninja.py --stats-summary
-sudo python3.12 -O trapninja.py --stats-top-ips
-sudo python3.12 -O trapninja.py --stats-top-oids
-
-# Block an IP
-sudo python3.12 -O trapninja.py --block-ip 10.0.0.1
-
-# Block an OID
-sudo python3.12 -O trapninja.py --block-oid 1.3.6.1.4.1.9.9.41.2.0.1
+trapninja daemon status
+trapninja stats summary
 ```
 
 See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for complete usage instructions.
 
 ## Deployment
 
-Production deployment is driven by Ansible playbooks maintained in a separate
-internal repository. Those playbooks deploy only the contents of `src/` to
-`/opt/trapninja/` on the target host:
+Production deployment is driven by playbooks in the separate
+`gnoa-network-assurance-automation-ansible` repository. The playbook deploys
+source to `/opt/trapninja/` and its isolated Python environment to
+`/opt/trapninja-venv/`:
 
 - `trapninja.py` - Entry point
 - `trapninja/` - Python package
 - `config/` - Default configurations
 - `VERSION` - Version file
 
-Everything else in this repository (`dev/`, `docs/`, `README.md`) is
-development-only and is not shipped to production hosts.
+The versioned wheelhouse under `dev/packages/` is transferred for an offline
+install. Test fixtures, docs, and other development tools are not copied into
+the application directory.
 
 ## Configuration
 

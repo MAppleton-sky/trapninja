@@ -1,35 +1,61 @@
 # TrapNinja Installation Guide
 
-This guide covers installing TrapNinja on RHEL 8/9 and compatible systems.
+This guide covers production deployment on RHEL 8.10 and development or recovery
+installation on compatible systems. **Production deployment is performed by the
+Ansible playbook; do not manually `pip install` into the system Python.**
 
-## Installation Methods
+## Production Deployment (Ansible)
 
-TrapNinja supports three installation methods:
-
-| Method | Best For | Command |
-|--------|----------|--------|
-| Package Install | Production deployments | `pip install trapninja` |
-| Development Install | Active development | `pip install -e .` |
-| Manual Install | Air-gapped systems | Copy `src/` directory |
-
-## Quick Install (Package)
-
-For production deployments using pip:
+Run the wrapper from the `gnoa-network-assurance-automation-ansible` checkout:
 
 ```bash
-# Install system packages
-sudo dnf install -y python3.12 python3.12-pip libpcap libpcap-devel
-
-# Install TrapNinja (minimal - basic forwarding)
-pip3.12 install --break-system-packages trapninja
-
-# Or with all features
-pip3.12 install --break-system-packages "trapninja[full]"
-
-# Or specific features
-pip3.12 install --break-system-packages "trapninja[cache]"      # Redis caching
-pip3.12 install --break-system-packages "trapninja[snmpv3]"     # SNMPv3 decryption
+bash run_playbook.sh samplicator playbooks/trapninja/deploy_code.yaml stage
 ```
+
+Arguments are the inventory host-group limit, playbook path, and inventory
+environment (`prod`, `stage`, or `dev`). The wrapper asks for the Ansible Vault
+password. The playbook then asks which TrapNinja branch or tag to deploy; press
+Enter to use the branch configured for that inventory, or enter a specific
+release branch/tag.
+
+The playbook performs the production installation:
+
+- Installs Python 3.12 and creates the dedicated environment at
+    `/opt/trapninja-venv/`.
+- Transfers the RHEL 8.10 x86_64 wheelhouse from the selected TrapNinja branch,
+    verifies `SHA256SUMS`, and installs `requirements.lock` with `--no-index`.
+- Checks the Python version, dependency consistency, and required imports.
+- Deploys application source to `/opt/trapninja/`, configuration to
+    `/etc/trapninja/`, the CLI wrapper, and the systemd service.
+- Records the deployed branch, Python version, and dependency-lock checksum in
+    `/opt/trapninja/.deployed_version`.
+
+Redis caching is disabled in the current runtime profile. The playbook does not
+upgrade or replace the host's Redis Server 5.0.3 packages. BCC, libpcap, and
+matching kernel support are host prerequisites managed by the site's base
+provisioning, not installed by this application playbook.
+
+After deployment, verify the managed interpreter and daemon status:
+
+```bash
+/opt/trapninja-venv/bin/python --version
+/opt/trapninja-venv/bin/python -m pip check
+trapninja daemon status
+cat /opt/trapninja/.deployed_version
+```
+
+`trapninja daemon status` shows both the installed CLI version and the version
+recorded by the running daemon. If the running version is `unknown`, restart the
+daemon once with the newly deployed code so it writes runtime version metadata.
+
+For an upgrade or rollback, rerun the same playbook and select the desired
+branch/tag at its prompt. The wheelhouse and application source are taken from
+that same branch/tag.
+
+## Development or Manual Recovery Installation
+
+The remaining manual installation instructions are for development, diagnosis,
+or emergency recovery only. They are not the normal production deployment path.
 
 ## Building from Source
 
@@ -63,7 +89,7 @@ cd trapninja
 pip3.12 install --break-system-packages -e ".[dev]"
 ```
 
-## Full Installation
+## Manual Host Setup (Development or Recovery Only)
 
 ### 1. System Requirements
 
