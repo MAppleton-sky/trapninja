@@ -64,7 +64,7 @@ with self._lock:
     self._counters[key] += 1  # only this, nothing else
 ```
 
-**Tier 2 (background timer thread):**
+**Tier 2 (persistent background metrics thread):**
 - Aggregation (sum, average, percentile)
 - Rolling window calculations
 - Prometheus file write

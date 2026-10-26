@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Reuse one persistent background thread for periodic metrics exports instead
+  of creating a new timer thread every interval. Export failures are isolated,
+  later cycles continue, and orderly service shutdown stops the exporter after
+  writing a final metrics snapshot.
+
 ### Added
 
 #### Capture File Replay Engine

@@ -28,13 +28,13 @@ time.
 fast/slow path hit counts, queue metrics, HA-blocked counts, and processing
 errors.
 
-### Unified Export Timer (v0.8.1+)
+### Persistent Unified Export Worker
 
-Both `.prom` files are written by a **single coordinated timer** owned by
-`metrics/collector.py`. `GranularStatsCollector` no longer runs its own
-export timer — instead its `export_now()` method is called synchronously
-by the unified timer immediately after `export_metrics()`. This guarantees
-both files always reflect the same point-in-time snapshot.
+Both `.prom` files are written by one persistent background thread owned by
+`metrics/collector.py`. The worker reuses the same OS thread for every export
+cycle; `GranularStatsCollector` does not run its own exporter. Its `export_now()`
+method runs immediately after `export_metrics()`, keeping both files on the same
+point-in-time snapshot without creating a new thread per interval.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -61,7 +61,7 @@ both files always reflect the same point-in-time snapshot.
 └──────────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
-       metrics/collector.py  _schedule_metrics_export()  ← single unified timer
+      metrics/collector.py  _metrics_export_loop()  ← one persistent worker
        │
        ├─ 1. export_metrics()        → trapninja_metrics.prom + .json
        │     reads totals from GranularStatsCollector,
@@ -70,7 +70,7 @@ both files always reflect the same point-in-time snapshot.
        └─ 2. collector.export_now()  → trapninja_granular.prom + .json
              reads per-IP/OID/destination from GranularStatsCollector
 
-       Both files written in the same callback — always consistent.
+      Both files written in the same cycle — always consistent.
 ```
 
 This architecture eliminates two classes of divergence that existed in earlier
@@ -587,7 +587,7 @@ sudo chmod 755 /opt/metrics
 ### Metrics Show Zero After Upgrade to v0.8.1
 
 If you are upgrading from a version prior to v0.8.1, ensure the granular
-statistics collector is initialised before the metrics export timer fires.
+statistics collector is initialised before the metrics export worker runs.
 The startup sequence initialises the granular collector first, but if metrics
 are exported before the first trap is processed, `_get_granular_totals()` will
 return zeros until the collector is ready. This self-corrects within the first
@@ -620,8 +620,8 @@ Prior to v0.8.1 this had two root causes, both now resolved:
    different moments from different snapshots. During periods of I/O or
    CPU pressure one timer could lag significantly behind the other,
    producing Grafana dips that did not reflect actual trap volume changes.
-   Fixed by the unified export timer: both files are now written in the
-   same callback, always from a consistent snapshot.
+  Fixed by the unified export cycle: both files are written in the
+  same worker cycle, always from a consistent snapshot.
 
 If you are still seeing this on v0.8.1+, confirm both fixes are deployed
 and that the running process has been restarted after deployment.

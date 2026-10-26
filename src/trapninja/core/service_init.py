@@ -56,7 +56,12 @@ from ..ha import (
     load_ha_config,
     shutdown_ha,
 )
-from ..metrics import get_metrics_summary, init_metrics, load_metrics_config
+from ..metrics import (
+    cleanup_metrics,
+    get_metrics_summary,
+    init_metrics,
+    load_metrics_config,
+)
 from ..network import (
     cleanup_udp_sockets,
     forward_trap,
@@ -937,6 +942,12 @@ class ServiceInitializer:
 
         # Clean up UDP sockets
         cleanup_udp_sockets()
+
+        # Stop the persistent exporter and write one final metrics snapshot.
+        try:
+            cleanup_metrics()
+        except Exception as e:
+            logger.error(f"Error shutting down metrics exporter: {e}")
 
         # Final metrics
         self._log_final_metrics()

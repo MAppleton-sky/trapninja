@@ -73,6 +73,34 @@ class TestMetricsCollectorInitialization:
         
         assert result.export_interval_seconds == 90
 
+    def test_init_reuses_export_thread_and_cleanup_stops_it(self, tmp_path):
+        """Repeated initialization reuses one worker and cleanup joins it."""
+        from trapninja.metrics import collector
+        from trapninja.metrics.config import MetricsConfig
+
+        original_config = collector._current_config
+        config = MetricsConfig(
+            directory=str(tmp_path),
+            export_interval_seconds=3600,
+        )
+        try:
+            with patch('trapninja.metrics.exporter.export_metrics', return_value=True), \
+                 patch.object(collector, '_export_granular_stats'), \
+                 patch.object(collector, '_export_pipeline_timing'):
+                collector.init_metrics(config=config)
+                worker = collector._export_thread
+                collector.init_metrics(config=config)
+
+                assert worker is not None
+                assert worker.is_alive()
+                assert collector._export_thread is worker
+
+                collector.cleanup_metrics()
+                assert not worker.is_alive()
+        finally:
+            collector.cleanup_metrics()
+            collector._current_config = original_config
+
 
 class TestIncrementFunctions:
     """Tests for metric increment functions."""
@@ -232,60 +260,52 @@ class TestResetMetrics:
 # PIPELINE TIMING INTEGRATION (A4)
 # =============================================================================
 
-class TestPipelineTimingInScheduleExport:
-    """Verify _export_pipeline_timing() is called from the unified export timer."""
+class TestPipelineTimingInExportCycle:
+    """Verify pipeline timing remains part of every export cycle."""
 
-    def test_schedule_export_calls_pipeline_timing(self):
-        """_schedule_metrics_export() calls _export_pipeline_timing() after _export_granular_stats()."""
+    def test_export_cycle_calls_pipeline_timing(self):
+        """Pipeline timing runs after granular metrics in each export cycle."""
         from trapninja.metrics import collector
 
-        original_config = collector._current_config
-        try:
-            collector._current_config = MagicMock(export_interval_seconds=3600)
-            call_order = []
+        call_order = []
 
-            with patch('trapninja.metrics.exporter.export_metrics',
-                       side_effect=lambda *a, **kw: call_order.append('metrics')), \
-                 patch.object(collector, '_export_granular_stats',
-                              side_effect=lambda: call_order.append('granular')), \
-                 patch.object(collector, '_export_pipeline_timing',
-                              side_effect=lambda: call_order.append('pipeline')), \
-                 patch('trapninja.metrics.collector.Timer'):
-                collector._schedule_metrics_export()
-        finally:
-            collector._current_config = original_config
+        with patch('trapninja.metrics.exporter.export_metrics',
+                   side_effect=lambda *a, **kw: call_order.append('metrics')), \
+             patch.object(collector, '_export_granular_stats',
+                          side_effect=lambda: call_order.append('granular')), \
+             patch.object(collector, '_export_pipeline_timing',
+                          side_effect=lambda: call_order.append('pipeline')):
+            collector._run_metrics_export_cycle()
 
         assert 'granular' in call_order
         assert 'pipeline' in call_order
         assert call_order.index('granular') < call_order.index('pipeline')
 
-    def test_pipeline_timing_exception_does_not_stop_timer_rescheduling(self):
-        """If _export_pipeline_timing() raises, the finally block still reschedules."""
+    def test_export_loop_continues_after_cycle_exception(self):
+        """A failed cycle is logged and the persistent worker runs the next cycle."""
         from trapninja.metrics import collector
 
-        rescheduled = []
-
-        def fake_timer(interval, fn):
-            rescheduled.append(interval)
-            t = MagicMock()
-            t.daemon = False
-            return t
-
         original_config = collector._current_config
-        try:
-            collector._current_config = MagicMock(export_interval_seconds=60)
+        original_stop_event = collector._export_stop_event
+        stop_event = threading.Event()
+        cycles = []
 
-            with patch.object(collector, '_export_pipeline_timing',
-                              side_effect=RuntimeError("simulated failure")), \
-                 patch.object(collector, '_export_granular_stats'), \
-                 patch('trapninja.metrics.exporter.export_metrics'), \
-                 patch('trapninja.metrics.collector.Timer', side_effect=fake_timer):
-                collector._schedule_metrics_export()
+        def run_cycle():
+            cycles.append(len(cycles) + 1)
+            if len(cycles) == 1:
+                raise RuntimeError("simulated export failure")
+            stop_event.set()
+
+        try:
+            collector._current_config = MagicMock(export_interval_seconds=0.001)
+            collector._export_stop_event = stop_event
+            with patch.object(collector, '_run_metrics_export_cycle', side_effect=run_cycle):
+                collector._metrics_export_loop()
         finally:
             collector._current_config = original_config
+            collector._export_stop_event = original_stop_event
 
-        # Timer was rescheduled despite the exception in _export_pipeline_timing
-        assert len(rescheduled) > 0
+        assert cycles == [1, 2]
 
 
 class TestGetMetricsSummaryNewKeys:
@@ -455,23 +475,20 @@ class TestGetEbpfStats:
         assert result.get('raw_socket_drops') == 12
 
 
-class TestUnifiedExportTimer:
-    """Verify the unified timer calls both exports per cycle in the correct order."""
+class TestUnifiedExportCycle:
+    """Verify each unified export cycle writes the main and granular metrics."""
 
-    def test_schedule_metrics_export_calls_both_in_order(self, tmp_path):
-        """_schedule_metrics_export must call export_metrics then _export_granular_stats."""
+    def test_export_cycle_calls_both_in_order(self):
+        """The main export runs before the granular export in each cycle."""
         from trapninja.metrics import collector
-        from trapninja.metrics.config import MetricsConfig
 
-        collector._current_config = MetricsConfig(directory=str(tmp_path))
         call_order = []
 
         with patch('trapninja.metrics.exporter.export_metrics',
                    side_effect=lambda *a, **kw: call_order.append('metrics')), \
              patch('trapninja.metrics.collector._export_granular_stats',
-                   side_effect=lambda: call_order.append('granular')), \
-             patch('trapninja.metrics.collector.Timer'):
-            collector._schedule_metrics_export()
+                   side_effect=lambda: call_order.append('granular')):
+            collector._run_metrics_export_cycle()
 
         assert call_order == ['metrics', 'granular'], (
             f"Expected ['metrics', 'granular'], got {call_order}"

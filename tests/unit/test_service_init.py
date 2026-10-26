@@ -612,6 +612,7 @@ class TestShutdown:
     """Test ordered shutdown."""
 
     @patch("trapninja.core.service_init.cleanup_udp_sockets")
+    @patch("trapninja.core.service_init.cleanup_metrics")
     @patch("trapninja.core.service_init.get_metrics_summary")
     @patch("trapninja.core.service_init.shutdown_ha")
     @patch("trapninja.core.service_init.stop_event")
@@ -619,7 +620,7 @@ class TestShutdown:
     @patch("trapninja.core.service_init.modules")
     def test_shutdown_uninitialized(
         self, mock_modules, mock_queue, mock_stop, mock_ha,
-        mock_metrics, mock_cleanup, initializer
+        mock_metrics, mock_cleanup_metrics, mock_cleanup, initializer
     ):
         """Shutdown on fresh initializer should not raise."""
         mock_queue.empty.return_value = True
@@ -639,6 +640,7 @@ class TestShutdown:
         initializer.shutdown()  # Should not raise
 
     @patch("trapninja.core.service_init.cleanup_udp_sockets")
+    @patch("trapninja.core.service_init.cleanup_metrics")
     @patch("trapninja.core.service_init.get_metrics_summary")
     @patch("trapninja.core.service_init.shutdown_ha")
     @patch("trapninja.core.service_init.stop_event")
@@ -646,7 +648,7 @@ class TestShutdown:
     @patch("trapninja.core.service_init.modules")
     def test_shutdown_calls_subsystems(
         self, mock_modules, mock_queue, mock_stop, mock_ha,
-        mock_metrics, mock_cleanup, initializer
+        mock_metrics, mock_cleanup_metrics, mock_cleanup, initializer
     ):
         """Shutdown should call each initialized subsystem."""
         mock_queue.empty.return_value = True
@@ -683,6 +685,7 @@ class TestShutdown:
         mock_ha.assert_called_once()
         mock_capture.stop.assert_called_once()
         mock_cleanup.assert_called_once()
+        mock_cleanup_metrics.assert_called_once()
 
 
 # =============================================================================

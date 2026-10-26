@@ -19,7 +19,7 @@ import time
 import logging
 from collections import Counter, defaultdict
 from datetime import datetime
-from threading import Lock, Timer
+from threading import Event, Lock, Thread, current_thread
 from typing import Dict, Any, Optional
 
 from .config import (
@@ -52,8 +52,11 @@ _last_reset_time = time.time()
 # get_metrics_summary() call (e.g. from `trapninja stats`).
 _last_pipeline_timing: Dict[str, Any] = {}
 
-# Export timer reference
-_export_timer: Optional[Timer] = None
+# One background thread owns all periodic metric exports.
+_export_thread: Optional[Thread] = None
+_export_thread_lock = Lock()
+_export_stop_event = Event()
+_export_cycle_lock = Lock()
 _initialized = False
 
 # Current configuration
@@ -123,8 +126,9 @@ def init_metrics(
         )
         logger.info(f"Global metrics labels: {labels_str}")
 
-    # Start the export timer
-    _schedule_metrics_export()
+    # Keep the immediate initial write, then reuse one thread for later cycles.
+    _run_metrics_export_cycle()
+    _start_metrics_export_thread()
     
     return _current_config
 
@@ -133,14 +137,13 @@ def _export_granular_stats():
     """
     Call GranularStatsCollector.export_now() as part of the unified export cycle.
 
-    The granular collector no longer runs its own timer.  Instead, this
-    function is called synchronously from _schedule_metrics_export() so that
+    The granular collector no longer runs its own timer. Instead, this
+    function is called synchronously from _run_metrics_export_cycle() so that
     trapninja_metrics.prom and trapninja_granular.prom are always written in
-    the same timer callback, guaranteeing temporal consistency between the
-    two files.
+    the same worker cycle, guaranteeing temporal consistency between the files.
 
     Failure is logged but never raises — a failed granular export must never
-    prevent the metrics export from completing or scheduling the next timer.
+    prevent the remaining metrics exports from completing.
     """
     try:
         from ..stats.collector import get_stats_collector
@@ -158,7 +161,7 @@ def _export_pipeline_timing():
 
     Independently exception-guarded, like _export_granular_stats() — a
     failure here must never prevent the metrics/granular exports from
-    completing or the timer from rescheduling.
+    completing or the next worker cycle from running.
     """
     global _last_pipeline_timing
     try:
@@ -167,70 +170,67 @@ def _export_pipeline_timing():
         if collector.enabled:
             _last_pipeline_timing = collector.compute_percentiles()
     except Exception as e:
-        logger.error(f"Pipeline timing export failed in unified timer: {e}")
+        logger.error(f"Pipeline timing export failed in unified worker: {e}")
 
 
-def _schedule_metrics_export():
-    """
-    Unified export timer callback — writes both .prom files then reschedules.
-
-    The next timer is scheduled in a finally block so it is ALWAYS rescheduled
-    regardless of whether the export succeeds or fails.  Without this guarantee,
-    a transient export failure (disk full, I/O error, NFS timeout) would silently
-    kill the timer and stop all metric file updates until TrapNinja is restarted.
-    Each export call is individually guarded so a failure in one does not prevent
-    the other from running.
-    """
-    global _export_timer
-
-    try:
-        from ..config import stop_event
-    except ImportError:
-        class DummyEvent:
-            def is_set(self):
-                return False
-        stop_event = DummyEvent()
-
-    # Cancel any existing timer
-    if _export_timer is not None:
-        try:
-            _export_timer.cancel()
-        except Exception:
-            pass
-
-    try:
-        # Step 1 — write trapninja_metrics.prom + trapninja_metrics.json
+def _run_metrics_export_cycle():
+    """Write each metrics output independently so one failure cannot skip the others."""
+    with _export_cycle_lock:
         try:
             from .exporter import export_metrics
-            export_metrics()
+            if not export_metrics():
+                logger.error(
+                    "metrics export failed (trapninja_metrics.prom not updated)"
+                )
         except Exception as e:
             logger.error(
                 f"metrics export failed (trapninja_metrics.prom not updated): {e}"
             )
 
-        # Step 2 — write trapninja_granular.prom + trapninja_granular.json
-        # Always runs even if Step 1 failed.
         _export_granular_stats()
 
-        # Step 3 — compute pipeline timing percentiles (Phase 1 load-test
-        # instrumentation). Always runs even if Steps 1-2 failed.
         try:
             _export_pipeline_timing()
         except Exception as e:
-            logger.error(
-                f"pipeline timing export failed (skipping this cycle): {e}"
-            )
+            logger.error(f"pipeline timing export failed (skipping this cycle): {e}")
 
-    finally:
-        # Always reschedule — export failures must never stop the timer.
-        config = get_current_config()
-        if not stop_event.is_set():
-            _export_timer = Timer(
-                config.export_interval_seconds,
-                _schedule_metrics_export
-            )
-            _export_timer.daemon = True
-            _export_timer.start()
+
+def _metrics_export_loop():
+    """Run exports on one persistent thread until cleanup requests shutdown."""
+    while not _export_stop_event.wait(get_current_config().export_interval_seconds):
+        try:
+            _run_metrics_export_cycle()
+        except Exception as e:
+            logger.error(f"Metrics export cycle raised unexpectedly: {e}")
+
+
+def _start_metrics_export_thread() -> bool:
+    """Start the single periodic exporter thread, reporting resource failures."""
+    global _export_thread
+
+    with _export_thread_lock:
+        if _export_thread is not None and _export_thread.is_alive():
+            if not _export_stop_event.is_set():
+                return True
+            _export_thread.join(timeout=5.0)
+            if _export_thread.is_alive():
+                logger.error("Previous metrics exporter thread is still stopping")
+                return False
+
+        _export_stop_event.clear()
+        thread = Thread(
+            target=_metrics_export_loop,
+            name="TrapNinjaMetricsExporter",
+            daemon=True,
+        )
+        try:
+            thread.start()
+        except Exception as e:
+            logger.error(f"Unable to start metrics exporter thread: {e}")
+            return False
+
+        _export_thread = thread
+        return True
 
 
 def get_current_config() -> MetricsConfig:
@@ -632,25 +632,26 @@ def cleanup_metrics():
     Clean up resources used by the metrics module.
     Should be called when shutting down.
     """
-    global _export_timer
+    global _export_thread
 
-    # Cancel any pending export timer
-    if _export_timer is not None:
-        try:
-            _export_timer.cancel()
-        except Exception:
-            pass
-        _export_timer = None
+    with _export_thread_lock:
+        _export_stop_event.set()
+        thread = _export_thread
+    if thread is not None and thread is not current_thread():
+        thread.join(timeout=5.0)
+        if thread.is_alive():
+            logger.error("Metrics exporter thread did not stop within 5 seconds")
+            return
+        else:
+            with _export_thread_lock:
+                if _export_thread is thread:
+                    _export_thread = None
+    elif thread is current_thread():
+        logger.error("cleanup_metrics cannot join its own exporter thread")
+        return
 
-    # Do a final export
-    try:
-        from .exporter import export_metrics
-        export_metrics()
-        _export_granular_stats()
-        _export_pipeline_timing()
-        logger.info("Final metrics export completed")
-    except Exception as e:
-        logger.error(f"Error during final metrics export: {e}")
+    _run_metrics_export_cycle()
+    logger.info("Final metrics export completed")
 
 
 # =============================================================================

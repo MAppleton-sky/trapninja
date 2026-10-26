@@ -827,7 +827,7 @@ class TestExportNow:
 
         try:
             assert not hasattr(collector, '_export_timer'), (
-                "_export_timer must not exist — export is driven by the unified timer"
+                "_export_timer must not exist — metrics use a persistent export worker"
             )
         finally:
             collector.stop()
