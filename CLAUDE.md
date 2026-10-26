@@ -1,7 +1,7 @@
 # TrapNinja — Claude Code Instructions
 
 > **Version:** 0.8.0 (beta)  
-> **Platform:** RHEL 8/9 · Python 3.9 · Telecom NOC environment  
+> **Platform:** RHEL 8/9 · Python 3.12+ · Telecom NOC environment
 > **Availability target:** 99.999% (five nines)
 
 ---
@@ -14,7 +14,7 @@ It handles **5,000–50,000+ network elements** in steady-state with burst scena
 every alarm being delivered — silent trap loss is never acceptable.
 
 ### Technology Stack
-- **Runtime:** Python 3.9 with `-O` optimisation flags (`python3.9 -O`)
+- **Runtime:** Python 3.12+ with `-O` optimisation flags (`python3.12 -O`)
 - **Packet capture:** eBPF (via BCC) with automatic fallback to raw sockets (Scapy)
 - **Caching / HA state:** Redis 5.0.3+ (streams-based architecture)
 - **Metrics:** Prometheus export + JSON
@@ -123,15 +123,15 @@ Each module has one clear responsibility. When a module starts doing too much, p
 ### 4.4 Thread Safety
 - Use thread-safe data structures for all shared state.
 - Avoid `OrderedDict` mutation during iteration in stats collection (known crash vector).
-- Stats updates must use atomic operations or locks appropriate to Python 3.9.
+- Stats updates must use atomic operations or locks appropriate to Python 3.12.
 
 ---
 
 ## 5. Code Style and Quality
 
-### 5.1 Python 3.9 Compatibility
-- **Target: Python 3.9 only.** Do not use features from 3.10+ (match/case, newer type hints, etc.).
-- Use `Optional[X]` not `X | None`, use `List[X]` not `list[X]` (or import from `__future__`).
+### 5.1 Python 3.12 Compatibility
+- **Target: Python 3.12.** Keep runtime syntax and APIs compatible with Python 3.12.
+- Use standard-library typing features available in Python 3.12; avoid unnecessary compatibility shims for older runtimes.
 - Compatible with RHEL 8/9 system Python.
 
 ### 5.2 Style Conventions

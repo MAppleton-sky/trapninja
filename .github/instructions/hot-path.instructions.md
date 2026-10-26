@@ -23,7 +23,7 @@ This code executes **once per SNMP trap**. At 100,000 traps/burst, every microse
 | Disk I/O (log write, file open) | Same as Redis — blocks the forwarding thread |
 | DNS lookup or hostname resolution | Unpredictable latency |
 | Lock held across any I/O | Blocks all other forwarding threads |
-| `assert` for safety checks | Stripped by `python3.9 -O` in production |
+| `assert` for safety checks | Stripped by `python3.12 -O` in production |
 
 ## Statistics on the Hot Path
 

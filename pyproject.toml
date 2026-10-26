@@ -24,7 +24,7 @@ dynamic = ["version"]
 description = "High-performance SNMP trap forwarding system for telecommunications networks"
 readme = "README.md"
 license = {file = "LICENSE"}
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 authors = [
     {name = "Matthew Appleton"}
 ]
@@ -47,9 +47,6 @@ classifiers = [
     "License :: Other/Proprietary License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: System :: Networking :: Monitoring",
     "Topic :: System :: Systems Administration",
@@ -132,7 +129,7 @@ filterwarnings = [
 
 [tool.black]
 line-length = 100
-target-version = ['py39']
+target-version = ['py312']
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -157,7 +154,7 @@ exclude = [
 ]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true

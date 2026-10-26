@@ -52,11 +52,11 @@ ${selection}
 
 ### 8. `assert` Usage
 - Is `assert` used for any runtime safety check?
-- **BLOCK**: `assert` is stripped by `python3.9 -O` in production. Use explicit raises.
+- **BLOCK**: `assert` is stripped by `python3.12 -O` in production. Use explicit raises.
 
 ### 9. Import Discipline
 - Are Scapy and BCC imported at module top level?
-- Are any Python 3.10+ language features used (match statements, X|Y unions, ParamSpec)?
+- Are any Python 3.13+ language features used?
 - **BLOCK**: Either condition.
 
 ### 10. Test Mock Targets

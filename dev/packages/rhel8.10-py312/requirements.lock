@@ -1,0 +1,7 @@
+cffi==2.1.1
+cryptography==50.0.2
+pyasn1==0.6.4
+pycparser==3.12
+pycryptodome==4.2.0
+pysnmp==7.1.30
+scapy==2.8.0

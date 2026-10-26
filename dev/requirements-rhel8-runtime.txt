@@ -1,0 +1,7 @@
+# Runtime dependencies for RHEL 8.10 x86_64 with Python 3.12.
+# Redis caching is disabled for this deployment profile.
+scapy>=2.4.5
+pysnmp>=4.4.12
+pyasn1>=0.4.8
+cryptography>=3.4.0
+pycryptodome>=3.15.0
