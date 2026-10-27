@@ -20,7 +20,7 @@ import json
 import pytest
 from unittest.mock import MagicMock, patch, mock_open
 from dataclasses import asdict
-from fixtures.secrets import new_test_secret
+from fixtures.secrets import new_test_secret, new_test_username
 
 
 class TestSNMPv3User:
@@ -453,7 +453,7 @@ class TestSNMPv3CredentialStore:
         
         user1 = valid_user
         user2 = SNMPv3User(
-            username="user2",
+            username=new_test_username(),
             auth_protocol="SHA",
             auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
@@ -492,7 +492,7 @@ class TestSNMPv3CredentialStore:
         
         user1 = valid_user
         user2 = SNMPv3User(
-            username="user2",
+            username=new_test_username(),
             auth_protocol="SHA",
             auth_passphrase=new_test_secret(),
             priv_protocol="AES128",
@@ -624,13 +624,14 @@ class TestCredentialPersistence:
         from trapninja.snmpv3_credentials import SNMPv3CredentialStore, SNMPv3User
         
         cred_file = tmp_path / "credentials.json"
+        username = new_test_username()
         
         # Create and save
         store1 = SNMPv3CredentialStore(str(cred_file))
         auth_passphrase = new_test_secret()
         priv_passphrase = new_test_secret()
         user = SNMPv3User(
-            username="testuser",
+            username=username,
             auth_protocol="SHA",
             auth_passphrase=auth_passphrase,
             priv_protocol="AES128",
@@ -642,10 +643,10 @@ class TestCredentialPersistence:
         # Create new store - should load existing file
         store2 = SNMPv3CredentialStore(str(cred_file))
         
-        loaded_user = store2.get_user("80001234", "testuser")
+        loaded_user = store2.get_user("80001234", username)
         
         assert loaded_user is not None
-        assert loaded_user.username == "testuser"
+        assert loaded_user.username == username
         assert loaded_user.auth_passphrase == auth_passphrase
 
     def test_load_missing_file_ok(self, tmp_path):

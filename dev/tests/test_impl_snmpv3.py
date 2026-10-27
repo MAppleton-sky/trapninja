@@ -33,7 +33,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch, PropertyMock
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
-from fixtures.secrets import new_test_secret
+from fixtures.secrets import new_test_secret, new_test_username
 
 # Shared fixtures and utilities from fixtures/ directory
 from fixtures import (
@@ -266,7 +266,7 @@ def build_scoped_pdu_with_varbinds(
 @dataclass
 class MockSNMPv3User:
     """Mock SNMPv3 user for testing."""
-    username: str = "testuser"
+    username: str = field(default_factory=new_test_username)
     auth_protocol: str = "SHA"
     auth_passphrase: str = field(default_factory=new_test_secret)
     priv_protocol: str = "AES128"
@@ -286,7 +286,7 @@ class TestEngineIDExtraction:
         from trapninja.snmpv3_decryption import extract_engine_id_from_bytes, extract_username_from_bytes
         
         engine_id = b'\x80\x00\x1f\x88\x80'
-        username = "testuser"
+        username = new_test_username()
         message = build_snmpv3_message(engine_id=engine_id, username=username)
         
         # Should be a SEQUENCE

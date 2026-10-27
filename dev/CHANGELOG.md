@@ -43,6 +43,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.8.8] - 2026-10-26
+
+### Fixed
+
+- Resolve and allowlist config paths before opening them, blocking traversal
+  and symlink escapes for configuration reads and writes.
+
+---
+
 ## [0.8.7] - 2026-10-26
 
 ### Fixed
@@ -1217,7 +1226,8 @@ When contributing, please:
 
 ---
 
-[Unreleased]: https://github.com/yourusername/trapninja/compare/v0.8.7...HEAD
+[Unreleased]: https://github.com/yourusername/trapninja/compare/v0.8.8...HEAD
+[0.8.8]: https://github.com/yourusername/trapninja/compare/v0.8.7...v0.8.8
 [0.8.7]: https://github.com/yourusername/trapninja/compare/v0.8.6...v0.8.7
 [0.8.6]: https://github.com/yourusername/trapninja/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/yourusername/trapninja/compare/v0.8.4...v0.8.5

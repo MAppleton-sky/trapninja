@@ -11,7 +11,7 @@ Tests cover:
 import unittest
 from unittest.mock import MagicMock, patch, PropertyMock
 from dataclasses import asdict
-from fixtures.secrets import new_test_secret
+from fixtures.secrets import new_test_secret, new_test_username
 
 
 # =============================================================================
@@ -21,7 +21,7 @@ from fixtures.secrets import new_test_secret
 def _make_mock_user():
     """Create a mock SNMPv3User for testing."""
     user = MagicMock()
-    user.username = 'testuser'
+    user.username = new_test_username()
     user.auth_protocol = 'SHA256'
     user.auth_passphrase = new_test_secret()
     user.priv_protocol = 'AES128'
@@ -276,9 +276,9 @@ class TestSNMPv3Generator(unittest.TestCase):
         from trapninja.snmpv3_generator import SNMPv3Generator, TrapEvent, VarBind
         
         user1 = _make_mock_user()
-        user1.username = 'user1'
+        user1.username = new_test_username()
         user2 = _make_mock_user()
-        user2.username = 'user2'
+        user2.username = new_test_username()
         
         store = _make_mock_credential_store(users=[user1, user2])
         generator = SNMPv3Generator(store)

@@ -1,7 +1,7 @@
 # TrapNinja Documentation Index
 
 **Last Updated**: 2026-10-26
-**TrapNinja Version**: 0.8.7 (Beta)
+**TrapNinja Version**: 0.8.8 (Beta)
 
 All project documentation lives in this `docs/` directory. The `documentation/` directory has been consolidated here.
 

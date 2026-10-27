@@ -1,6 +1,6 @@
 # TrapNinja — Claude Code Instructions
 
-> **Version:** 0.8.7 (beta)
+> **Version:** 0.8.8 (beta)
 > **Platform:** RHEL 8/9 · Python 3.12+ · Telecom NOC environment
 > **Availability target:** 99.999% (five nines)
 

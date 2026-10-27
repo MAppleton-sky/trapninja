@@ -23,7 +23,7 @@ trapninja metrics
 
 ## Legacy Flat-Flag Compatibility
 
-The current v0.8.7 implementation retains hidden legacy flat-flag parsing for
+The current v0.8.8 implementation retains hidden legacy flat-flag parsing for
 existing automation. Do not add new legacy flags or expand the compatibility
 layer without an explicit migration need; new commands and documentation use
 the hierarchical subcommand interface.

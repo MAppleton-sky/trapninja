@@ -16,7 +16,7 @@ import logging
 import time
 from threading import Timer, Event
 from collections import defaultdict
-from typing import Any
+from typing import Any, Optional
 import ipaddress
 
 # Paths to config files
@@ -60,57 +60,41 @@ ALLOWED_CONFIG_FILES = frozenset([
 ])
 
 
-def _validate_config_path(file_path: str) -> bool:
-    """
-    Validate that a config file path is safe (CWE-23 mitigation).
-    
-    Checks:
-    1. Path resolves to within CONFIG_DIR
-    2. Filename is in allowed list
-    3. No path traversal sequences
-    
-    Args:
-        file_path: Path to validate
-        
-    Returns:
-        True if path is safe, False otherwise
-    """
+def _validated_config_path(file_path: str) -> Optional[str]:
+    """Return the canonical config path if it is allowlisted and stays in CONFIG_DIR."""
     log = logging.getLogger("trapninja")
     
     try:
-        # Get the real path (resolves symlinks)
         real_path = os.path.realpath(os.path.abspath(file_path))
         real_config_dir = os.path.realpath(os.path.abspath(CONFIG_DIR))
         
-        # Check path is within config directory
-        if not real_path.startswith(real_config_dir + os.sep) and real_path != real_config_dir:
+        if os.path.commonpath((real_config_dir, real_path)) != real_config_dir:
             log.warning(f"Path traversal attempt blocked: {file_path} -> {real_path}")
-            return False
+            return None
         
-        # Check filename is allowed
         filename = os.path.basename(real_path)
         if filename not in ALLOWED_CONFIG_FILES:
             log.warning(f"Unauthorized config file access blocked: {filename}")
-            return False
+            return None
         
-        # Check for path traversal patterns
         if '..' in file_path:
             log.warning(f"Path traversal pattern detected: {file_path}")
-            return False
+            return None
         
-        return True
+        return real_path
         
     except Exception as e:
         log.error(f"Path validation error: {e}")
-        return False
+        return None
 
 
 def _write_config_json(file_path: str, data: Any) -> None:
     """Write JSON only to an allowlisted file inside CONFIG_DIR."""
-    if not _validate_config_path(file_path):
+    safe_path = _validated_config_path(file_path)
+    if safe_path is None:
         raise ValueError("Refusing to write configuration outside the config directory")
 
-    with open(file_path, 'w') as f:
+    with open(safe_path, 'w') as f:
         json.dump(data, f, indent=2)
 
 
@@ -182,13 +166,14 @@ def _load_main_config():
     """
     log = logging.getLogger("trapninja")
 
-    if not _validate_config_path(MAIN_CONFIG_FILE):
+    safe_path = _validated_config_path(MAIN_CONFIG_FILE)
+    if safe_path is None:
         log.error("Refusing to load main configuration from an unsafe path")
         return {}
     
-    if os.path.exists(MAIN_CONFIG_FILE):
+    if os.path.exists(safe_path):
         try:
-            with open(MAIN_CONFIG_FILE, 'r') as f:
+            with open(safe_path, 'r') as f:
                 config = json.load(f)
                 log.debug(f"Loaded main config from {MAIN_CONFIG_FILE}")
                 return config
@@ -410,12 +395,13 @@ def safe_load_json(file_path, fallback):
     log = logging.getLogger("trapninja")
 
     try:
-        if not _validate_config_path(file_path):
+        safe_path = _validated_config_path(file_path)
+        if safe_path is None:
             log.error("Refusing to load configuration from an unsafe path")
             return fallback
 
-        if os.path.exists(file_path):
-            with open(file_path, 'r') as f:
+        if os.path.exists(safe_path):
+            with open(safe_path, 'r') as f:
                 data = json.load(f)
                 log.debug(f"Loaded JSON from {file_path}: {data}")
                 return data
